@@ -1,0 +1,13 @@
+[volumes]
+sasc=@SASC_PATH@
+proj=@PROJECT_PATH@
+tmp=/tmp
+
+[assigns]
+sc=sasc:
+include=sasc:include
+lib=sasc:lib
+t=tmp:
+
+[path]
+path=sc:c

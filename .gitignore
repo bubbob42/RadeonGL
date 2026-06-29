@@ -1,0 +1,20 @@
+cat > .gitignore <<'EOF'
+# Build artifacts
+build/
+dist/
+
+# Generated vamos config
+.vamosrc
+
+# macOS
+.DS_Store
+
+# VS Code local/user state
+.vscode/*.log
+
+# Backups
+*.bak
+*.bak.*
+*.old
+*.tmp
+EOF
