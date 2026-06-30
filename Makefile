@@ -24,9 +24,8 @@ PROJECT_NAME := $(notdir $(CURDIR))
 TARGET_GCC  := dist/$(PROJECT_NAME)_gcc
 TARGET_SASC := dist/$(PROJECT_NAME)_sasc
 
-SRC_GCC  := src/main.c src/app.c
+SRC_GCC  := src/main.c 
 SRC_SASC := src/main_sasc.c
-SRC_APP  := src/app.c
 OBJ_SASC := build/main_sasc.o
 
 CPUFLAGS ?= -m68000
