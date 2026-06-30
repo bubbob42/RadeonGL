@@ -14,6 +14,9 @@ GCC_OBJDUMP := $(PREFIX)/bin/m68k-amigaos-objdump
 VAMOS      ?= $(HOME)/Developer/AmigaTools/venv-amitools/bin/vamos
 VAMOSRC    := .vamosrc
 
+VAMOS_SC    := $(VAMOS) -c $(VAMOSRC) -q
+VAMOS_SLINK := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
+
 SASC_PATH  ?= $(HOME)/Developer/AmigaSDK/SASC/SC
 
 PROJECT_NAME := $(notdir $(CURDIR))
@@ -21,8 +24,9 @@ PROJECT_NAME := $(notdir $(CURDIR))
 TARGET_GCC  := dist/$(PROJECT_NAME)_gcc
 TARGET_SASC := dist/$(PROJECT_NAME)_sasc
 
-SRC_GCC  := src/main.c
+SRC_GCC  := src/main.c src/app.c
 SRC_SASC := src/main_sasc.c
+SRC_APP  := src/app.c
 OBJ_SASC := build/main_sasc.o
 
 CPUFLAGS ?= -m68000
@@ -43,11 +47,15 @@ $(TARGET_GCC): $(SRC_GCC)
 
 sasc: $(TARGET_SASC)
 
-$(TARGET_SASC): $(SRC_SASC) $(VAMOSRC)
+# -H disable -m 16128: works around a vamos/slink interaction where slink
+# transiently dereferences an out-of-bounds pointer while resolving a large
+# amiga.lib symbol set; real hardware tolerates this silently, vamos's
+# default strict memory map does not. Widening the mapped RAM lets slink
+# read garbage instead of trapping, same as it would on real hardware.
+$(TARGET_SASC): $(SRC_SASC) $(SRC_APP) $(VAMOSRC)
 	mkdir -p build dist
-	$(VAMOS) -c $(VAMOSRC) -q sc NOLINK IDIR=include: OBJNAME=proj:$(OBJ_SASC) proj:$(SRC_SASC)
-	$(VAMOS) -c $(VAMOSRC) -q slink FROM lib:c.o proj:$(OBJ_SASC) TO proj:$(TARGET_SASC) LIB lib:sc.lib lib:amiga.lib
-
+	$(VAMOS_SC) sc NOLINK IDIR=include: OBJNAME=proj:$(OBJ_SASC) proj:$(SRC_SASC)
+	$(VAMOS_SLINK) slink FROM lib:c.o proj:$(OBJ_SASC) TO proj:$(TARGET_SASC) LIB lib:sc.lib lib:amiga.lib
 $(VAMOSRC): .vamosrc.in
 	sed \
 		-e 's|@SASC_PATH@|$(SASC_PATH)|g' \
