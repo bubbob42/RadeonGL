@@ -9,8 +9,10 @@ VAMOSRC    := .vamosrc
 
 SASC_PATH  ?= $(HOME)/Developer/AmigaSDK/SASC/SC
 
-TARGET_GCC  := dist/triangle_gcc
-TARGET_SASC := dist/triangle_sasc
+PROJECT_NAME := $(notdir $(CURDIR))
+
+TARGET_GCC  := dist/$(PROJECT_NAME)_gcc
+TARGET_SASC := dist/$(PROJECT_NAME)_sasc
 
 SRC_GCC  := src/main.c
 SRC_SASC := src/main_sasc.c
@@ -54,6 +56,7 @@ info: all
 
 check:
 	@echo "Project:   $(CURDIR)"
+	@echo "Name:      $(PROJECT_NAME)"
 	@echo "GCC:       $(GCC_CC)"
 	@echo "VAMOS:     $(VAMOS)"
 	@echo "SASC_PATH: $(SASC_PATH)"
