@@ -1,0 +1,25 @@
+cd ~/Developer/AmigaApps/starter
+
+mkdir -p fsuae fsuae/local
+
+cat > fsuae/starter.fs-uae.in <<'EOF'
+[fs-uae]
+amiga_model = A1200
+kickstart_file = @KICKSTART_FILE@
+
+hard_drive_0 = @SYSTEM_HDF@
+hard_drive_0_label = System
+
+hard_drive_1 = @PROJECT_DIST@
+hard_drive_1_label = DEV
+
+chip_memory = 2
+fast_memory = 8
+
+window_width = 960
+window_height = 720
+fullscreen = 0
+initial_input_grab = 0
+
+title = AmigaOS 3.2 - starter
+EOF

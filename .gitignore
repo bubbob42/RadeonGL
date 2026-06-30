@@ -17,4 +17,14 @@ dist/
 *.bak.*
 *.old
 *.tmp
+
+.vamosrc
+build/
+dist/
+
+fsuae/local/
+*.hdf
+*.rom
+*.adf
+
 EOF

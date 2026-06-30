@@ -1,3 +1,10 @@
+FSUAE        ?= /opt/homebrew/bin/fs-uae
+FSUAE_CONFIG := fsuae/local/starter.fs-uae
+
+KICKSTART_FILE ?= $(HOME)/Developer/AmigaEmu/ROMs/kick32.rom
+SYSTEM_HDF     ?= $(HOME)/Developer/AmigaEmu/HDF/AmigaOS32.hdf
+PROJECT_DIST   := $(CURDIR)/dist
+
 PREFIX ?= $(HOME)/amiga-arm
 
 GCC_CC      := $(PREFIX)/bin/m68k-amigaos-gcc
@@ -20,12 +27,13 @@ OBJ_SASC := build/main_sasc.o
 
 CPUFLAGS ?= -m68000
 
-GCC_CFLAGS  := -Wall -Wextra -Werror=implicit-function-declaration -Os -std=gnu99 $(CPUFLAGS)
+GCC_WARNINGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration
+GCC_CFLAGS  := $(GCC_WARNINGS) -Os -std=gnu99 $(CPUFLAGS)
 GCC_LDFLAGS := -noixemul -lamiga
 
-.PHONY: all gcc sasc run-sasc info check clean distclean
+.PHONY: all gcc sasc run-sasc run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config info check clean distclean
 
-all: gcc sasc
+all: gcc sasc dist/runme
 
 gcc: $(TARGET_GCC)
 
@@ -46,8 +54,43 @@ $(VAMOSRC): .vamosrc.in
 		-e 's|@PROJECT_PATH@|$(CURDIR)|g' \
 		.vamosrc.in > $(VAMOSRC)
 
+dist/runme: $(TARGET_GCC) $(TARGET_SASC)
+	mkdir -p dist
+	printf 'echo "Available binaries on DEV:"\n' > dist/runme
+	printf 'list DEV:\n' >> dist/runme
+	printf 'echo ""\n' >> dist/runme
+	printf 'echo "Run GCC build:"\n' >> dist/runme
+	printf 'echo "  DEV:%s_gcc"\n' "$(PROJECT_NAME)" >> dist/runme
+	printf 'echo "Run SAS/C build:"\n' >> dist/runme
+	printf 'echo "  DEV:%s_sasc"\n' "$(PROJECT_NAME)" >> dist/runme
+	printf 'echo ""\n' >> dist/runme
+	printf 'echo "Or execute helper scripts:"\n' >> dist/runme
+	printf 'echo "  execute DEV:run-gcc"\n' >> dist/runme
+	printf 'echo "  execute DEV:run-sasc"\n' >> dist/runme
+	printf 'DEV:%s_gcc\n' "$(PROJECT_NAME)" > dist/run-gcc
+	printf 'DEV:%s_sasc\n' "$(PROJECT_NAME)" > dist/run-sasc
+
 run-sasc: $(TARGET_SASC)
 	$(VAMOS) -c $(VAMOSRC) -q proj:$(TARGET_SASC)
+
+fsuae-config: $(FSUAE_CONFIG)
+
+$(FSUAE_CONFIG): fsuae/starter.fs-uae.in
+	mkdir -p fsuae/local
+	sed \
+		-e 's|@KICKSTART_FILE@|$(KICKSTART_FILE)|g' \
+		-e 's|@SYSTEM_HDF@|$(SYSTEM_HDF)|g' \
+		-e 's|@PROJECT_DIST@|$(PROJECT_DIST)|g' \
+		fsuae/starter.fs-uae.in > $(FSUAE_CONFIG)
+
+run-fsuae: all fsuae-config
+	$(FSUAE) $(FSUAE_CONFIG)
+
+run-fsuae-gcc: gcc dist/runme fsuae-config
+	$(FSUAE) $(FSUAE_CONFIG)
+
+run-fsuae-sasc: sasc dist/runme fsuae-config
+	$(FSUAE) $(FSUAE_CONFIG)
 
 info: all
 	file $(TARGET_GCC)
@@ -55,21 +98,28 @@ info: all
 	$(GCC_OBJDUMP) -f $(TARGET_GCC)
 
 check:
-	@echo "Project:   $(CURDIR)"
-	@echo "Name:      $(PROJECT_NAME)"
-	@echo "GCC:       $(GCC_CC)"
-	@echo "VAMOS:     $(VAMOS)"
-	@echo "SASC_PATH: $(SASC_PATH)"
-	@echo "VAMOSRC:   $(VAMOSRC)"
+	@echo "Project:        $(CURDIR)"
+	@echo "PROJECT_NAME:   $(PROJECT_NAME)"
+	@echo "GCC:            $(GCC_CC)"
+	@echo "VAMOS:          $(VAMOS)"
+	@echo "SASC_PATH:      $(SASC_PATH)"
+	@echo "FSUAE:          $(FSUAE)"
+	@echo "KICKSTART_FILE: $(KICKSTART_FILE)"
+	@echo "SYSTEM_HDF:     $(SYSTEM_HDF)"
 	@test -x "$(GCC_CC)" || (echo "Missing GCC: $(GCC_CC)" && exit 1)
 	@test -x "$(GCC_STRIP)" || (echo "Missing strip: $(GCC_STRIP)" && exit 1)
 	@test -x "$(GCC_OBJDUMP)" || (echo "Missing objdump: $(GCC_OBJDUMP)" && exit 1)
 	@test -x "$(VAMOS)" || (echo "Missing vamos: $(VAMOS)" && exit 1)
 	@test -d "$(SASC_PATH)" || (echo "Missing SAS/C path: $(SASC_PATH)" && exit 1)
+	@test -x "$(FSUAE)" || (echo "Missing FS-UAE: $(FSUAE)" && exit 1)
+	@test -f "$(KICKSTART_FILE)" || (echo "Missing Kickstart ROM: $(KICKSTART_FILE)" && exit 1)
+	@test -f "$(SYSTEM_HDF)" || (echo "Missing AmigaOS HDF: $(SYSTEM_HDF)" && exit 1)
 	@test -f ".vamosrc.in" || (echo "Missing .vamosrc.in" && exit 1)
+	@test -f "fsuae/starter.fs-uae.in" || (echo "Missing fsuae/starter.fs-uae.in" && exit 1)
 
 clean:
 	rm -rf build dist
 
 distclean: clean
 	rm -f $(VAMOSRC)
+	rm -rf fsuae/local
