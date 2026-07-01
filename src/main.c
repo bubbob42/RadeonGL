@@ -20,6 +20,14 @@
 #define TAN18 1331
 #define TAN54 5638
 
+/* Yaw the checker texture on the sphere by ROT_DEG degrees so the ball
+ * looks turned to the right, while the silhouette (dx,dy circle) stays
+ * fixed -- the same technique the real Boing Ball uses. Fixed-point
+ * (Q12) cos/sin of ROT_DEG, no floating point required. */
+#define ROT_DEG 25
+#define ROT_COS 3712
+#define ROT_SIN 1731
+
 static int Isqrt(int n)
 {
     int r = 0;
@@ -39,7 +47,7 @@ static int Classify(long v, long t1, long t2)
 int main(void)
 {
     int dx, dy, sdy, width, distSq, rz, hSpan, limit, latBand, lonBand, checker;
-    long latT1, latT2, lonV, lonT1, lonT2;
+    long latT1, latT2, lonV, lonT1, lonT2, rxRot, rzRot;
     char line[2 * ASPECT * BALL_RADIUS + 2];
 
     hSpan = ASPECT * BALL_RADIUS;
@@ -64,9 +72,14 @@ int main(void)
             }
 
             rz = Isqrt(limit - distSq);
-            lonV  = (long) dx * SCALE;
-            lonT1 = (long) TAN18 * rz;
-            lonT2 = (long) TAN54 * rz;
+
+            rxRot = ((long) dx * ROT_COS + (long) rz * ROT_SIN) / SCALE;
+            rzRot = ((long) rz * ROT_COS - (long) dx * ROT_SIN) / SCALE;
+            if (rzRot < 0) rzRot = -rzRot;
+
+            lonV  = rxRot * SCALE;
+            lonT1 = (long) TAN18 * rzRot;
+            lonT2 = (long) TAN54 * rzRot;
             lonBand = Classify(lonV, lonT1, lonT2);
 
             checker = (latBand + lonBand) & 1;
