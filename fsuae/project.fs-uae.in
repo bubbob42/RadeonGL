@@ -27,5 +27,6 @@ automatic_input_grab = 1
 cursor = 1
 initial_input_grab = 1
 mouse_integration = 0
+joystick_port_1 = nothing
 
 title = AmigaOS 3.2 - @PROJECT_NAME@

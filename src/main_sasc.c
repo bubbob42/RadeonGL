@@ -2,8 +2,13 @@
 #include <dos/dos.h>
 #include <proto/dos.h>
 
-#define BALL_RADIUS 7
+#define BALL_RADIUS 10
 #define NUM_RINGS   4
+
+/* Character cells are roughly twice as tall as wide, so the horizontal
+ * axis is sampled at ASPECT times the resolution of the vertical axis.
+ * Without this the ball prints as an oval instead of a circle. */
+#define ASPECT      2
 
 static int Isqrt(int n)
 {
@@ -25,26 +30,30 @@ static int Octant(int dx, int dy)
 
 int main(void)
 {
-    int dx, dy, width, distSq, dist, ring, oct, checker;
-    char line[2 * BALL_RADIUS + 2];
+    int dx, dy, sdy, width, distSq, dist, ring, oct, checker, hSpan, limit;
+    char line[2 * ASPECT * BALL_RADIUS + 2];
+
+    hSpan = ASPECT * BALL_RADIUS;
+    limit = hSpan * hSpan;
 
     for (dy = -BALL_RADIUS; dy <= BALL_RADIUS; dy++)
     {
         width = 0;
+        sdy = ASPECT * dy;
 
-        for (dx = -BALL_RADIUS; dx <= BALL_RADIUS; dx++)
+        for (dx = -hSpan; dx <= hSpan; dx++)
         {
-            distSq = dx * dx + dy * dy;
+            distSq = dx * dx + sdy * sdy;
 
-            if (distSq > BALL_RADIUS * BALL_RADIUS)
+            if (distSq > limit)
             {
                 line[width++] = ' ';
                 continue;
             }
 
             dist = Isqrt(distSq);
-            ring = (dist * NUM_RINGS) / (BALL_RADIUS + 1);
-            oct  = Octant(dx, dy);
+            ring = (dist * NUM_RINGS) / (hSpan + 1);
+            oct  = Octant(dx, sdy);
             checker = (ring + oct) & 1;
 
             line[width++] = checker ? '#' : '.';
