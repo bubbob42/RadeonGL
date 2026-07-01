@@ -18,14 +18,12 @@ dist/
 *.old
 *.tmp
 
-.vamosrc
-build/
-dist/
-
+# fs-uae
 fsuae/local/
 *.hdf
 *.rom
 *.adf
+
 
 EOF
 starter.code-workspace
