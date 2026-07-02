@@ -73,7 +73,8 @@ The current setup assumes:
 ├── .vscode/
 │   └── tasks.json
 ├── fsuae/
-│   └── starter.fs-uae.in
+│   ├── project.fs-uae.in
+│   └── mutools
 ├── src/
 │   ├── main.c
 │   └── main_sasc.c
@@ -288,7 +289,7 @@ fsuae/local/starter.fs-uae
 from:
 
 ```text
-fsuae/starter.fs-uae.in
+fsuae/project.fs-uae.in
 ```
 
 ---
@@ -391,6 +392,16 @@ DEV:starter_gcc
 DEV:starter_sasc
 ```
 
+### `mutools` -- memory-debugging session starter
+
+`dist/mutools` (copied verbatim from the committed `fsuae/mutools`) starts a MuForce/MuGuardianAngel debugging session -- catches illegal memory accesses, stack overflows, and register corruption while a program runs. Requires the `mutools` package (`MuForce`, `MuGuardianAngel`) already installed under `sys:tools/mutools/` inside the AmigaOS install. Run it before launching whatever you're debugging:
+
+```text
+execute DEV:mutools
+```
+
+Edit `fsuae/mutools` (not `dist/mutools`, which is regenerated on every build) to change its flags.
+
 ---
 
 ## FS-UAE Integration
@@ -398,7 +409,7 @@ DEV:starter_sasc
 The project uses a template file:
 
 ```text
-fsuae/starter.fs-uae.in
+fsuae/project.fs-uae.in
 ```
 
 The Makefile generates a local config file:
@@ -426,6 +437,18 @@ DEV:
 dir
 execute runme
 ```
+
+The config emulates a **68030 CPU** (rather than the A1200's stock 68EC020) specifically so an MMU is available for MuForce/MuGuardianAngel to use -- this is a test-environment choice only and doesn't change what your code is compiled for (still a plain 68000 baseline, see `CPUFLAGS` in the Makefile).
+
+It also exposes the emulated serial port as a TCP socket (`serial_port = tcp://127.0.0.1:1234`), so MuForce's serial debug output can be read from the host:
+
+```sh
+telnet 127.0.0.1 1234
+```
+
+Connect *before* triggering whatever you're debugging, so you don't miss early output. See [this write-up](https://blog.arisamiga.rocks/post/debuggingamiga/) for the full workflow this is based on.
+
+`bsdsocket_library = 1` is also enabled, giving the emulated Amiga TCP/IP stack access (`bsdsocket.library`) for programs that need it.
 
 ---
 
@@ -615,6 +638,18 @@ gmake sasc
 
 ---
 
+### `vamos` fails with a "NO MEMORY" internal error while compiling
+
+This is a `vamos`-internal RAM ceiling, not a problem with your source: as source files grow, `sc` needs more room to load its own support libraries than `vamos`'s default RAM size provides. `VAMOS_SC`/`VAMOS_SLINK` in the Makefile already pass `-H disable -m 16128` to work around this (also required for a separate, older `slink`/`vamos` pointer-corruption issue -- see the comment above `$(TARGET_SASC)`). If it recurs with much larger sources, try raising `-m` further.
+
+---
+
+### Cursor keys or other input don't reach a program in FS-UAE
+
+Some FS-UAE setups default to mapping the keyboard's cursor keys to emulated joystick port 1 instead of passing them through as real keystrokes to the guest OS. The template config already sets `joystick_port_1 = nothing` to disable that; if input still isn't arriving, double check the target window is actually the *active* window in Intuition (only the active window receives keyboard IDCMP messages).
+
+---
+
 ### FS-UAE cannot find the ROM or HDF
 
 Check:
@@ -644,7 +679,8 @@ CLAUDE.md
 .vamosrc.in
 .gitignore
 .vscode/tasks.json
-fsuae/starter.fs-uae.in
+fsuae/project.fs-uae.in
+fsuae/mutools
 src/
 ```
 
@@ -719,9 +755,10 @@ VS Code → GCC/SAS-C build → vamos CLI test → FS-UAE AmigaOS test
 Current project capabilities:
 
 * GCC cross-build for AmigaOS 3.2
-* SAS/C build via vamos
+* SAS/C build via vamos (with the RAM-size workaround needed for larger sources)
 * Generated local `.vamosrc`
-* Generated FS-UAE config
+* Generated FS-UAE config, emulating a 68030+MMU for memory debugging and exposing the serial port over TCP
+* `mutools` MuForce/MuGuardianAngel debug-session starter, copied into `dist/` on every build
 * `dist/` mounted as `DEV:`
 * VS Code build tasks
 * Claude Code project guidance

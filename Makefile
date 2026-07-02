@@ -18,7 +18,13 @@ GCC_OBJDUMP := $(PREFIX)/bin/m68k-amigaos-objdump
 VAMOS   ?= $(HOME)/Developer/AmigaTools/venv-amitools/bin/vamos
 VAMOSRC := .vamosrc
 
-VAMOS_SC    := $(VAMOS) -c $(VAMOSRC) -q
+# -m 16128: vamos's default RAM size is too small to compile larger source
+# files with sc (observed as a vamos-internal "NO MEMORY" error while sc
+# loads its own support libraries, not a problem with the source itself).
+# -H disable is required alongside the larger RAM size -- vamos refuses
+# "too much RAM allocated with hw access enabled" otherwise. Give both the
+# compile and link steps the same generous allowance.
+VAMOS_SC    := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
 VAMOS_SLINK := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
 
 SASC_PATH ?= $(HOME)/Developer/AmigaSDK/SASC/SC
@@ -38,7 +44,7 @@ GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean
 
-all: gcc sasc dist/runme
+all: gcc sasc dist/runme dist/mutools
 
 gcc: $(TARGET_GCC)
 
@@ -51,7 +57,8 @@ sasc: $(TARGET_SASC)
 # -H disable -m 16128: works around a vamos/slink interaction where slink
 # transiently dereferences an out-of-bounds pointer while resolving a large
 # amiga.lib symbol set. Real hardware tolerates this silently; vamos's default
-# strict memory map does not. This workaround is applied only to the slink step.
+# strict memory map does not. See the VAMOS_SC/VAMOS_SLINK definitions above
+# for why both the compile and link steps need this.
 $(TARGET_SASC): $(SRC_SASC) $(VAMOSRC)
 	mkdir -p build dist
 	$(VAMOS_SC) sc NOLINK IDIR=include: OBJNAME=proj:$(OBJ_SASC) proj:$(SRC_SASC)
@@ -85,6 +92,12 @@ dist/runme: dist/run-gcc dist/run-sasc
 	printf 'echo "  execute DEV:run-gcc"\n' >> dist/runme
 	printf 'echo "  execute DEV:run-sasc"\n' >> dist/runme
 
+# MuForce/MuGuardianAngel debug-session starter (run via "execute DEV:mutools"
+# inside AmigaOS). Static file, copied verbatim -- not templated.
+dist/mutools: fsuae/mutools
+	mkdir -p dist
+	cp fsuae/mutools dist/mutools
+
 run-sasc: $(TARGET_SASC)
 	$(VAMOS) -c $(VAMOSRC) -q proj:$(TARGET_SASC)
 
@@ -111,9 +124,9 @@ launch-fsuae: $(FSUAE_CONFIG)
 
 run-fsuae: all fsuae-config launch-fsuae
 
-run-fsuae-gcc: gcc dist/run-gcc fsuae-config launch-fsuae
+run-fsuae-gcc: gcc dist/run-gcc dist/mutools fsuae-config launch-fsuae
 
-run-fsuae-sasc: sasc dist/run-sasc fsuae-config launch-fsuae
+run-fsuae-sasc: sasc dist/run-sasc dist/mutools fsuae-config launch-fsuae
 
 info: all
 	file $(TARGET_GCC)
