@@ -27,6 +27,16 @@ VAMOSRC := .vamosrc
 VAMOS_SC    := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
 VAMOS_SLINK := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
 
+# NOSTACKCHECK: SAS/C inserts a per-function stack-overflow check that calls
+# an overflow handler (__XCOVF) when it thinks the stack is low. That handler
+# is unsafe when the function is a callback invoked by the OS -- most notably
+# a BOOPSI/ReAction class dispatcher called by Intuition -- where it corrupts
+# the task's user stack (seen as an exec address-error crash). Programs that
+# install such callbacks should turn the check off and instead guarantee an
+# adequate stack with a "$STACK: <bytes>" cookie (see README). Harmless for
+# plain CLI tools. Applied to every sc compile below.
+SC_OPTS := NOSTACKCHECK
+
 SASC_PATH ?= $(HOME)/Developer/AmigaSDK/SASC/SC
 
 TARGET_GCC  := dist/$(PROJECT_NAME)_gcc
@@ -61,7 +71,7 @@ sasc: $(TARGET_SASC)
 # for why both the compile and link steps need this.
 $(TARGET_SASC): $(SRC_SASC) $(VAMOSRC)
 	mkdir -p build dist
-	$(VAMOS_SC) sc NOLINK IDIR=include: OBJNAME=proj:$(OBJ_SASC) proj:$(SRC_SASC)
+	$(VAMOS_SC) sc $(SC_OPTS) NOLINK IDIR=include: OBJNAME=proj:$(OBJ_SASC) proj:$(SRC_SASC)
 	$(VAMOS_SLINK) slink FROM lib:c.o proj:$(OBJ_SASC) TO proj:$(TARGET_SASC) LIB lib:sc.lib lib:amiga.lib
 
 $(VAMOSRC): .vamosrc.in

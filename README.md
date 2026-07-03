@@ -145,6 +145,37 @@ dist/<project-name>_sasc
 
 This profile is useful for checking whether the code remains close to classic Amiga C conventions.
 
+#### SAS/C stack checking (`NOSTACKCHECK`) and GUI stack sizing
+
+The SAS/C build compiles with `NOSTACKCHECK` (set via `SC_OPTS` in the
+`Makefile`, and `SCOPTS` in the `src/*.in` native-build templates).
+
+By default SAS/C inserts a per-function stack-overflow check. When the check
+decides the stack is low it calls an overflow handler (`__XCOVF`). That is
+fine inside a program's own call tree, but **unsafe when the function is a
+callback invoked by the operating system** -- most importantly a
+BOOPSI/ReAction class dispatcher called by Intuition. Invoked there, the
+handler corrupts the task's user stack, which shows up as an exec
+address-error crash (`80000003`) rather than a clean diagnostic. GCC does not
+insert such a check, so the same program can appear to work under GCC while
+crashing only under SAS/C. Disabling the check avoids this entirely; it is
+harmless for plain CLI tools.
+
+With the check gone, the program itself is responsible for having enough
+stack. The AmigaOS 3.2 default Shell stack is small and BOOPSI GUIs
+(`window.class`, `texteditor.gadget`, ...) are stack-hungry, so a GUI program
+should embed a **stack cookie**. The OS 3.2 Shell reads it via
+`ScanStackToken()` and sizes the process stack before `main()` runs:
+
+```c
+/* Note the space after the colon -- the exact format the Shell scans for. */
+const char stack_cookie[] = "$STACK: 16384";
+```
+
+Put it in each entry point (for GCC add `__attribute__((used))` so it is not
+stripped). Pure CLI tools that never call into BOOPSI/Intuition callbacks do
+not need the cookie and can leave the default stack.
+
 ---
 
 ## Important Legal Note

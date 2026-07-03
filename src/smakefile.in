@@ -19,7 +19,11 @@
 OBJS = main_sasc.o
 SRCS = main_sasc.c
 
-SCOPTS =
+# NOSTACKCHECK: SAS/C's per-function stack check is unsafe inside OS callbacks
+# such as BOOPSI/ReAction class dispatchers (it corrupts the task stack). Turn
+# it off and size the stack with a "$STACK: <bytes>" cookie instead (see
+# README). Harmless for plain CLI tools.
+SCOPTS = NOSTACKCHECK
 
 all: @PROJECT_NAME@
 
