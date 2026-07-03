@@ -68,6 +68,7 @@ The current setup assumes:
 ├── CLAUDE.md
 ├── Makefile
 ├── README.md
+├── new_project.sh          # scaffold a new sibling project from this template
 ├── .gitignore
 ├── .vamosrc.in
 ├── .vscode/
@@ -80,6 +81,7 @@ The current setup assumes:
 │   ├── main_sasc.c
 │   ├── smakefile.in
 │   └── Makefile.in
+├── reference/              # pulled reference PDFs (git-ignored)
 ├── build/
 └── dist/
 ```
@@ -91,7 +93,46 @@ Generated files and local machine-specific files are not committed:
 build/
 dist/
 fsuae/local/
+reference/*.pdf
 ```
+
+---
+
+## Creating a New Project
+
+Use `new_project.sh` to scaffold a new project from this template. The script
+lives inside the starter but creates new projects as **siblings** of it (in the
+parent "AmigaApps" directory), and locates itself, so it can be run from
+anywhere:
+
+```sh
+# From the AmigaApps directory:
+starter/new_project.sh gadtools_test
+
+# ...or from inside any project cloned from the starter:
+./new_project.sh gadtools_test
+```
+
+This creates `../gadtools_test` as a local **playground** clone of the starter:
+
+* renames the branch to `playground` and disables pushing (a `pre-push` hook
+  blocks accidental pushes back to the template); configure a real remote
+  deliberately when you want to publish it,
+* removes generated `build/`, `dist/`, `fsuae/local/` and `.vamosrc`,
+* copies `CLAUDE.md` to `.claude/CLAUDE.md` so Claude Code finds it reliably,
+* pulls the reference manual (see below) into `reference/`.
+
+Override the template with `SOURCE_PROJECT=<sibling> new_project.sh <name>` to
+branch off a different existing project instead of the starter.
+
+### Reference material for AI-assisted development
+
+`new_project.sh` downloads an offline copy of **RKRM: DOS** (Thomas Richter's
+AmigaOS 3.2 rewrite of the ROM Kernel Reference Manual for AmigaDOS and
+`dos.library`) into `reference/rkrm-dos.pdf`. It is git-ignored and cached
+under `../.reference-cache/` so it is fetched only once across projects.
+`CLAUDE.md` points Claude Code at it as the authoritative OS 3.x DOS reference
+(and forbids the OS4-specific `wiki.amigaos.net`).
 
 ---
 
