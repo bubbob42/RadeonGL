@@ -77,7 +77,9 @@ The current setup assumes:
 │   └── mutools
 ├── src/
 │   ├── main.c
-│   └── main_sasc.c
+│   ├── main_sasc.c
+│   ├── smakefile.in
+│   └── Makefile.in
 ├── build/
 └── dist/
 ```
@@ -401,6 +403,20 @@ execute DEV:mutools
 ```
 
 Edit `fsuae/mutools` (not `dist/mutools`, which is regenerated on every build) to change its flags.
+
+### `DEV:src/` -- native on-Amiga build
+
+Every build also mirrors all project sources into `dist/src/` (`DEV:src/` inside AmigaOS), together with an `smakefile` (for SAS/C's `smake`) and a `Makefile` (for Amiga `make` ports), both generated from the `.in` templates in `src/` with the project name substituted. With SAS/C installed on the Amiga side, the project can be compiled and debugged entirely natively:
+
+```text
+cd DEV:src
+smake              ; incremental build        -> DEV:src/<project>
+smake debug        ; DEBUG=SF rebuild          -> DEV:src/<project>.debug
+cpr <project>.debug ; source-level debugging in CodeProbe
+smake clean
+```
+
+The native build uses the SAS/C installation's own include/library configuration (no `IDIR=` forced, unlike the host-side vamos build). The mirror is one-way -- host wins: edits made under `DEV:src/` are overwritten by the next host-side build, so treat it as a scratch build area, not a place to develop in. When adding source files to a derived project, extend `OBJS`/`SRCS` in both `.in` templates alongside the host Makefile's source lists.
 
 ---
 

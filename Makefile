@@ -42,9 +42,9 @@ GCC_WARNINGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declar
 GCC_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 $(CPUFLAGS)
 GCC_LDFLAGS  := -noixemul -lamiga
 
-.PHONY: all gcc sasc run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean
+.PHONY: all gcc sasc run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src
 
-all: gcc sasc dist/runme dist/mutools
+all: gcc sasc dist/runme dist/mutools mirror-src
 
 gcc: $(TARGET_GCC)
 
@@ -98,6 +98,18 @@ dist/mutools: fsuae/mutools
 	mkdir -p dist
 	cp fsuae/mutools dist/mutools
 
+# Mirror all sources into dist/src (DEV:src inside AmigaOS), along with
+# an smakefile (SAS/C smake) and a Makefile (Amiga make ports) generated
+# from the .in templates in src/, so the project can also be compiled
+# and debugged natively on the Amiga. The mirror is one-way: host wins.
+MIRROR_SRC := $(wildcard src/*.c) $(wildcard src/*.h)
+
+mirror-src:
+	mkdir -p dist/src
+	cp $(MIRROR_SRC) dist/src/
+	sed -e 's|@PROJECT_NAME@|$(PROJECT_NAME)|g' src/smakefile.in > dist/src/smakefile
+	sed -e 's|@PROJECT_NAME@|$(PROJECT_NAME)|g' src/Makefile.in > dist/src/Makefile
+
 run-sasc: $(TARGET_SASC)
 	$(VAMOS) -c $(VAMOSRC) -q proj:$(TARGET_SASC)
 
@@ -124,9 +136,9 @@ launch-fsuae: $(FSUAE_CONFIG)
 
 run-fsuae: all fsuae-config launch-fsuae
 
-run-fsuae-gcc: gcc dist/run-gcc dist/mutools fsuae-config launch-fsuae
+run-fsuae-gcc: gcc dist/run-gcc dist/mutools mirror-src fsuae-config launch-fsuae
 
-run-fsuae-sasc: sasc dist/run-sasc dist/mutools fsuae-config launch-fsuae
+run-fsuae-sasc: sasc dist/run-sasc dist/mutools mirror-src fsuae-config launch-fsuae
 
 info: all
 	file $(TARGET_GCC)

@@ -1,0 +1,36 @@
+# smakefile -- native AmigaOS build with SAS/C's smake.
+#
+# Generated into DEV:src/ (dist/src on the host) by the host-side
+# "gmake all", together with a mirror of all project sources, so the
+# project can be compiled and debugged directly on the Amiga:
+#
+#   smake          incremental build             -> @PROJECT_NAME@
+#   smake debug    full rebuild with source-level -> @PROJECT_NAME@.debug
+#                  debug info for CodeProbe:  cpr @PROJECT_NAME@.debug
+#   smake clean    remove objects and binaries
+#
+# Unlike the host-side vamos build, no IDIR= is forced here: a native
+# SAS/C installation supplies its own include/library configuration.
+# main.c (the GCC entry point) is mirrored alongside but not built here.
+#
+# NOTE: the mirror is one-way (host -> DEV:). Edits made to these files
+# on the Amiga side are overwritten by the next host-side build.
+
+OBJS = main_sasc.o
+SRCS = main_sasc.c
+
+SCOPTS =
+
+all: @PROJECT_NAME@
+
+@PROJECT_NAME@: $(OBJS)
+	slink FROM lib:c.o $(OBJS) TO @PROJECT_NAME@ LIB lib:sc.lib lib:amiga.lib
+
+debug:
+	sc LINK DEBUG=SF $(SCOPTS) TO @PROJECT_NAME@.debug $(SRCS)
+
+clean:
+	delete $(OBJS) @PROJECT_NAME@ @PROJECT_NAME@.debug
+
+.c.o:
+	sc $(SCOPTS) NOLINK $*.c
