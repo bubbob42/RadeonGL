@@ -52,7 +52,7 @@ GCC_WARNINGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declar
 GCC_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 $(CPUFLAGS)
 GCC_LDFLAGS  := -noixemul -lamiga
 
-.PHONY: all gcc sasc run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src
+.PHONY: all gcc sasc debug run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src
 
 all: gcc sasc dist/runme dist/mutools mirror-src
 
@@ -71,8 +71,28 @@ sasc: $(TARGET_SASC)
 # for why both the compile and link steps need this.
 $(TARGET_SASC): $(SRC_SASC) $(VAMOSRC)
 	mkdir -p build dist
-	$(VAMOS_SC) sc $(SC_OPTS) NOLINK IDIR=include: OBJNAME=proj:$(OBJ_SASC) proj:$(SRC_SASC)
+	$(VAMOS_SC) sc $(SC_OPTS) NOLINK IDIR=include: IDIR=proj:src/ OBJNAME=proj:$(OBJ_SASC) proj:$(SRC_SASC)
 	$(VAMOS_SLINK) slink FROM lib:c.o proj:$(OBJ_SASC) TO proj:$(TARGET_SASC) LIB lib:sc.lib lib:amiga.lib
+
+# --- Debug builds ---------------------------------------------------------
+# Same sources compiled with -DLMDEBUG, which turns on the DBG() serial trace
+# (src/debug.h) and links debug.lib for KPrintF(). -DDBG_TAG=$(PROJECT_NAME)
+# makes each project's trace lines self-identify ("<project>: ..."). Separate
+# outputs and object dir keep the release builds untouched. Read the trace over
+# FS-UAE's tcp serial: `telnet 127.0.0.1 1234` (same channel as DEV:mutools).
+TARGET_GCC_DEBUG  := dist/$(PROJECT_NAME)_gcc_debug
+TARGET_SASC_DEBUG := dist/$(PROJECT_NAME)_sasc_debug
+
+debug: $(TARGET_GCC_DEBUG) $(TARGET_SASC_DEBUG)
+
+$(TARGET_GCC_DEBUG): $(SRC_GCC) src/debug.h
+	mkdir -p dist
+	$(GCC_CC) $(GCC_CFLAGS) -DLMDEBUG -DDBG_TAG=$(PROJECT_NAME) $(SRC_GCC) -o $(TARGET_GCC_DEBUG) $(GCC_LDFLAGS) -ldebug
+
+$(TARGET_SASC_DEBUG): $(SRC_SASC) src/debug.h $(VAMOSRC)
+	mkdir -p build/debug dist
+	$(VAMOS_SC) sc $(SC_OPTS) DEFINE LMDEBUG DEFINE DBG_TAG=$(PROJECT_NAME) NOLINK IDIR=include: IDIR=proj:src/ OBJNAME=proj:build/debug/main_sasc.o proj:$(SRC_SASC)
+	$(VAMOS_SLINK) slink FROM lib:c.o proj:build/debug/main_sasc.o TO proj:$(TARGET_SASC_DEBUG) LIB lib:sc.lib lib:amiga.lib lib:debug.lib
 
 $(VAMOSRC): .vamosrc.in
 	sed \

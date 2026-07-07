@@ -8,6 +8,9 @@
 #   make           incremental build             -> @PROJECT_NAME@
 #   make debug     full rebuild with source-level -> @PROJECT_NAME@.debug
 #                  debug info for CodeProbe:  cpr @PROJECT_NAME@.debug
+#   make kdebug    serial-debug build (LMDEBUG,  -> @PROJECT_NAME@.kdbg
+#                  kprintf via debug.lib): read the DBG() trace over the
+#                  serial port. Same as the host "gmake debug".
 #   make clean     remove objects and binaries
 #
 # NOTE: the mirror is one-way (host -> DEV:). Edits made to these files
@@ -32,8 +35,14 @@ all: @PROJECT_NAME@
 debug:
 	sc LINK DEBUG=SF $(SCOPTS) TO @PROJECT_NAME@.debug $(SRCS)
 
+# Serial-debug (kprintf) build: DEFINE LMDEBUG turns on the DBG() trace,
+# DEFINE DBG_TAG names the trace lines, and lib:debug.lib supplies KPrintF().
+# Output goes to the serial port.
+kdebug:
+	sc LINK $(SCOPTS) DEFINE LMDEBUG DEFINE DBG_TAG=@PROJECT_NAME@ TO @PROJECT_NAME@.kdbg $(SRCS) lib:debug.lib
+
 clean:
-	delete $(OBJS) @PROJECT_NAME@ @PROJECT_NAME@.debug
+	delete $(OBJS) @PROJECT_NAME@ @PROJECT_NAME@.debug @PROJECT_NAME@.kdbg
 
 .c.o:
 	sc $(SCOPTS) NOLINK $<

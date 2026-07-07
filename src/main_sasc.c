@@ -2,6 +2,8 @@
 #include <dos/dos.h>
 #include <proto/dos.h>
 
+#include "debug.h"
+
 #define BALL_RADIUS 10
 
 /* Character cells are roughly twice as tall as wide, so the horizontal
@@ -49,6 +51,9 @@ int main(void)
     int dx, dy, sdy, width, distSq, rz, hSpan, limit, latBand, lonBand, checker;
     long latT1, latT2, lonV, lonT1, lonT2, rxRot, rzRot;
     char line[2 * ASPECT * BALL_RADIUS + 2];
+
+    DBG(("boing: rendering %ld rows (radius %ld)\n",
+         (LONG)(2 * BALL_RADIUS + 1), (LONG)BALL_RADIUS));
 
     hSpan = ASPECT * BALL_RADIUS;
     limit = hSpan * hSpan;
