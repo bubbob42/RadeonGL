@@ -24,5 +24,7 @@ fsuae/local/
 *.rom
 *.adf
 
-# Reference material (pulled by new_project.sh; large binary, not committed)
+# Reference material (pulled by new_project.sh; not committed -- the canonical
+# copies live under ~/Developer/Reference and the RKRM cache)
 reference/*.pdf
+reference/*.md
