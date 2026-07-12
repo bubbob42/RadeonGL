@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""
+gen_catalog.py -- bootstrap the CatComp catalog description (.cd) from
+src/app_strings.h, and validate a translation (.ct) against it on the host
+(CatComp itself needs iffparse.library and only runs in FS-UAE, so this
+catches length / %-specifier / missing-name errors before the round trip).
+
+Usage:
+    tools/gen_catalog.py gen     # write .cd + src/<Project>_cat.h + src/app_msg.h
+    tools/gen_catalog.py check catalogs/<language>/<Project>.ct
+
+Conventions (see docs/localization-catcomp.md):
+  - src/app_strings.h is the human-edited seed: one #define per user-facing
+    string, category-prefixed names (GAD_ LBL_ SEC_ WIN_ MSG_ MENU_ REQ_ ERR_
+    CHO_ COL_).
+  - The define NAME becomes the catcomp message id (prefixed, see CAT_PREFIX);
+    the string value becomes the built-in English default. Min length is
+    always 1; max length is by role.
+  - The project name is derived from the repository root folder, like the
+    Makefile's $(notdir $(CURDIR)).
+
+`gen` also writes src/<Project>_cat.h: the numeric ids + a GetString()
+accessor with the English defaults embedded, matching what `catcomp CFILE`
+produces natively on the Amiga (interface-compatible: identical ids because
+the .cd carries no explicit ids, so catcomp numbers them 0..N in file order
+too, and the same LocaleInfo / GetString contract). The generated files are
+committed so an ordinary build -- host cross-build or native SAS/C -- needs
+no generator step.
+"""
+
+import sys, os, re, math
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT = os.path.basename(ROOT)
+APP_STRINGS = os.path.join(ROOT, "src", "app_strings.h")
+CD_PATH = os.path.join(ROOT, "catalogs", PROJECT + ".cd")
+CAT_H_PATH = os.path.join(ROOT, "src", PROJECT + "_cat.h")
+MSG_H_PATH = os.path.join(ROOT, "src", "app_msg.h")
+
+STR_LIT = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+# The catcomp message id token must differ from the call-site string token
+# (app_strings.h keeps GAD_PRINT etc. as the redirect macro name), so the .cd
+# entry / numeric id is prefixed. Derived from the project name's initials
+# (LabelMaster -> LM_), which also avoids doubling an existing MSG_ category
+# (MSG_NOTSET -> LM_MSG_NOTSET, not MSG_MSG_NOTSET). Override here if the
+# derived prefix collides with something in your project.
+CAT_PREFIX = "".join(w[0] for w in
+                     re.findall(r'[A-Z][a-z0-9]*|[a-z0-9]+', PROJECT)
+                     ).upper()[:4] + "_"
+
+# The LocaleInfo global instantiated by the app's locale module (the one
+# translation unit compiled with CATCOMP_CODE); see the doc.
+LOCALEINFO_VAR = CAT_PREFIX + "LI"
+
+def ident(name):
+    """Sanitize a name into a C identifier fragment."""
+    return re.sub(r'[^A-Za-z0-9_]', '_', name)
+
+
+def cat_name(name):
+    """app_strings.h define name -> catcomp .cd entry / numeric id name."""
+    return CAT_PREFIX + name
+
+
+def decoded_len(raw):
+    """Byte length after collapsing C escapes to one byte each."""
+    s = re.sub(r'\\x[0-9A-Fa-f]{1,2}', '.', raw)
+    s = re.sub(r'\\[0-7]{1,3}', '.', s)
+    s = re.sub(r'\\.', '.', s)
+    return len(s)
+
+
+def role(name):
+    if name.startswith("REQ_TITLE_") or name.startswith("REQ_ASL_"):
+        return "widget"
+    if name.startswith("REQ_") or name.startswith("ERR_"):
+        return "body"
+    if name.startswith("MENU_"):
+        return "menu"
+    return "widget"   # GAD_ LBL_ COL_ CHO_ SEC_ WIN_ MSG_
+
+
+def max_len(n, r):
+    if r == "menu":
+        return max(n + 12, math.ceil(n * 2.0))
+    if r == "body":
+        return max(n + 40, math.ceil(n * 2.5))
+    return max(n + 8, math.ceil(n * 1.8))
+
+
+def pct_tokens(raw):
+    """Conversion types (ignoring %N$ position and %%), in order."""
+    toks = re.findall(r'%(?:\d+\$)?[-+ 0#]*\d*(?:\.\d+)?l*([bcdeEfgGiopsuxXNT%])',
+                      raw)
+    return [t for t in toks if t != "%"]
+
+
+def parse_app_strings():
+    """Yield (name, raw_value) in file order from app_strings.h."""
+    entries = []
+    with open(APP_STRINGS, encoding="utf-8") as f:
+        lines = f.readlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r'\s*#define\s+([A-Z][A-Z0-9_]*)\s+(.*)', line)
+        if not m:
+            i += 1
+            continue
+        name = m.group(1)
+        rest = m.group(2)
+        # Join C line-continuations (trailing backslash).
+        while rest.rstrip().endswith("\\"):
+            rest = rest.rstrip()[:-1]
+            i += 1
+            rest += lines[i]
+        value = "".join(STR_LIT.findall(rest))
+        # Skip defines with no string literal (e.g. the include guard).
+        if STR_LIT.search(rest):
+            entries.append((name, value))
+        i += 1
+    return entries
+
+
+def gen_cd():
+    entries = parse_app_strings()
+    os.makedirs(os.path.dirname(CD_PATH), exist_ok=True)
+    prev_prefix = None
+    out = []
+    out.append("; %s.cd -- CatComp catalog description" % PROJECT)
+    out.append("; GENERATED by tools/gen_catalog.py from src/app_strings.h -- do")
+    out.append("; not hand-edit ids; edit the strings in app_strings.h and rerun.")
+    out.append("; Entry: %sNAME (/min/max) then the built-in English string." % CAT_PREFIX)
+    out.append(";")
+    for name, value in entries:
+        prefix = name.split("_")[0]
+        if prefix != prev_prefix:
+            out.append(";")
+            out.append("; ---- %s ----" % prefix)
+            prev_prefix = prefix
+        r = role(name)
+        mx = max_len(decoded_len(value), r)
+        out.append("%s (/1/%d)" % (cat_name(name), mx))
+        out.append(value)
+    with open(CD_PATH, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    print("wrote %s (%d strings)" % (os.path.relpath(CD_PATH, ROOT),
+                                     len(entries)))
+
+
+def gen_header():
+    """Emit src/<Project>_cat.h: numeric ids + GetString() with the English
+    defaults embedded. Interface-compatible with `catcomp CFILE` output."""
+    entries = parse_app_strings()
+    guard = ident(PROJECT).upper() + "_CAT_H"
+    arr = CAT_PREFIX + "CatCompArray"
+    out = []
+    out.append("#ifndef %s" % guard)
+    out.append("#define %s" % guard)
+    out.append("")
+    out.append("/*")
+    out.append(" * %s_cat.h -- CatComp message ids + GetString() accessor." % PROJECT)
+    out.append(" *")
+    out.append(" * GENERATED. Host: tools/gen_catalog.py gen. Amiga (native, no host")
+    out.append(" * tools): catcomp catalogs/%s.cd CFILE %s_cat.h." % (PROJECT, PROJECT))
+    out.append(" * The two are interface-compatible -- identical %sNAME ids (the .cd"
+               % CAT_PREFIX)
+    out.append(" * carries no explicit ids, so both number 0..N in file order) and the")
+    out.append(" * same struct LocaleInfo / GetString() contract. Do not hand-edit.")
+    out.append(" *")
+    out.append(" * Include with CATCOMP_CODE defined in exactly ONE .c (the locale")
+    out.append(" * module) to instantiate GetString() and the default table; include")
+    out.append(" * with CATCOMP_NUMBERS (or neither) elsewhere for ids and prototype.")
+    out.append(" */")
+    out.append("")
+    out.append("#include <exec/types.h>")
+    out.append("")
+    out.append("struct LocaleInfo")
+    out.append("{")
+    out.append("    APTR li_LocaleBase;")
+    out.append("    APTR li_Catalog;")
+    out.append("};")
+    out.append("")
+    out.append("STRPTR GetString(struct LocaleInfo *li, LONG stringNum);")
+    out.append("")
+    out.append("/* Numbers are needed by the redirect header AND by the code section. */")
+    out.append("#if defined(CATCOMP_NUMBERS) || defined(CATCOMP_CODE)")
+    for i, (name, _value) in enumerate(entries):
+        out.append("#define %s %d" % (cat_name(name), i))
+    out.append("#endif /* CATCOMP_NUMBERS || CATCOMP_CODE */")
+    out.append("")
+    out.append("#ifdef CATCOMP_CODE")
+    out.append("")
+    out.append("#include <libraries/locale.h>")
+    out.append("#include <proto/locale.h>")
+    out.append("")
+    out.append("struct %sCatCompArrayType" % CAT_PREFIX)
+    out.append("{")
+    out.append("    LONG   cca_ID;")
+    out.append("    STRPTR cca_Str;")
+    out.append("};")
+    out.append("")
+    out.append("static const struct %sCatCompArrayType %s[] =" % (CAT_PREFIX, arr))
+    out.append("{")
+    for name, value in entries:
+        out.append('    { %s, (STRPTR)"%s" },' % (cat_name(name), value))
+    out.append("};")
+    out.append("")
+    out.append("STRPTR GetString(struct LocaleInfo *li, LONG stringNum)")
+    out.append("{")
+    out.append("    STRPTR builtIn;")
+    out.append("    LONG   i;")
+    out.append("    LONG   count;")
+    out.append("")
+    out.append("    builtIn = (STRPTR)\"\";")
+    out.append("    count = (LONG)(sizeof(%s) / sizeof(%s[0]));" % (arr, arr))
+    out.append("    for (i = 0; i < count; i++)")
+    out.append("    {")
+    out.append("        if (%s[i].cca_ID == stringNum)" % arr)
+    out.append("        {")
+    out.append("            builtIn = %s[i].cca_Str;" % arr)
+    out.append("            break;")
+    out.append("        }")
+    out.append("    }")
+    out.append("")
+    out.append("    /* Consult the catalog only when locale.library is open AND a catalog is")
+    out.append("     * actually loaded; otherwise the built-in English default is used. The")
+    out.append("     * NULL check on the result additionally guards against a stub or broken")
+    out.append("     * locale.library (e.g. an incomplete emulation) handing back NULL. */")
+    out.append("    if (li != NULL && li->li_LocaleBase != NULL && li->li_Catalog != NULL)")
+    out.append("    {")
+    out.append("        STRPTR s;")
+    out.append("")
+    out.append("        s = GetCatalogStr((struct Catalog *)li->li_Catalog, stringNum,")
+    out.append("                          builtIn);")
+    out.append("        if (s != NULL)")
+    out.append("        {")
+    out.append("            return s;")
+    out.append("        }")
+    out.append("    }")
+    out.append("    return builtIn;")
+    out.append("}")
+    out.append("")
+    out.append("#endif /* CATCOMP_CODE */")
+    out.append("")
+    out.append("#endif /* %s */" % guard)
+    with open(CAT_H_PATH, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    print("wrote %s (%d ids)" % (os.path.relpath(CAT_H_PATH, ROOT), len(entries)))
+
+
+def gen_msg():
+    """Emit src/app_msg.h: redefine every app_strings.h name as a runtime
+    catalog lookup, so call sites stay unchanged while text becomes localized."""
+    entries = parse_app_strings()
+    guard = ident(PROJECT).upper() + "_APP_MSG_H"
+    width = max(len(name) for name, _ in entries) if entries else 0
+    out = []
+    out.append("#ifndef %s" % guard)
+    out.append("#define %s" % guard)
+    out.append("")
+    out.append("/*")
+    out.append(" * app_msg.h -- GENERATED localization redirect")
+    out.append(" * (tools/gen_catalog.py gen). Do not hand-edit; edit the English")
+    out.append(" * text in app_strings.h and rerun.")
+    out.append(" *")
+    out.append(" * Each user-facing string name is redefined as a runtime catalog")
+    out.append(" * lookup: GetString(&%s, %s<name>) returns the translation for"
+               % (LOCALEINFO_VAR, CAT_PREFIX))
+    out.append(" * the user's locale, or the built-in English default (embedded in")
+    out.append(" * %s_cat.h) when there is no catalog. Call sites are unchanged;" % PROJECT)
+    out.append(" * the central header includes this in place of app_strings.h (which")
+    out.append(" * remains the generator's seed).")
+    out.append(" *")
+    out.append(" * Because each name now expands to a function call it can no longer sit")
+    out.append(" * in a static/global initializer; populate such tables (menu strips,")
+    out.append(" * chooser label arrays) at runtime instead.")
+    out.append(" */")
+    out.append("")
+    out.append('#include "app_locale.h"    /* %s, %s* ids, GetString() */'
+               % (LOCALEINFO_VAR, CAT_PREFIX))
+    out.append("")
+    for name, _value in entries:
+        out.append("#define %-*s GetString(&%s, %s)"
+                    % (width, name, LOCALEINFO_VAR, cat_name(name)))
+    out.append("")
+    out.append("#endif /* %s */" % guard)
+    with open(MSG_H_PATH, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    print("wrote %s (%d redirects)" % (os.path.relpath(MSG_H_PATH, ROOT),
+                                       len(entries)))
+
+
+def parse_ct(path):
+    """Return (commands, {name: raw_value}) from a .ct file (UTF-8)."""
+    cmds, trans = [], {}
+    with open(path, encoding="utf-8") as f:
+        lines = f.readlines()
+    i = 0
+    while i < len(lines):
+        s = lines[i].rstrip("\n")
+        if s.startswith("##"):
+            cmds.append(s)
+            i += 1
+            continue
+        if s.startswith(";") or s.strip() == "":
+            i += 1
+            continue
+        name = s.strip()
+        i += 1
+        val = lines[i].rstrip("\n") if i < len(lines) else ""
+        while val.endswith("\\"):
+            i += 1
+            val = val[:-1] + (lines[i].rstrip("\n") if i < len(lines) else "")
+        trans[name] = val
+        i += 1
+    return cmds, trans
+
+
+def check_ct(path):
+    entries = parse_app_strings()
+    info = {}
+    for name, value in entries:
+        r = role(name)
+        info[cat_name(name)] = (value, max_len(decoded_len(value), r),
+                                pct_tokens(value))
+    cmds, trans = parse_ct(path)
+    errors, warns = [], []
+    for name, _ in entries:
+        if cat_name(name) not in trans:
+            errors.append("missing translation: %s" % cat_name(name))
+    for name, tval in trans.items():
+        if name not in info:
+            errors.append("unknown token (not in .cd): %s" % name)
+            continue
+        eng, mx, epct = info[name]
+        dl = decoded_len(tval)
+        if dl < 1:
+            errors.append("%s: empty (min 1)" % name)
+        if dl > mx:
+            errors.append("%s: len %d > max %d  [%s]" % (name, dl, mx, tval))
+        if pct_tokens(tval) != epct:
+            errors.append("%s: %% specifiers %s != english %s"
+                          % (name, pct_tokens(tval), epct))
+        if tval == eng:
+            warns.append("%s: identical to English (catcomp will omit it)"
+                         % name)
+    for w in warns:
+        print("WARN  " + w)
+    for e in errors:
+        print("ERROR " + e)
+    print("%s: %d strings, %d error(s), %d warning(s)"
+          % (os.path.relpath(path, ROOT), len(trans), len(errors), len(warns)))
+    return 1 if errors else 0
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "gen":
+        gen_cd()
+        gen_header()
+        gen_msg()
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "header":
+        gen_header()
+        gen_msg()
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "check":
+        return check_ct(sys.argv[2])
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
