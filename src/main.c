@@ -3,6 +3,17 @@
 #include <proto/dos.h>
 
 #include "debug.h"
+#include "starter_rev.h"
+
+/* AmigaDOS $VER cookie: the "Version" command finds this string in the binary
+ * and reports the build. REVISION/VERSTAG come from the bumprev-managed
+ * <project>_rev.h (advanced only by "gmake release"). __attribute__((used))
+ * keeps -Os from stripping it under GCC; harmless nowhere else. */
+#ifdef __GNUC__
+static const char verstag[] __attribute__((used)) = VERSTAG;
+#else
+static const char verstag[] = VERSTAG;
+#endif
 
 #define BALL_RADIUS 10
 

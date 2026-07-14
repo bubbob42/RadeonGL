@@ -2,8 +2,17 @@
 build/
 dist/
 
+# Version includes: bumprev refreshes these only on "gmake release". The .rev
+# counter and the _rev.h header are committed (the header is compiled into the
+# binary, so it must be present on a fresh checkout). The _rev.i asm include is
+# a generated build product that nothing here uses, so it stays ignored.
+src/*_rev.i
+
 # Generated vamos config
 .vamosrc
+
+# Local SMB push target (written by ./setup-smb.sh; personal to this checkout)
+smbpush.conf
 
 # macOS
 .DS_Store

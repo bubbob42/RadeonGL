@@ -1,650 +1,352 @@
 # AmigaOS 3.2 VS Code Cross-Development Starter
 
-A practical macOS-based cross-development starter project for writing, building, testing, and iterating on classic **AmigaOS 3.2** applications from **Visual Studio Code**.
+A macOS-based starter for writing, building, and testing classic **AmigaOS 3.2**
+(Motorola 68000) applications from **Visual Studio Code**, with two compiler
+paths and optional FS-UAE emulator testing.
 
-The project supports two compiler paths:
+- **m68k-amigaos-gcc** + **libnix** (`-noixemul`) — the main cross path.
+- **SAS/C 6.58** run through **amitools/vamos** — a compatibility check that
+  keeps code close to classic Amiga C conventions.
 
-* **m68k-amigaos-gcc** with **libnix** for modern cross-compilation
-* **SAS/C 6.58** executed through **amitools/vamos** for classic Amiga compiler compatibility
+It deliberately avoids POSIX, SDL, and direct hardware access in normal
+application code, and is set up to work well with Claude Code / AI assistance.
 
-It also includes optional **FS-UAE** integration so the generated binaries can be tested inside an AmigaOS 3.2 emulator environment.
+**Contents**
 
----
-
-## Goals
-
-This repository is intended as a reusable starter setup for system-friendly AmigaOS 3.x application development.
-
-It is designed to support workflows involving:
-
-* Visual Studio Code
-* Claude Code or similar AI-assisted coding tools
-* AmigaOS 3.2 NDK-based development
-* GCC/libnix cross-compilation
-* SAS/C compatibility checks
-* FS-UAE based emulator testing
-
-The setup deliberately avoids POSIX assumptions, SDL, Linux/macOS runtime dependencies, and direct hardware access in normal application code.
+- [Overview & layout](#overview--layout)
+- [Getting started](#getting-started) — prerequisites, first build
+- [Building & running](#building--running) — targets, profiles, dev loop
+- [Testing & debugging](#testing--debugging) — FS-UAE, MuForce, serial
+- [Project capabilities](#project-capabilities) — new project, versioning, publish, staging, native build
+- [Configuration & conventions](#configuration--conventions)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Host Platform
+## Overview & layout
 
-The current setup assumes:
-
-* macOS on Apple Silicon
-* Homebrew installed natively under `/opt/homebrew`
-* GNU Make available as `gmake`
-* A working `m68k-amigaos-gcc` toolchain installed under:
-
-```sh
-~/amiga-arm
-```
-
-* `amitools` and `machine68k` installed from source into:
-
-```sh
-~/Developer/AmigaTools/venv-amitools
-```
-
-* SAS/C installed under:
-
-```sh
-~/Developer/AmigaSDK/SASC/SC
-```
-
-* Optional FS-UAE installation under:
-
-```sh
-/opt/homebrew/bin/fs-uae
-```
-
----
-
-## What Is Included
+`dist/` is the build output directory; FS-UAE mounts it as the Amiga volume
+`DEV:`, so building and testing share one tree. The GCC build is the primary
+target; the SAS/C build exists to catch portability drift.
 
 ```text
 .
-├── CLAUDE.md
-├── Makefile
-├── README.md
-├── new_project.sh          # scaffold a new sibling project from this template
-├── .gitignore
-├── .vamosrc.in
-├── .vscode/
-│   └── tasks.json
+├── CLAUDE.md                 # project guidance for Claude Code / AI tools
+├── Makefile                  # the whole build; derives PROJECT_NAME from the folder
+├── new_project.sh            # scaffold a new sibling project from this template
+├── setup-smb.sh              # configure `gmake push` for your own SMB share
+├── .vamosrc.in               # vamos volume/assign template (-> .vamosrc)
+├── .vscode/tasks.json
 ├── fsuae/
-│   ├── project.fs-uae.in
-│   └── mutools
+│   ├── project.fs-uae.in     # FS-UAE config template (-> fsuae/local/…)
+│   └── mutools               # MuForce/MuGuardianAngel session starter
 ├── src/
-│   ├── main.c
-│   ├── main_sasc.c
-│   ├── smakefile.in
+│   ├── main.c                # GCC entry point (embeds the $VER cookie)
+│   ├── main_sasc.c           # SAS/C entry point
+│   ├── help.c, help.h        # OPTIONAL async AmigaGuide help scaffolding
+│   ├── <project>_rev.h/.rev  # bumprev version include + counter (committed)
+│   ├── smakefile.in          # native SAS/C build templates (-> DEV:src/)
 │   └── Makefile.in
-├── reference/              # pulled reference PDFs (git-ignored)
-├── build/
-└── dist/
+├── tools/                    # host-side Python helpers (icons, catalogs)
+├── install/                  # generic Installer script + Workbench icon
+├── guide/english/            # AmigaGuide online-help stub
+├── docs/                     # inherited knowledge base (see docs/README.md)
+├── reference/                # pulled reference PDFs (git-ignored)
+├── build/  dist/             # build artifacts (git-ignored)
 ```
 
-Generated files and local machine-specific files are not committed:
-
-```text
-.vamosrc
-build/
-dist/
-fsuae/local/
-reference/*.pdf
-```
+Generated / machine-specific files are git-ignored and never committed:
+`.vamosrc`, `smbpush.conf`, `build/`, `dist/`, `fsuae/local/`, `src/*_rev.i`,
+`reference/*.pdf`. The committed vs. generated split is enforced by
+[`.gitignore`](.gitignore).
 
 ---
 
-## Creating a New Project
+## Getting started
 
-Use `new_project.sh` to scaffold a new project from this template. The script
-lives inside the starter but creates new projects as **siblings** of it (in the
-parent "AmigaApps" directory), and locates itself, so it can be run from
-anywhere:
+### Prerequisites
+
+Host: **macOS on Apple Silicon**, Homebrew under `/opt/homebrew`, and GNU Make
+as `gmake`. The Makefile expects these tool locations (override any with a
+`gmake VAR=…` assignment):
+
+| Path | What | Makefile var |
+|---|---|---|
+| `~/amiga-arm` | `m68k-amigaos-gcc` toolchain | `PREFIX` |
+| `~/Developer/AmigaTools/venv-amitools` | `amitools`/`vamos` venv | `VAMOS` |
+| `~/Developer/AmigaSDK/SASC/SC` | SAS/C 6.58 install | `SASC_PATH` |
+| `~/Developer/AmigaEmu/ROMs/kick32.rom` | Kickstart 3.2 ROM | `KICKSTART_FILE` |
+| `~/Developer/AmigaEmu/HDF/AmigaOS32.hdf` | AmigaOS 3.2 system disk | `SYSTEM_HDF` |
+| `/opt/homebrew/bin/fs-uae` | FS-UAE (optional) | `FSUAE` |
+
+> **Legal note:** the AmigaOS ROM, HDF/Workbench, NDK, and SAS/C are **not**
+> included and must not be — supply them yourself from legal sources.
+
+### First build
 
 ```sh
-# From the AmigaApps directory:
-starter/new_project.sh gadtools_test
-
-# ...or from inside any project cloned from the starter:
-./new_project.sh gadtools_test
+gmake check        # validate that every tool/path above is present
+gmake all          # build both profiles + generate the dist/ helper scripts
+gmake run-sasc     # run the SAS/C binary under vamos (quick CLI smoke test)
+gmake run-fsuae    # build, generate the FS-UAE config, and launch the emulator
 ```
 
-This creates `../gadtools_test` as a local **playground** clone of the starter:
-
-* renames the branch to `playground` and disables pushing (a `pre-push` hook
-  blocks accidental pushes back to the template); configure a real remote
-  deliberately when you want to publish it,
-* removes generated `build/`, `dist/`, `fsuae/local/` and `.vamosrc`,
-* copies `CLAUDE.md` to `.claude/CLAUDE.md` so Claude Code finds it reliably,
-* pulls the reference manual (see below) into `reference/`.
-
-Override the template with `SOURCE_PROJECT=<sibling> new_project.sh <name>` to
-branch off a different existing project instead of the starter.
-
-### Reference material for AI-assisted development
-
-`new_project.sh` downloads an offline copy of **RKRM: DOS** (Thomas Richter's
-AmigaOS 3.2 rewrite of the ROM Kernel Reference Manual for AmigaDOS and
-`dos.library`) into `reference/rkrm-dos.pdf`. It is git-ignored and cached
-under `../.reference-cache/` so it is fetched only once across projects.
-`CLAUDE.md` points Claude Code at it as the authoritative OS 3.x DOS reference
-(and forbids the OS4-specific `wiki.amigaos.net`).
+`gmake check` prints the resolved paths and fails on the first missing one, so
+run it before anything else on a fresh machine.
 
 ---
 
-## Compiler Profiles
+## Building & running
 
-### GCC Profile
+### Make targets
 
-The GCC profile builds with:
+| Target | Does |
+|---|---|
+| `all` | Both profiles, `dist/` helper scripts, and any [optional staging](#optional-staging-targets). |
+| `gcc` / `sasc` | Build one profile → `dist/<project>_gcc` / `_sasc`. |
+| `debug` | Serial-debug (kprintf) builds → `dist/<project>_{gcc,sasc}_debug`. See [serial output](#serial-debug-output). |
+| `release` | Advance the revision (bumprev) and rebuild — see [versioning](#versioning-gmake-release). |
+| `run-sasc` | Run the SAS/C binary under vamos. CLI programs only, not a full-OS test. |
+| `run-fsuae` | `all` + generate the FS-UAE config + launch. Also `run-fsuae-gcc` / `run-fsuae-sasc`. |
+| `fsuae-config` | Generate `fsuae/local/<project>.fs-uae` from the template only. |
+| `push` | Publish `dist/` to an SMB share — see [publishing](#publish-to-a-share-gmake-push). |
+| `info` | `file` + `objdump -f` on the built binaries. |
+| `clean` | Remove `build/` and `dist/`. |
+| `distclean` | `clean` + remove `.vamosrc` and `fsuae/local/`. |
 
-```sh
-~/amiga-arm/bin/m68k-amigaos-gcc
-```
+### Compiler profiles
 
-Default options:
+**GCC** builds with `-m68000 -Os -std=gnu99 -noixemul -lamiga`. Warnings are
+`-Wall -Wextra` with `-Wno-pointer-sign` and `-Wno-int-conversion` suppressed
+(the classic NDK inlines produce false positives on those), and
+`-Werror=implicit-function-declaration` kept fatal.
 
-```sh
--m68000 -Os -std=gnu99 -noixemul -lamiga
-```
+**SAS/C** runs `sc`/`slink` through vamos. Both steps get `-H disable -m 16128`
+to work around vamos's default RAM ceiling on larger sources (see the comment
+above `$(TARGET_SASC)` in the Makefile).
 
-Output:
+#### SAS/C stack checking (`NOSTACKCHECK`) and GUI stacks
 
-```text
-dist/<project-name>_gcc
-```
+The SAS/C build compiles with `NOSTACKCHECK` (`SC_OPTS` in the Makefile,
+`SCOPTS` in the `src/*.in` templates). SAS/C otherwise inserts a per-function
+stack-overflow check whose handler (`__XCOVF`) is **unsafe inside an OS
+callback** — most importantly a BOOPSI/ReAction dispatcher called by Intuition,
+where it corrupts the task stack and shows up as an exec address-error crash
+(`80000003`) instead of a clean diagnostic. GCC inserts no such check, so a
+program can appear to work under GCC and crash only under SAS/C.
 
-This profile is the main development path.
-
----
-
-### SAS/C Profile
-
-The SAS/C profile runs the classic Amiga SAS/C compiler through `vamos`.
-
-Compiler:
-
-```text
-SC:C/sc
-```
-
-Linker:
-
-```text
-SC:C/slink
-```
-
-Output:
-
-```text
-dist/<project-name>_sasc
-```
-
-This profile is useful for checking whether the code remains close to classic Amiga C conventions.
-
-#### SAS/C stack checking (`NOSTACKCHECK`) and GUI stack sizing
-
-The SAS/C build compiles with `NOSTACKCHECK` (set via `SC_OPTS` in the
-`Makefile`, and `SCOPTS` in the `src/*.in` native-build templates).
-
-By default SAS/C inserts a per-function stack-overflow check. When the check
-decides the stack is low it calls an overflow handler (`__XCOVF`). That is
-fine inside a program's own call tree, but **unsafe when the function is a
-callback invoked by the operating system** -- most importantly a
-BOOPSI/ReAction class dispatcher called by Intuition. Invoked there, the
-handler corrupts the task's user stack, which shows up as an exec
-address-error crash (`80000003`) rather than a clean diagnostic. GCC does not
-insert such a check, so the same program can appear to work under GCC while
-crashing only under SAS/C. Disabling the check avoids this entirely; it is
-harmless for plain CLI tools.
-
-With the check gone, the program itself is responsible for having enough
-stack. The AmigaOS 3.2 default Shell stack is small and BOOPSI GUIs
-(`window.class`, `texteditor.gadget`, ...) are stack-hungry, so a GUI program
-should embed a **stack cookie**. The OS 3.2 Shell reads it via
-`ScanStackToken()` and sizes the process stack before `main()` runs:
+With the check off, the program owns its stack sizing. The default Shell stack
+is small and BOOPSI GUIs (`window.class`, `texteditor.gadget`, …) are
+stack-hungry, so a GUI program should embed a **stack cookie** — the Shell reads
+it (`ScanStackToken()`) and sizes the process stack before `main()`:
 
 ```c
 /* Note the space after the colon -- the exact format the Shell scans for. */
 const char stack_cookie[] = "$STACK: 16384";
 ```
 
-Put it in each entry point (for GCC add `__attribute__((used))` so it is not
-stripped). Pure CLI tools that never call into BOOPSI/Intuition callbacks do
-not need the cookie and can leave the default stack.
+Put it in each entry point (add `__attribute__((used))` under GCC so it is not
+stripped). Pure CLI tools that never enter Intuition callbacks can skip it.
+
+### Typical development loop
+
+```sh
+gmake clean && gmake all
+gmake run-sasc     # fast CLI check under vamos
+gmake run-fsuae    # full AmigaOS test in the emulator
+```
+
+Round trip: VS Code → GCC/SAS-C build → vamos CLI test → FS-UAE AmigaOS test.
 
 ---
 
-## Important Legal Note
+## Testing & debugging
 
-This repository does not include and should not include:
+### FS-UAE integration
 
-* AmigaOS ROMs
-* AmigaOS 3.2 HDF images
-* AmigaOS NDK files
-* SAS/C binaries or libraries
-* Workbench files
-
-You must provide these yourself from legal sources.
-
----
-
-## Required Local Paths
-
-By default, the Makefile expects the following local paths:
-
-```sh
-~/amiga-arm
-~/Developer/AmigaTools/venv-amitools
-~/Developer/AmigaSDK/SASC/SC
-~/Developer/AmigaEmu/ROMs/kick32.rom
-~/Developer/AmigaEmu/HDF/AmigaOS32.hdf
-```
-
-You can override most paths when invoking `gmake`.
-
-Example:
-
-```sh
-gmake all SASC_PATH="$HOME/Somewhere/SASC/SC"
-```
-
-For FS-UAE:
-
-```sh
-gmake run-fsuae \
-  KICKSTART_FILE="$HOME/ROMs/kick32.rom" \
-  SYSTEM_HDF="$HOME/HDF/AmigaOS32.hdf"
-```
-
----
-
-## First-Time Setup After Cloning
-
-Clone the repository:
-
-```sh
-git clone <repo-url>
-cd <repo>
-```
-
-Check the expected tools and paths:
-
-```sh
-gmake check
-```
-
-Generate local configuration files and build everything:
-
-```sh
-gmake all
-```
-
-Run the SAS/C binary through `vamos`:
-
-```sh
-gmake run-sasc
-```
-
-Start FS-UAE with the project output mounted as `DEV:`:
-
-```sh
-gmake run-fsuae
-```
-
----
-
-## Build Targets
-
-### Build Everything
-
-```sh
-gmake all
-```
-
-Builds both GCC and SAS/C outputs and creates helper scripts in `dist/`.
-
----
-
-### Build GCC Version
-
-```sh
-gmake gcc
-```
-
-Output:
-
-```text
-dist/<project-name>_gcc
-```
-
----
-
-### Build SAS/C Version
-
-```sh
-gmake sasc
-```
-
-Output:
-
-```text
-dist/<project-name>_sasc
-```
-
----
-
-### Run SAS/C Version via vamos
-
-```sh
-gmake run-sasc
-```
-
-This is suitable for simple CLI programs. It is not a replacement for full AmigaOS testing.
-
----
-
-### Generate FS-UAE Config
-
-```sh
-gmake fsuae-config
-```
-
-Creates:
-
-```text
-fsuae/local/starter.fs-uae
-```
-
-from:
-
-```text
-fsuae/project.fs-uae.in
-```
-
----
-
-### Build and Start FS-UAE
-
-```sh
-gmake run-fsuae
-```
-
-Builds both compiler variants, generates helper scripts, creates the local FS-UAE config, and starts the emulator.
-
----
-
-### Build GCC Version and Start FS-UAE
-
-```sh
-gmake run-fsuae-gcc
-```
-
----
-
-### Build SAS/C Version and Start FS-UAE
-
-```sh
-gmake run-fsuae-sasc
-```
-
----
-
-### Show Binary Information
-
-```sh
-gmake info
-```
-
----
-
-### Clean Build Outputs
-
-```sh
-gmake clean
-```
-
-Removes:
-
-```text
-build/
-dist/
-```
-
----
-
-### Full Local Cleanup
-
-```sh
-gmake distclean
-```
-
-Removes:
-
-```text
-build/
-dist/
-.vamosrc
-fsuae/local/
-```
-
----
-
-## Generated AmigaDOS Helper Scripts
-
-The build creates helper files in `dist/`.
-
-Inside AmigaOS, after FS-UAE has mounted `dist/` as `DEV:`, you can run:
+`gmake run-fsuae` renders `fsuae/project.fs-uae.in` into
+`fsuae/local/<project>.fs-uae` and launches it with `dist/` mounted as `DEV:`.
+Inside AmigaOS:
 
 ```text
 DEV:
-execute runme
+execute runme        ; lists the binaries and how to start each
 ```
 
-or directly:
+The config emulates a **68030 with an MMU** (not the A1200's stock 68EC020) so
+MuForce/MuGuardianAngel have an MMU to use — a test-environment choice only;
+your code is still compiled for a plain 68000 baseline (`CPUFLAGS`).
+`bsdsocket_library = 1` is enabled for programs that need the Amiga TCP/IP
+stack, and `joystick_port_1 = nothing` so cursor keys reach the guest.
 
-```text
-execute DEV:run-gcc
-execute DEV:run-sasc
-```
+### Serial-debug output
 
-You can also run the binaries manually:
-
-```text
-DEV:<project-name>_gcc
-DEV:<project-name>_sasc
-```
-
-Example:
-
-```text
-DEV:starter_gcc
-DEV:starter_sasc
-```
-
-### `mutools` -- memory-debugging session starter
-
-`dist/mutools` (copied verbatim from the committed `fsuae/mutools`) starts a MuForce/MuGuardianAngel debugging session -- catches illegal memory accesses, stack overflows, and register corruption while a program runs. Requires the `mutools` package (`MuForce`, `MuGuardianAngel`) already installed under `sys:tools/mutools/` inside the AmigaOS install. Run it before launching whatever you're debugging:
-
-```text
-execute DEV:mutools
-```
-
-Edit `fsuae/mutools` (not `dist/mutools`, which is regenerated on every build) to change its flags.
-
-### `DEV:src/` -- native on-Amiga build
-
-Every build also mirrors all project sources into `dist/src/` (`DEV:src/` inside AmigaOS), together with an `smakefile` (for SAS/C's `smake`) and a `Makefile` (for Amiga `make` ports), both generated from the `.in` templates in `src/` with the project name substituted. With SAS/C installed on the Amiga side, the project can be compiled and debugged entirely natively:
-
-```text
-cd DEV:src
-smake              ; incremental build        -> DEV:src/<project>
-smake debug        ; DEBUG=SF rebuild          -> DEV:src/<project>.debug
-cpr <project>.debug ; source-level debugging in CodeProbe
-smake clean
-```
-
-The native build uses the SAS/C installation's own include/library configuration (no `IDIR=` forced, unlike the host-side vamos build). The mirror is one-way -- host wins: edits made under `DEV:src/` are overwritten by the next host-side build, so treat it as a scratch build area, not a place to develop in. When adding source files to a derived project, extend `OBJS`/`SRCS` in both `.in` templates alongside the host Makefile's source lists.
-
----
-
-## FS-UAE Integration
-
-The project uses a template file:
-
-```text
-fsuae/project.fs-uae.in
-```
-
-The Makefile generates a local config file:
-
-```text
-fsuae/local/starter.fs-uae
-```
-
-The generated config mounts:
-
-```text
-dist/
-```
-
-as the Amiga volume:
-
-```text
-DEV:
-```
-
-Typical AmigaOS workflow after launching FS-UAE:
-
-```text
-DEV:
-dir
-execute runme
-```
-
-The config emulates a **68030 CPU** (rather than the A1200's stock 68EC020) specifically so an MMU is available for MuForce/MuGuardianAngel to use -- this is a test-environment choice only and doesn't change what your code is compiled for (still a plain 68000 baseline, see `CPUFLAGS` in the Makefile).
-
-It also exposes the emulated serial port as a TCP socket (`serial_port = tcp://127.0.0.1:1234`), so MuForce's serial debug output can be read from the host:
+`gmake debug` builds with the `DBG()` trace (`src/debug.h`) enabled and links
+`debug.lib` for `KPrintF()`. The FS-UAE config exposes the emulated serial port
+over TCP, so read the trace from the host:
 
 ```sh
 telnet 127.0.0.1 1234
 ```
 
-Connect *before* triggering whatever you're debugging, so you don't miss early output. See [this write-up](https://blog.arisamiga.rocks/post/debuggingamiga/) for the full workflow this is based on.
+Connect *before* triggering the code you're debugging so you don't miss early
+output. (Same channel MuForce uses.) Based on
+[this write-up](https://blog.arisamiga.rocks/post/debuggingamiga/).
 
-`bsdsocket_library = 1` is also enabled, giving the emulated Amiga TCP/IP stack access (`bsdsocket.library`) for programs that need it.
+### MuForce (`DEV:mutools`)
+
+`dist/mutools` (from the committed `fsuae/mutools`) starts a
+MuForce/MuGuardianAngel session that catches illegal memory access, stack
+overflow, and register corruption. It needs the `mutools` package already
+installed under `sys:tools/mutools/` in the guest. Run it before launching what
+you're debugging:
+
+```text
+execute DEV:mutools
+```
+
+Edit `fsuae/mutools` to change its flags (`dist/mutools` is regenerated every
+build).
+
+### `dist/` helper scripts
+
+Every build regenerates AmigaDOS scripts in `dist/` (= `DEV:`): `runme` (menu),
+`run-gcc`, and `run-sasc` (each assigns `HELP:` and launches its binary). Run a
+binary directly with `DEV:<project>_gcc` / `DEV:<project>_sasc`.
 
 ---
 
-## `.vamosrc.in`
+## Project capabilities
 
-The file `.vamosrc.in` is a portable template.
+Reusable template features. The optional ones stay inert until you add their
+inputs, and everything here is portable AmigaOS work built only from public
+documentation (no AmigaOS source), so it's safe to grow in the shared knowledge
+base.
 
-It contains placeholders:
+### Creating a new project
 
-```text
-@SASC_PATH@
-@PROJECT_PATH@
+`new_project.sh` clones this template into a **sibling** directory (under the
+parent `AmigaApps/`) and can be run from anywhere:
+
+```sh
+starter/new_project.sh gadtools_test   # from AmigaApps/
+./new_project.sh gadtools_test         # from inside any cloned project
 ```
 
-The Makefile generates `.vamosrc` automatically.
+The new clone is a **playground**: branch renamed to `playground`, pushing
+disabled (a `pre-push` hook blocks accidents), generated files removed,
+`CLAUDE.md` copied to `.claude/CLAUDE.md`, the version include reseeded for the
+new name, the guide/install-icon rebranded, and the **RKRM: DOS** reference PDF
+pulled into `reference/` (git-ignored, cached under `../.reference-cache/`).
+Branch off a different sibling with `SOURCE_PROJECT=<name> new_project.sh …`.
 
-Do not commit `.vamosrc`.
+### Versioning (`gmake release`)
 
-Example template:
+`src/<project>_rev.h` (committed, seeded at rev 1) supplies the `$VER` cookie
+embedded in both binaries via `src/main*.c`. Ordinary builds never touch it.
+`gmake release` runs `bumprev` to advance the revision and rebuilds — run it by
+hand when cutting a release.
+
+### Publish to a share (`gmake push`)
+
+`gmake push` mirrors the built `dist/` onto an SMB share so a real Amiga (or an
+emulator with the share mounted) can pick it up. Configure the share once, or
+override inline:
+
+```sh
+./setup-smb.sh                            # one-time; writes git-ignored smbpush.conf
+gmake push                                # uses smbpush.conf
+gmake push SMB_HOST=nas SMB_SHARE=amiga   # or set it on the command line
+```
+
+The copy is additive and uses `cp -X`; Finder cruft (`.DS_Store`, `._*`) is
+purged from `dist/` first. macOS only.
+
+### Optional staging targets
+
+Drop the sources in and the matching target lights up (all fold into
+`gmake all`); the pristine starter has none, so nothing extra is staged.
+
+| Provide… | Target | Result on `DEV:` |
+|---|---|---|
+| `icons/<project>.info` (author with `tools/amiga_icon.py`) | `dist-icons` | a Workbench icon on each binary |
+| `guide/<lang>/<project>.guide` | `guides` | AmigaGuide help in `PROGDIR:` + `HELP:` |
+| `src/help.c` wired into your GUI | — | opens that help asynchronously |
+| `install/Install(.info)` | `installer` | a double-clickable `Install` |
+| `rexx/*.rexx` | `rexx-examples` | example ARexx macros in `DEV:Rexx/` |
+| `catalogs/<project>.cd` + `<lang>/*.ct` | `catalogs` | locale message catalogs (+ `DEV:gencat`) |
+
+See `docs/` (`reaction-layout-cookbook.md`, `amigaguide-format.md`,
+`installer-scripting.md`, `localization-catcomp.md`, `arexx-programming.md`) and
+`tools/README.md` for the details.
+
+### Native on-Amiga build (`DEV:src/`)
+
+Every build mirrors the sources into `dist/src/` with an `smakefile` and
+`Makefile` generated from the `src/*.in` templates, so the project can also be
+compiled natively on the Amiga:
+
+```text
+cd DEV:src
+smake                ; incremental build     -> DEV:src/<project>
+smake debug          ; DEBUG=SF rebuild       -> DEV:src/<project>.debug
+cpr <project>.debug  ; source-level debug in CodeProbe
+smake clean
+```
+
+The mirror is one-way (host wins) — treat `DEV:src/` as a scratch build area,
+not a place to edit. When adding source files, extend `OBJS`/`SRCS` in both
+`.in` templates alongside the host Makefile's source lists.
+
+---
+
+## Configuration & conventions
+
+### `.vamosrc.in`
+
+A portable template with `@SASC_PATH@` / `@PROJECT_PATH@` placeholders; the
+Makefile renders it to `.vamosrc` (do not commit). It maps the `sasc:` and
+`proj:` volumes and the SAS/C assigns vamos needs:
 
 ```ini
 [volumes]
 sasc=@SASC_PATH@
 proj=@PROJECT_PATH@
 tmp=/tmp
-
 [assigns]
 sc=sasc:
 include=sasc:include
 lib=sasc:lib
 t=tmp:
-
 [path]
 path=sc:c
 ```
 
----
+### VS Code
 
-## VS Code Integration
-
-The project can be built from VS Code using the configured tasks.
-
-Recommended tasks:
-
-* `Amiga: Build GCC`
-* `Amiga: Build SAS/C`
-* `Amiga: Build All`
-* `Amiga: Run SAS/C via vamos`
-* `Amiga: Run FS-UAE`
-* `Amiga: Clean`
-
-The VS Code tasks should include both the Amiga GCC path and the `vamos` venv path in `PATH`.
-
-Example:
+`.vscode/tasks.json` provides build/run tasks (Build GCC/SAS-C/All, Run SAS/C
+via vamos, Run FS-UAE, Clean). Their `PATH` must include both the toolchain and
+the vamos venv:
 
 ```json
 "PATH": "${env:HOME}/Developer/AmigaTools/venv-amitools/bin:${env:HOME}/amiga-arm/bin:/opt/homebrew/bin:${env:PATH}"
 ```
 
----
+### Claude Code / AI assistance
 
-## Claude Code / AI-Assisted Development
+`CLAUDE.md` (root) guides AI tools; `new_project.sh` also copies it to
+`.claude/CLAUDE.md` so it is found reliably. Confirm it loaded with `/memory`.
+The key rules it enforces: use AmigaOS APIs via NDK/proto headers; no POSIX,
+SDL, pthreads, or Unix paths; no direct chip/CIA/Copper/Blitter access in normal
+apps; keep shared code C89-clean with explicit prototypes and clear resource
+ownership. `docs/` is a project-agnostic knowledge base carried into every
+clone — see `docs/README.md`.
 
-The repository includes a `CLAUDE.md` file to guide Claude Code.
+### Coding style (shared GCC + SAS/C code)
 
-The file should be placed in the project root:
-
-```text
-CLAUDE.md
-Makefile
-src/
-```
-
-Claude Code should be started with the project root as the VS Code workspace folder.
-
-To verify that Claude Code has loaded the file, use:
-
-```text
-/memory
-```
-
-Recommended AI development rules:
-
-* Use AmigaOS APIs through NDK/proto headers
-* Avoid POSIX APIs unless explicitly requested
-* Avoid SDL, pthreads, fork, mmap, Unix sockets, and Unix paths
-* Avoid direct custom chip, CIA, Copper, Blitter, and audio DMA access for normal Workbench applications
-* Keep SAS/C-compatible modules close to C89/C90
-* Keep function prototypes explicit
-* Avoid GCC-only extensions in shared code
-* Prefer small modules with clear ownership of resources
-
----
-
-## Coding Style
-
-For code intended to compile with both GCC and SAS/C:
-
-* Prefer C89/C90-compatible structure
-* Declare variables at the beginning of blocks
-* Avoid mixed declarations and statements
-* Avoid GCC extensions
-* Use explicit prototypes
-* Use AmigaOS types where appropriate
-* Use `CONST_STRPTR` casts for AmigaOS string APIs when needed
-* Keep platform-specific compiler handling isolated
-
-Example:
+C89/C90 structure: declarations at the top of a block, no mixed
+declarations/statements, no GCC extensions, explicit prototypes, AmigaOS types,
+and `CONST_STRPTR` casts on AmigaOS string APIs where the profiles disagree.
 
 ```c
 #include <exec/types.h>
@@ -662,192 +364,27 @@ int main(void)
 
 ## Troubleshooting
 
-### `vamos: No such file or directory`
+**`vamos: No such file or directory`** — the venv is missing or was copied from
+another Mac (venvs hold absolute paths). Recreate it:
+`ls -l ~/Developer/AmigaTools/venv-amitools/bin/vamos`.
 
-Check whether the venv exists:
+**`bad interpreter: /usr/bin/python`** — an old global `vamos` wrapper is on
+`PATH`. Check `which vamos` / `head -1 $(which vamos)`; use the venv-local one.
 
-```sh
-ls -l ~/Developer/AmigaTools/venv-amitools/bin/vamos
-```
+**`machine68k.Traps` AttributeError** — `amitools` and `machine68k` are out of
+sync. Reinstall both from source into the same venv in editable mode
+(`pip install -U -e .`).
 
-If the venv was copied from another Mac, recreate it. Python virtual environments contain absolute paths and should not be copied between machines.
+**SAS/C builds old code after cloning** — a stale `.vamosrc` points at the old
+project dir. `gmake distclean && gmake sasc` regenerates it.
 
----
+**vamos "NO MEMORY" while compiling** — vamos's RAM ceiling, not your source.
+The Makefile already passes `-H disable -m 16128`; raise `-m` for much larger
+sources.
 
-### `bad interpreter: /usr/bin/python: no such file or directory`
+**Cursor keys don't reach a program in FS-UAE** — the config sets
+`joystick_port_1 = nothing`; also make sure the target window is the *active*
+Intuition window (only it receives keyboard IDCMP).
 
-You are probably running an old global `vamos` wrapper.
-
-Check:
-
-```sh
-which vamos
-head -1 $(which vamos)
-```
-
-If it points to `/usr/local/bin/vamos`, remove or rename the old wrapper and use the venv-local `vamos`.
-
----
-
-### `machine68k.Traps` AttributeError
-
-`amitools` and `machine68k` are out of sync.
-
-Recommended fix:
-
-* install both from source
-* install both into the same venv
-* reinstall both in editable mode
-
-Example:
-
-```sh
-cd ~/Developer/AmigaTools/machine68k
-python -m pip install -U -e .
-
-cd ~/Developer/AmigaTools/amitools
-python -m pip install -U -e .
-```
-
----
-
-### SAS/C builds old code after cloning
-
-Check `.vamosrc`.
-
-If `.vamosrc` points to an old project directory, remove it and regenerate it:
-
-```sh
-gmake distclean
-gmake sasc
-```
-
-`.vamosrc` is generated from `.vamosrc.in` and should not be committed.
-
----
-
-### `vamos` fails with a "NO MEMORY" internal error while compiling
-
-This is a `vamos`-internal RAM ceiling, not a problem with your source: as source files grow, `sc` needs more room to load its own support libraries than `vamos`'s default RAM size provides. `VAMOS_SC`/`VAMOS_SLINK` in the Makefile already pass `-H disable -m 16128` to work around this (also required for a separate, older `slink`/`vamos` pointer-corruption issue -- see the comment above `$(TARGET_SASC)`). If it recurs with much larger sources, try raising `-m` further.
-
----
-
-### Cursor keys or other input don't reach a program in FS-UAE
-
-Some FS-UAE setups default to mapping the keyboard's cursor keys to emulated joystick port 1 instead of passing them through as real keystrokes to the guest OS. The template config already sets `joystick_port_1 = nothing` to disable that; if input still isn't arriving, double check the target window is actually the *active* window in Intuition (only the active window receives keyboard IDCMP messages).
-
----
-
-### FS-UAE cannot find the ROM or HDF
-
-Check:
-
-```sh
-gmake check
-```
-
-Override paths if needed:
-
-```sh
-gmake run-fsuae \
-  KICKSTART_FILE="$HOME/ROMs/kick32.rom" \
-  SYSTEM_HDF="$HOME/HDF/AmigaOS32.hdf"
-```
-
----
-
-## Recommended Repository Hygiene
-
-Commit:
-
-```text
-Makefile
-README.md
-CLAUDE.md
-.vamosrc.in
-.gitignore
-.vscode/tasks.json
-fsuae/project.fs-uae.in
-fsuae/mutools
-src/
-```
-
-Do not commit:
-
-```text
-.vamosrc
-build/
-dist/
-fsuae/local/
-ROMs
-HDFs
-SAS/C installation
-NDK installation
-Python venv
-```
-
-Recommended `.gitignore`:
-
-```gitignore
-# Build artifacts
-build/
-dist/
-
-# Generated local config
-.vamosrc
-fsuae/local/
-
-# Emulator/private files
-*.rom
-*.hdf
-*.adf
-
-# macOS
-.DS_Store
-
-# Backups
-*.bak
-*.bak.*
-*.old
-*.tmp
-```
-
----
-
-## Typical Development Loop
-
-```sh
-gmake clean
-gmake all
-gmake run-sasc
-gmake run-fsuae
-```
-
-Inside AmigaOS:
-
-```text
-DEV:
-execute runme
-```
-
-This gives a compact workflow:
-
-```text
-VS Code → GCC/SAS-C build → vamos CLI test → FS-UAE AmigaOS test
-```
-
----
-
-## Status
-
-Current project capabilities:
-
-* GCC cross-build for AmigaOS 3.2
-* SAS/C build via vamos (with the RAM-size workaround needed for larger sources)
-* Generated local `.vamosrc`
-* Generated FS-UAE config, emulating a 68030+MMU for memory debugging and exposing the serial port over TCP
-* `mutools` MuForce/MuGuardianAngel debug-session starter, copied into `dist/` on every build
-* `dist/` mounted as `DEV:`
-* VS Code build tasks
-* Claude Code project guidance
-* Portable starter structure for cloned projects
+**FS-UAE can't find the ROM or HDF** — run `gmake check`, or override
+`KICKSTART_FILE=` / `SYSTEM_HDF=` on the command line.

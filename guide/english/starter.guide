@@ -1,0 +1,49 @@
+@database "starter.guide"
+@$VER: starter.guide 1.0 (14.7.2026)
+@author You
+@wordwrap
+
+@node Main "starter Help"
+
+@{b}starter@{ub} -- online help.
+
+This is a starter AmigaGuide help file. Replace this text with your own, and
+add nodes for each topic. See @{" AmigaGuide format " link Format} for the
+markup, or @docs/amigaguide-format.md in the project.
+
+@{b}Contents@{ub}
+
+    @{" Getting started       " link GettingStarted}
+    @{" AmigaGuide format      " link Format}
+
+Press the @{b}Help@{ub} key, or choose @{b}Help@{ub} from the Project menu, to
+return here.
+@endnode
+
+@node GettingStarted "Getting started"
+@toc Main
+@next Format
+
+The default language guide is staged by @{b}gmake guides@{ub} both next to the
+program (PROGDIR:) and under HELP:. The Makefile's run scripts assign HELP: to
+DEV:Help so FS-UAE finds it. src/help.c opens the current node on the app's own
+screen.
+
+Next: @{" AmigaGuide format " link Format}
+@endnode
+
+@node Format "AmigaGuide format"
+@toc Main
+@prev GettingStarted
+
+A guide is plain text. A @{b}@@@{ub} in column 0 starts a command; @{b}@@{...}@{ub}
+in body text is an inline attribute.
+
+    @{b}@@node name "title"@{ub}   start a node (link target + window title)
+    @{b}@@endnode@{ub}            end the node
+    @{b}@@{b} ... @@{ub}@{ub}     bold on / off
+    @{b}@@{i} ... @@{ui}@{ub}     italic on / off
+    @{b}@@{"text" link node}@{ub} a clickable link to another node
+
+See @docs/amigaguide-format.md for the full digest.
+@endnode
