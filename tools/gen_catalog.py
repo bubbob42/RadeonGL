@@ -56,8 +56,8 @@ STR_LIT = re.compile(r'"((?:[^"\\]|\\.)*)"')
 # The catcomp message id token must differ from the call-site string token
 # (app_strings.h keeps GAD_PRINT etc. as the redirect macro name), so the .cd
 # entry / numeric id is prefixed. Derived from the project name's initials
-# (LabelMaster -> LM_), which also avoids doubling an existing MSG_ category
-# (MSG_NOTSET -> LM_MSG_NOTSET, not MSG_MSG_NOTSET). Override here if the
+# (MyApp -> MA_), which also avoids doubling an existing MSG_ category
+# (MSG_NOTSET -> MA_MSG_NOTSET, not MSG_MSG_NOTSET). Override here if the
 # derived prefix collides with something in your project.
 CAT_PREFIX = "".join(w[0] for w in
                      re.findall(r'[A-Z][a-z0-9]*|[a-z0-9]+', PROJECT)
