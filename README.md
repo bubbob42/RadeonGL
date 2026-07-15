@@ -14,7 +14,8 @@ application code, and is set up to work well with Claude Code / AI assistance.
 **Contents**
 
 - [Overview & layout](#overview--layout)
-- [Getting started](#getting-started) — prerequisites, first build
+- [Installation](#installation) — set up the toolchain on a fresh Mac
+- [Getting started](#getting-started) — first build
 - [Building & running](#building--running) — targets, profiles, dev loop
 - [Testing & debugging](#testing--debugging) — FS-UAE, MuForce, serial
 - [Project capabilities](#project-capabilities) — new project, versioning, publish, staging, native build
@@ -62,37 +63,108 @@ Generated / machine-specific files are git-ignored and never committed:
 
 ---
 
-## Getting started
+## Installation
 
-### Prerequisites
+A fresh Mac needs two kinds of things: **build tools you install** (the GCC
+cross-toolchain, amitools/vamos, FS-UAE) and **Amiga software you must supply
+yourself from legal sources** (SAS/C, a Kickstart ROM, an AmigaOS 3.2 system
+disk). Each lands at a path the Makefile expects; override any with a `gmake
+VAR=…` assignment (all summarised at the [end of this section](#expected-locations-override-on-the-command-line)).
 
-Host: **macOS on Apple Silicon**, Homebrew under `/opt/homebrew`, and GNU Make
-as `gmake`. The Makefile expects these tool locations (override any with a
-`gmake VAR=…` assignment):
+Host basics: macOS on Apple Silicon with [Homebrew](https://brew.sh) under
+`/opt/homebrew`, and GNU Make as `gmake` (`brew install make`).
 
-| Path | What | Makefile var |
-|---|---|---|
-| `~/amiga-arm` | `m68k-amigaos-gcc` toolchain | `PREFIX` |
-| `~/Developer/AmigaTools/venv-amitools` | `amitools`/`vamos` venv | `VAMOS` |
-| `~/Developer/AmigaSDK/SASC/SC` | SAS/C 6.58 install | `SASC_PATH` |
-| `~/Developer/AmigaEmu/ROMs/kick32.rom` | Kickstart 3.2 ROM | `KICKSTART_FILE` |
-| `~/Developer/AmigaEmu/HDF/AmigaOS32.hdf` | AmigaOS 3.2 system disk | `SYSTEM_HDF` |
-| `/opt/homebrew/bin/fs-uae` | FS-UAE (optional) | `FSUAE` |
+### 1. GCC cross-toolchain → `~/amiga-arm` (`PREFIX`)
 
-> **Legal note:** the AmigaOS ROM, HDF/Workbench, NDK, and SAS/C are **not**
-> included and must not be — supply them yourself from legal sources.
-
-### First build
+`m68k-amigaos-gcc` (with libnix and the bundled NDK headers) is built from
+Bebbo's [amiga-gcc](https://github.com/bebbo/amiga-gcc):
 
 ```sh
-gmake check        # validate that every tool/path above is present
+git clone https://github.com/bebbo/amiga-gcc.git
+cd amiga-gcc
+make update                          # fetch the component sources
+make all PREFIX=$HOME/amiga-arm -j8  # build + install into ~/amiga-arm
+```
+
+See that project's README for its own build prerequisites (a few Homebrew
+packages). This starter was built against GCC 6.5.0b.
+
+### 2. amitools / vamos → `~/Developer/AmigaTools/venv-amitools` (`VAMOS`)
+
+vamos runs the classic SAS/C compiler on the host.
+[amitools](https://github.com/cnvogelg/amitools) and its `machine68k` CPU
+emulator install from source into a virtualenv, editable so they stay in sync:
+
+```sh
+python3 -m venv ~/Developer/AmigaTools/venv-amitools
+source ~/Developer/AmigaTools/venv-amitools/bin/activate
+git clone https://github.com/cnvogelg/machine68k.git && pip install -e machine68k
+git clone https://github.com/cnvogelg/amitools.git   && pip install -e amitools
+```
+
+(If the two drift apart later, see the `machine68k.Traps` fix in
+[Troubleshooting](#troubleshooting).)
+
+### 3. FS-UAE → `/opt/homebrew/bin/fs-uae` (`FSUAE`)
+
+```sh
+brew install fs-uae
+```
+
+Needed only for full-OS testing (`gmake run-fsuae`).
+
+### 4. SAS/C 6.58 → `~/Developer/AmigaSDK/SASC/SC` (`SASC_PATH`)
+
+Supply SAS/C yourself and place its `SC` drawer at that path. vamos maps the
+compiler, includes, and libs from there via `.vamosrc.in` (`sc:`, `include:`,
+`lib:`).
+
+### 5. Kickstart ROM + AmigaOS 3.2 system disk (`KICKSTART_FILE`, `SYSTEM_HDF`)
+
+Supply these legally (AmigaOS 3.2 is sold by Hyperion). Place them at:
+
+```text
+~/Developer/AmigaEmu/ROMs/kick32.rom       # Kickstart 3.2 ROM image
+~/Developer/AmigaEmu/HDF/AmigaOS32.hdf     # AmigaOS 3.2 install as a hard-disk image
+```
+
+Only FS-UAE testing needs these; the GCC/SAS-C builds do not.
+
+### 6. bumprev (optional) → `~/Developer/AmigaTools/bumprev/bumprev` (`BUMPREV`)
+
+Only `gmake release` needs it — the standard AmigaOS `bumprev` tool, run through
+vamos to advance the version. Point `BUMPREV` at your copy, or skip releases.
+
+### Expected locations (override on the command line)
+
+| Path | Component | `gmake` var |
+|---|---|---|
+| `~/amiga-arm` | GCC cross-toolchain | `PREFIX` |
+| `~/Developer/AmigaTools/venv-amitools` | amitools / vamos | `VAMOS` |
+| `~/Developer/AmigaSDK/SASC/SC` | SAS/C 6.58 | `SASC_PATH` |
+| `~/Developer/AmigaEmu/ROMs/kick32.rom` | Kickstart 3.2 ROM | `KICKSTART_FILE` |
+| `~/Developer/AmigaEmu/HDF/AmigaOS32.hdf` | AmigaOS 3.2 system disk | `SYSTEM_HDF` |
+| `/opt/homebrew/bin/fs-uae` | FS-UAE | `FSUAE` |
+
+```sh
+gmake check    # confirms every path resolves; fails on the first missing one
+```
+
+> **Legal note:** the AmigaOS ROM, system disk/Workbench, NDK, and SAS/C are
+> **not** included and must not be committed — supply them from legal sources.
+
+---
+
+## Getting started
+
+With the prerequisites in place:
+
+```sh
+gmake check        # validate the toolchain/paths (run this first on a new machine)
 gmake all          # build both profiles + generate the dist/ helper scripts
 gmake run-sasc     # run the SAS/C binary under vamos (quick CLI smoke test)
 gmake run-fsuae    # build, generate the FS-UAE config, and launch the emulator
 ```
-
-`gmake check` prints the resolved paths and fails on the first missing one, so
-run it before anything else on a fresh machine.
 
 ---
 
