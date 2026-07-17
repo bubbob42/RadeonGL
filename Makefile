@@ -100,7 +100,7 @@ GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run
 
-all: gcc sasc dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalog-check wb-run
+all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalog-check wb-run
 
 # release: advance the revision, then rebuild both profiles so the new $VER is
 # embedded. This is the ONLY target that bumps -- run it by hand when cutting a
