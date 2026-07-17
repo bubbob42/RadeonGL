@@ -286,6 +286,17 @@ Every build regenerates AmigaDOS scripts in `dist/` (= `DEV:`): `runme` (menu),
 `run-gcc`, and `run-sasc` (each assigns `HELP:` and launches its binary). Run a
 binary directly with `DEV:<project>_gcc` / `DEV:<project>_sasc`.
 
+### Desktop run icons (`.backdrop`)
+
+The build also stages two IconX scripts with icons — **Run** (the release
+build) and **RunDebug** (starts MuForce/MuGuardianAngel via `DEV:mutools`,
+then runs the kprintf debug build; read the trace with
+`telnet 127.0.0.1 1234`) — plus a `.backdrop` file in `dist/`. A `.backdrop`
+file in a volume's root lists icons Workbench shows directly on the desktop,
+so both icons appear on the Workbench as soon as `DEV:` mounts. Regenerate
+the icon artwork with `tools/make_run_icons.py` (output-window titles carry
+the project name; `new_project.sh` does this on clone).
+
 ---
 
 ## Project capabilities

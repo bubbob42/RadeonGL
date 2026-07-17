@@ -98,9 +98,9 @@ GCC_WARNINGS := -Wall -Wextra -Wno-pointer-sign -Wno-int-conversion -Werror=impl
 GCC_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 $(CPUFLAGS)
 GCC_LDFLAGS  := -noixemul -lamiga
 
-.PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push
+.PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run
 
-all: gcc sasc dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalog-check
+all: gcc sasc dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalog-check wb-run
 
 # release: advance the revision, then rebuild both profiles so the new $VER is
 # embedded. This is the ONLY target that bumps -- run it by hand when cutting a
@@ -148,6 +148,33 @@ $(TARGET_SASC_DEBUG): $(REV_H) $(SRC_SASC) src/debug.h $(VAMOSRC)
 	mkdir -p build/debug dist
 	$(VAMOS_SC) sc $(SC_OPTS) DEFINE LMDEBUG DEFINE DBG_TAG=$(PROJECT_NAME) NOLINK IDIR=include: IDIR=proj:src/ OBJNAME=proj:build/debug/main_sasc.o proj:$(SRC_SASC)
 	$(VAMOS_SLINK) slink FROM lib:c.o proj:build/debug/main_sasc.o TO proj:$(TARGET_SASC_DEBUG) LIB lib:sc.lib lib:amiga.lib lib:debug.lib
+
+# --- Workbench desktop run scripts -------------------------------------------
+# Two IconX scripts staged on DEV: with icons and a .backdrop file. A .backdrop
+# file in a volume's ROOT lists icons (one path per line, relative to the root)
+# that Workbench shows directly on the desktop -- so when DEV: mounts, both
+# icons sit on the Workbench ready to double-click:
+#   Run      -- runs the release (GCC) build.
+#   RunDebug -- starts MuForce/MuGuardianAngel (DEV:mutools), then runs the
+#               kprintf debug build; trace via `telnet 127.0.0.1 1234`.
+# The icons (icons/run*.info, regenerate with tools/make_run_icons.py) carry
+# C:IconX as default tool and a WINDOW tooltype so output stays visible.
+# NOTE: this rule must stay below the TARGET_GCC_DEBUG definition --
+# prerequisites expand when the rule is read.
+wb-run: $(TARGET_GCC) $(TARGET_GCC_DEBUG) dist/mutools
+	@mkdir -p dist
+	@printf 'echo "Running $(PROJECT_NAME)..."\n' > dist/Run
+	@printf 'DEV:%s\n' "$(notdir $(TARGET_GCC))" >> dist/Run
+	@printf 'echo "Done."\n' >> dist/Run
+	@printf 'echo "Starting MuForce/MuGuardianAngel (trace: telnet 127.0.0.1 1234)..."\n' > dist/RunDebug
+	@printf 'execute DEV:mutools\n' >> dist/RunDebug
+	@printf 'echo "Running the kprintf debug build..."\n' >> dist/RunDebug
+	@printf 'DEV:%s\n' "$(notdir $(TARGET_GCC_DEBUG))" >> dist/RunDebug
+	@printf 'echo "Done. The serial trace is on telnet 127.0.0.1:1234."\n' >> dist/RunDebug
+	@if [ -f icons/run.info ]; then cp icons/run.info dist/Run.info; fi
+	@if [ -f icons/rundebug.info ]; then cp icons/rundebug.info dist/RunDebug.info; fi
+	@printf 'Run\nRunDebug\n' > dist/.backdrop
+	@echo "wb-run: staged Run + RunDebug icons (+ .backdrop) on DEV:"
 
 $(VAMOSRC): .vamosrc.in
 	sed \
