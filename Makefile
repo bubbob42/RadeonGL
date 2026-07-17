@@ -402,7 +402,10 @@ distclean: clean
 # trap guarantees cleanup even if the copy fails). The copy is additive and uses
 # cp -X so macOS extended attributes / resource forks (which SMB rejects) are
 # not copied. Finder cruft (.DS_Store, AppleDouble "._*") is purged from dist/
-# first -- cp -X strips xattrs but not those regular sidecar files. macOS only.
+# BEFORE the copy (cp -X strips xattrs but not those regular sidecar files) and
+# from the TARGET drawer AFTER it -- the copy is additive, so cruft dropped on
+# the share earlier (e.g. by Finder drag-copies) would otherwise stay there
+# forever and show up as real files on the Amiga. macOS only.
 push: all
 	@if [ -z "$(SMB_HOST)" ] || [ -z "$(SMB_SHARE)" ]; then \
 		echo "push: no SMB share configured."; \
@@ -427,4 +430,5 @@ push: all
 	mkdir -p "$$base/$(SMB_DIR)" || { echo "ERROR: cannot create '$(SMB_DIR)' on the share"; exit 1; }; \
 	echo "Copying dist/ -> $$share/$(SMB_DIR) ..."; \
 	cp -RX dist/. "$$base/$(SMB_DIR)/" || { echo "ERROR: copy failed"; exit 1; }; \
+	find "$$base/$(SMB_DIR)" \( -name '.DS_Store' -o -name '._*' \) -delete 2>/dev/null; \
 	echo "Pushed $(PROJECT_NAME) to $$share/$(SMB_DIR)."
