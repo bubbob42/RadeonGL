@@ -188,14 +188,22 @@ gmake run-fsuae    # build, generate the FS-UAE config, and launch the emulator
 
 ### Compiler profiles
 
-**GCC** builds with `-m68000 -Os -std=gnu99 -noixemul -lamiga`. Warnings are
-`-Wall -Wextra` with `-Wno-pointer-sign` and `-Wno-int-conversion` suppressed
-(the classic NDK inlines produce false positives on those), and
+**GCC** builds with `-m68000 -Os -std=gnu99 -msasregparm -noixemul -lamiga`.
+Warnings are `-Wall -Wextra` with `-Wno-pointer-sign` and `-Wno-int-conversion`
+suppressed (the classic NDK inlines produce false positives on those), and
 `-Werror=implicit-function-declaration` kept fatal.
 
 **SAS/C** runs `sc`/`slink` through vamos. Both steps get `-H disable -m 16128`
 to work around vamos's default RAM ceiling on larger sources (see the comment
 above `$(TARGET_SASC)` in the Makefile).
+
+Both profiles pass function arguments in **registers** rather than on the stack
+— the natural 680x0 convention (`PARAMETERS=REGISTERS` in `SC_OPTS`,
+`-msasregparm` in `GCC_CFLAGS`, the SAS/C-compatible variant so the two profiles
+share one ABI). It is applied to every build, debug included. See
+[docs/compiler-usage.md](docs/compiler-usage.md) for why this is safe and the one
+exception — a `DEVS:Printers` driver's `Render`/`DoSpecial`/`ConvFunc` entry
+points must stay on the C stack convention (`SC_DRIVER_OPTS`).
 
 #### SAS/C stack checking (`NOSTACKCHECK`) and GUI stacks
 

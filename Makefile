@@ -40,7 +40,22 @@ VAMOS_SLINK := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
 # install such callbacks should turn the check off and instead guarantee an
 # adequate stack with a "$STACK: <bytes>" cookie (see README). Harmless for
 # plain CLI tools. Applied to every sc compile below.
-SC_OPTS := NOSTACKCHECK
+#
+# PARAMETERS=REGISTERS: pass function arguments in registers instead of on the
+# stack -- the natural 680x0 convention. Fewer pushes at every call site, less
+# stack traffic ("stack ping-pong"), and shallower call depth. SAS/C's own
+# manual recommends it for fully-prototyped programs (which these are, by house
+# style). GCC's matching flag is -msasregparm below: the SAME convention (ints
+# in d0/d1, pointers in a0/a1), so both profiles share one calling ABI.
+#
+# Safe because every cross-module boundary already pins its own convention:
+# OS API calls are register-pinned by the proto/inline headers; C-runtime calls
+# keep their own convention (sc.lib accepts both; the gcc headers mark libc
+# __stdargs); BOOPSI/hook dispatchers pin registers with __saveds __asm /
+# __asm("aN"). Only calls between our own functions change, and those are
+# uniform within each binary. In SC_OPTS (not the release-only optimiser flags)
+# so it applies to ALL builds -- the debug ABI then matches what ships.
+SC_OPTS := NOSTACKCHECK PARAMETERS=REGISTERS
 
 SASC_PATH ?= $(HOME)/Developer/AmigaSDK/SASC/SC
 
@@ -95,7 +110,15 @@ CPUFLAGS ?= -m68000
 # passing a pointer (e.g. a "%s" string) trips -Wint-conversion on every call.
 # Suppress it at the build level instead of casting every vararg in source.
 GCC_WARNINGS := -Wall -Wextra -Wno-pointer-sign -Wno-int-conversion -Werror=implicit-function-declaration
-GCC_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 $(CPUFLAGS)
+# -msasregparm: register-based parameter passing, the SAS/C-compatible variant
+# (integer args in d0/d1, pointers in a0/a1, the rest on the stack) -- the same
+# calling convention as the SAS/C profile's PARAMETERS=REGISTERS (see SC_OPTS).
+# The 680x0 register convention: fewer arg pushes at each call site and less
+# stack traffic. Only calls between our own functions are affected -- OS calls
+# stay register-pinned via the inline headers and libc calls stay stack-pinned
+# via their __stdargs declarations. In GCC_CFLAGS (shared by the release and
+# debug rules) so it applies to ALL builds, matching the SAS/C side.
+GCC_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm $(CPUFLAGS)
 GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run
@@ -316,20 +339,45 @@ catalogs:
 		echo "catalogs: $(LOCALE_CD) not found -- nothing to stage"; \
 	fi
 
-# catalog-check: warn when a built .catalog is OLDER than its sources (a stale
-# catalog shows on screen as misaligned or English text). Quiet when nothing is
-# built yet or LOCALE_LANGS is empty; never fatal. Folded into `all`.
+# catalog-check: warn when a built .catalog does not match the binary that will
+# ask for it (a stale catalog maps ids to the WRONG strings -- and a shifted
+# format string feeds wrong arguments into RawDoFmt, seen as a MuForce hit storm
+# on real hardware). Quiet when nothing is built yet or LOCALE_LANGS is empty;
+# never fatal. Folded into `all`.
+#
+# ⚠ NOT a timestamp comparison. CatComp runs inside FS-UAE, which stamps the
+# file with the EMULATED clock -- so a freshly built catalog reads as older than
+# its sources and the warning fired after every correct rebuild. A check that
+# cries wolf is one you learn to scroll past, and then it misses the real case.
+#
+# What is compared instead is the thing that actually decides at run time:
+# gen_catalog.py stamps an id-layout fingerprint into src/app_catver.h as
+# PDFP_CATALOG_SIG ("<PREFIX>CAT-<n>") and into every .catalog as its id-0
+# string, and OpenCatalog matches the version EXACTLY. So if the built catalog
+# contains that literal signature it is current, whatever its date says. Reading
+# the signature out of the header keeps this project-agnostic -- no prefix and
+# no version number is hardcoded here.
+CATVER_H := src/app_catver.h
+
 catalog-check:
-	@for lang in $(LOCALE_LANGS); do \
+	@sig=""; \
+	if [ -f "$(CATVER_H)" ]; then \
+		sig=`sed -n 's/^#define [A-Z0-9_]*_CATALOG_SIG[ 	]*"\(.*\)"/\1/p' \
+		     "$(CATVER_H)" | head -1`; \
+	fi; \
+	for lang in $(LOCALE_LANGS); do \
 		built="dist/Catalogs/$$lang/$(LOCALE_CATNAME)"; \
-		ct="catalogs/$$lang/$(PROJECT_NAME).ct"; \
-		if [ -f "$$built" ]; then \
-			if [ "$(LOCALE_CD)" -nt "$$built" ] || [ "$$ct" -nt "$$built" ]; then \
-				echo "WARNING: $$built is older than its sources -- rebuild it:"; \
+		if [ -f "$$built" ] && [ -n "$$sig" ]; then \
+			if ! LC_ALL=C grep -a -q -F "$$sig" "$$built"; then \
+				have=`LC_ALL=C grep -a -o -E '[A-Z0-9]+CAT-[0-9]+' "$$built" \
+				      | head -1`; \
+				echo "WARNING: $$built is STALE -- rebuild it:"; \
+				echo "  the binary asks for '$$sig', the catalog carries '$${have:-none}'"; \
 				echo "  'gmake catalogs' then 'execute DEV:gencat' in FS-UAE"; \
 			fi; \
 		fi; \
 	done
+
 
 run-sasc: $(TARGET_SASC)
 	$(VAMOS) -c $(VAMOSRC) -q proj:$(TARGET_SASC)

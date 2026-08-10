@@ -23,7 +23,12 @@ SRCS = main_sasc.c
 # such as BOOPSI/ReAction class dispatchers (it corrupts the task stack). Turn
 # it off and size the stack with a "$STACK: <bytes>" cookie instead (see
 # README). Harmless for plain CLI tools.
-SCOPTS = NOSTACKCHECK
+# PARAMETERS=REGISTERS: pass arguments in registers, the natural 680x0
+# convention (fewer stack pushes, less stack traffic). SAS/C recommends it for
+# fully-prototyped code; OS calls, C-runtime calls and BOOPSI dispatchers each
+# pin their own convention, so only our own calls change. Matches the host
+# build's SC_OPTS and the GCC profile's -msasregparm.
+SCOPTS = NOSTACKCHECK PARAMETERS=REGISTERS
 
 .SUFFIXES: .c .o
 
