@@ -29,8 +29,8 @@
 (set #minos 37)
 (set #os (/ (getversion) 65536))
 (if (< #os #minos)
-    (abort ("@PROJECT_NAME@ requires AmigaOS V%ld or newer.\n"
-            "This system reports Kickstart V%ld.\n" #minos #os))
+    (abort ("@PROJECT_NAME@ requires AmigaOS V%ld or newer.\n" #minos)
+           ("This system reports Kickstart V%ld.\n" #os))
 )
 
 ; --- which program file to install -----------------------------------------

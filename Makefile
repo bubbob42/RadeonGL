@@ -29,6 +29,9 @@ VAMOSRC := .vamosrc
 # -H disable is required alongside the larger RAM size -- vamos refuses
 # "too much RAM allocated with hw access enabled" otherwise. Give both the
 # compile and link steps the same generous allowance.
+# Host python, for the tools/ helpers (tools/check_installer.py below).
+PYTHON      ?= python3
+
 VAMOS_SC    := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
 VAMOS_SLINK := $(VAMOS) -c $(VAMOSRC) -q -H disable -m 16128
 
@@ -123,7 +126,7 @@ GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run
 
-all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalog-check wb-run
+all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run
 
 # release: advance the revision, then rebuild both profiles so the new $VER is
 # embedded. This is the ONLY target that bumps -- run it by hand when cutting a
@@ -289,9 +292,25 @@ guides:
 # icon into dist/, so on the Amiga the user double-clicks the Install icon.
 # Regenerate the icon with tools/make_install_icon.py.
 installer:
+	@# Lint before staging. The trap it guards -- a multi-line message wrapped
+	@# in the substitution form, where every line after the first silently
+	@# becomes an ARGUMENT to the first -- still parses and still shows a page,
+	@# so nothing downstream notices. It was in THIS template's own version
+	@# check, and every project generated from here inherited it.
+	@#
+	@# The shipped copy also carries NO comments. They are engineering notes
+	@# and belong in the file that is maintained, not in the one a user opens
+	@# out of curiosity.
+	@#
+	@# Stripped by the linter, NEVER by sed: ';' only starts a comment OUTSIDE
+	@# a string, so 's/;.*//' cuts any prompt containing one in half -- and
+	@# silently, because the result still parses.
+	@if [ -f install/Install ]; then $(PYTHON) tools/check_installer.py install/Install; fi
 	@if [ -f install/Install ]; then \
 		mkdir -p dist; \
-		sed -e 's|@PROJECT_NAME@|$(PROJECT_NAME)|g' install/Install > dist/Install; \
+		$(PYTHON) tools/check_installer.py --strip install/Install > dist/.Install.tmp; \
+		sed -e 's|@PROJECT_NAME@|$(PROJECT_NAME)|g' dist/.Install.tmp > dist/Install; \
+		rm -f dist/.Install.tmp; \
 		if [ -f install/Install.info ]; then cp install/Install.info dist/Install.info; fi; \
 		echo "installer: staged DEV:Install"; \
 	fi
@@ -310,12 +329,20 @@ rexx-examples:
 # generate it from your app_strings.h with tools/gen_catalog.py) and one
 # catalogs/<lang>/$(PROJECT_NAME).ct per language in LOCALE_LANGS.
 #
-# CatComp needs iffparse.library and only runs INSIDE FS-UAE (not vamos), so
-# `gmake catalogs` just STAGES the inputs into dist/Catalogs (converting UTF-8
-# to the Amiga's ISO-8859-1) and writes DEV:gencat, an AmigaDOS script that runs
-# CatComp for every language. Then, inside AmigaOS:  execute DEV:gencat
-# which writes dist/Catalogs/<lang>/$(PROJECT_NAME).catalog. Not in `all` (it
-# needs the manual FS-UAE step); run it explicitly when strings change.
+# The .catalog files are built HERE, on the host, by tools/make_catalog.py --
+# so a translation change reaches the package in the same build that changed
+# it. That used to need FS-UAE (the Amiga's CatComp wants iffparse.library,
+# which vamos cannot provide), and the round trip was silent when skipped: a
+# WORDING change does not move the catalog version fingerprint, so a stale
+# .catalog still loads, still passes every guard, and simply shows the previous
+# translation. One project in this family went further and shipped a whole
+# release in English that way, with nothing in the build to say so.
+#
+# The generator is byte-compatible with the Amiga tool -- verified by
+# reproducing catalogs CatComp built, exactly, from the same descriptor and
+# translation (tools/make_catalog.py --compare). The .cd/.ct sources and the
+# DEV:gencat script are still staged, so the on-Amiga route stays available as
+# a cross-check.
 catalogs:
 	@if [ -f $(LOCALE_CD) ]; then \
 		mkdir -p dist/Catalogs; \
@@ -324,6 +351,9 @@ catalogs:
 			mkdir -p dist/Catalogs/$$lang; \
 			iconv -f UTF-8 -t ISO-8859-1 catalogs/$$lang/$(PROJECT_NAME).ct \
 				> dist/Catalogs/$$lang/$(PROJECT_NAME).ct; \
+			$(PYTHON) tools/make_catalog.py $(LOCALE_CD) \
+				catalogs/$$lang/$(PROJECT_NAME).ct \
+				dist/Catalogs/$$lang/$(LOCALE_CATNAME) || exit 1; \
 		done; \
 		printf '; gencat -- build %s message catalogs (run inside AmigaOS)\n' "$(PROJECT_NAME)" > dist/gencat; \
 		printf 'echo "Building message catalogs..."\n' >> dist/gencat; \
@@ -333,8 +363,7 @@ catalogs:
 			printf 'echo "  %s/%s"\n' "$$lang" "$(LOCALE_CATNAME)" >> dist/gencat; \
 		done; \
 		printf 'echo "Done."\n' >> dist/gencat; \
-		echo "catalogs: staged sources + DEV:gencat for: $(LOCALE_LANGS)"; \
-		echo "  inside FS-UAE run:  execute DEV:gencat"; \
+		echo "catalogs: built + staged for: $(LOCALE_LANGS) (sources + DEV:gencat too)"; \
 	else \
 		echo "catalogs: $(LOCALE_CD) not found -- nothing to stage"; \
 	fi
@@ -345,14 +374,17 @@ catalogs:
 # on real hardware). Quiet when nothing is built yet or LOCALE_LANGS is empty;
 # never fatal. Folded into `all`.
 #
-# ⚠ NOT a timestamp comparison. CatComp runs inside FS-UAE, which stamps the
-# file with the EMULATED clock -- so a freshly built catalog reads as older than
-# its sources and the warning fired after every correct rebuild. A check that
-# cries wolf is one you learn to scroll past, and then it misses the real case.
+# ⚠ NOT a timestamp comparison. This dates from when CatComp ran inside FS-UAE,
+# which stamps the file with the EMULATED clock -- so a freshly built catalog
+# read as older than its sources and the warning fired after every correct
+# rebuild. A check that cries wolf is one you learn to scroll past, and then it
+# misses the real case. The host builder makes the dates honest again, but the
+# signature is still the better test: it compares what actually decides at run
+# time, and it keeps working for a catalog built the on-Amiga way.
 #
 # What is compared instead is the thing that actually decides at run time:
 # gen_catalog.py stamps an id-layout fingerprint into src/app_catver.h as
-# PDFP_CATALOG_SIG ("<PREFIX>CAT-<n>") and into every .catalog as its id-0
+# <PREFIX>_CATALOG_SIG ("<PREFIX>CAT-<n>") and into every .catalog as its id-0
 # string, and OpenCatalog matches the version EXACTLY. So if the built catalog
 # contains that literal signature it is current, whatever its date says. Reading
 # the signature out of the header keeps this project-agnostic -- no prefix and
@@ -373,7 +405,8 @@ catalog-check:
 				      | head -1`; \
 				echo "WARNING: $$built is STALE -- rebuild it:"; \
 				echo "  the binary asks for '$$sig', the catalog carries '$${have:-none}'"; \
-				echo "  'gmake catalogs' then 'execute DEV:gencat' in FS-UAE"; \
+				echo "  run 'gmake catalogs' (regenerate the .cd with"; \
+				echo "   tools/gen_catalog.py first if you edited src/app_strings.h)"; \
 			fi; \
 		fi; \
 	done
