@@ -19,10 +19,10 @@ substituted and the whole rest of the message vanishes silently.
 
 It is invisible in review because the two forms differ by one character, and
 invisible in testing unless somebody reads the finished page word for word.
-PDFPrinter shipped four of them at once -- a version-requirement abort that
-never named the version, a help hint cut off mid-sentence, and both closing
-pages reduced to "The PDF driver was You can find the Preferences Editor in
-%s." That is what this exists to catch.
+One shipped release carried four of them at once -- a version-requirement
+abort that never named the version, a help hint cut off mid-sentence, and both
+closing pages reduced to "The driver was You can find the Preferences Editor
+in %s." That is what this exists to catch.
 
 THE RULE. A substitution form with more than one TOP-LEVEL string literal in
 it is almost certainly a concatenation that wanted to be one. Nested forms are

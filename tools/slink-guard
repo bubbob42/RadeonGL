@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# slink-guard -- run a vamos slink that is allowed to crash OR HANG in its
+# exit path after writing a complete executable.
+#
+# slink 6.57 under vamos corrupts an internal pointer when a link combines
+# cross-object calls with a larger amiga.lib symbol set (starter commit
+# ea461ed). Two variants have been met in the field. The CRASH variant:
+# slink faults after the output file is already complete (guardable with
+# `|| true` plus `test -s`). The HANG variant of the same pathology: vamos
+# spins at 100% CPU forever after the file is written (observed: a
+# complete, runnable binary on disk while slink burned CPU-hours).
+#
+# This guard covers both: run slink, and
+#   - normal exit  -> require the output file, done;
+#   - crash        -> require the output file, done;
+#   - still running at the deadline -> if the output file exists and has
+#     been stable for a few seconds, kill the linker and call it a
+#     success; otherwise it is a real failure.
+#
+# Usage: slink-guard <output-file> <deadline-secs> <command...>
+
+OUT="$1"; shift
+LIMIT="$1"; shift
+
+rm -f "$OUT"
+
+"$@" &
+PID=$!
+
+SECS=0
+while kill -0 "$PID" 2>/dev/null; do
+    sleep 1
+    SECS=$((SECS + 1))
+    if [ "$SECS" -ge "$LIMIT" ]; then
+        if [ -s "$OUT" ]; then
+            AGE=$(( $(date +%s) - $(stat -f %m "$OUT" 2>/dev/null || echo 0) ))
+            if [ "$AGE" -ge 5 ]; then
+                echo "slink-guard: $OUT written; killing slink stuck in its exit path"
+                kill -9 "$PID" 2>/dev/null
+                wait "$PID" 2>/dev/null
+                exit 0
+            fi
+        fi
+        echo "slink-guard: deadline (${LIMIT}s) with no stable $OUT -- real failure"
+        kill -9 "$PID" 2>/dev/null
+        wait "$PID" 2>/dev/null
+        exit 1
+    fi
+done
+
+wait "$PID" 2>/dev/null
+test -s "$OUT" || { echo "slink-guard: slink produced no $OUT"; exit 1; }
+exit 0

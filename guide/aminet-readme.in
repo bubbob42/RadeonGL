@@ -1,0 +1,68 @@
+Short:        What it does, in one line (40 max)
+Uploader:     you@example.com (Your Name)
+Author:       you@example.com (Your Name)
+Type:         util/misc
+Version:      @VERSION@
+Architecture: m68k-amigaos >= 3.0
+Distribution: Aminet
+Requires:     AmigaOS 3.0 or newer. 68000.
+Kurz:         Dasselbe auf Deutsch (40 Zeichen)
+
+MyApp @VERSION@  --  @DATE@
+
+
+; ---------------------------------------------------------------------------
+; This is the Aminet .readme template. tools/make_aminet_readme.py renders it
+; into dist/aminet/<project>.readme, substituting only @VERSION@ and @DATE@
+; (read from src/<project>_rev.h, so the readme cannot claim a version the
+; binaries do not have), and then validates the result against Aminet's rules.
+;
+; Edit the prose here, never the generated file. Delete these comment lines --
+; Aminet has no comment syntax, and the header must be followed by the body.
+;
+; The rules the generator enforces, so you know what it will reject:
+;   * Short:, Uploader:, Type: and Architecture: are mandatory.
+;   * Short:/Kurz: are at most 40 characters; they go in the index and say
+;     what the program DOES -- not its version and not its platform, which
+;     have fields of their own.
+;   * Type: must be an Aminet top-level directory plus a subdirectory.
+;   * Distribution: is exactly "Aminet" or "NoCD".
+;   * Lines are at most 78 characters, ASCII, ending in a bare linefeed.
+;   * The header ends at the FIRST BLANK LINE; a field below that is body text
+;     as far as Aminet is concerned and will not be seen.
+; ---------------------------------------------------------------------------
+
+
+WHAT IT IS
+
+A sentence or two on what the program is, for a reader who has only seen
+the one-line Short: in the index.
+
+
+WHAT IT DOES
+
+  * The features, as a short list
+  * Each one a line, in the order a user meets them
+
+
+WHAT IT NEEDS
+
+The OS version, the CPU, and anything that must already be installed.
+Be specific about what happens on a machine that has less.
+
+
+INSTALLING
+
+Unpack, open the drawer and double-click Install.
+
+
+LICENCE
+
+Say whether it may be redistributed, including on Aminet CDs and
+coverdisks, and name the licence of anything bundled that has one of its
+own.
+
+
+THANKS
+
+To whoever earned it.

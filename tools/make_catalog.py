@@ -120,8 +120,8 @@ def take_string_line(lines, i, path, what):
     """The string that follows a header line, and the index after it.
 
     Whatever is on the line IS the string -- there are no comments in this
-    position, so a string may perfectly well begin with ';' or '#' (AmiMatters
-    has "#%s - %ld post(s)"). A line ending in a backslash continues onto the
+    position, so a string may perfectly well begin with ';' or '#' (one real
+    catalog has "#%s - %ld post(s)"). A line ending in a backslash continues onto the
     next one, the backslash dropped.
     """
     if i >= len(lines):
