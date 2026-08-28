@@ -14,6 +14,15 @@ KICKSTART_FILE ?= $(HOME)/Developer/AmigaEmu/ROMs/kick32.rom
 SYSTEM_HDF     ?= $(HOME)/Developer/AmigaEmu/HDF/AmigaOS32.hdf
 PROJECT_DIST   := $(CURDIR)/dist
 
+# OPTIONAL Kickstart 1.3 / plain-68000 test machine (gmake run-fsuae13): its own
+# ROM, hardfile and FS-UAE template, separate from the 3.x machine above, for
+# checking that a program really runs on 1.3. Entirely optional -- `gmake check`
+# reports these paths but never fails on them, and nothing in `all` needs them.
+KICKSTART13_FILE ?= $(HOME)/Developer/AmigaEmu/ROMs/kick13.rom
+SYSTEM13_HDF     ?= $(HOME)/Developer/AmigaEmu/HDF/AmigaOS13.hdf
+FSUAE_TEMPLATE13 := fsuae/project13.fs-uae.in
+FSUAE_CONFIG13   := fsuae/local/$(PROJECT_NAME)-13.fs-uae
+
 PREFIX ?= $(HOME)/amiga-arm
 
 GCC_CC      := $(PREFIX)/bin/m68k-amigaos-gcc
@@ -105,7 +114,12 @@ SRC_GCC  := src/main.c
 SRC_SASC := src/main_sasc.c
 OBJ_SASC := build/main_sasc.o
 
-CPUFLAGS ?= -m68000
+# 68000 is the project baseline and what every ordinary target builds. The
+# OPTIONAL per-CPU variant targets at the bottom re-enter make with CPU=<n>
+# set; nothing else does, so the default is unchanged. An explicit
+# CPUFLAGS=... on the command line still wins over both.
+CPU      ?=
+CPUFLAGS ?= -m$(if $(CPU),$(CPU),68000)
 
 # -Wno-int-conversion: like -Wno-pointer-sign, this silences a false positive
 # from the classic NDK inlines rather than a real bug. The AmigaOS varargs
@@ -124,7 +138,7 @@ GCC_WARNINGS := -Wall -Wextra -Wno-pointer-sign -Wno-int-conversion -Werror=impl
 GCC_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm $(CPUFLAGS)
 GCC_LDFLAGS  := -noixemul -lamiga
 
-.PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run
+.PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config13 launch-fsuae13 run-fsuae13 info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run release-stage release-drawer release-archive release-lha release-adf release-aminet release-verify release-dist
 
 all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run
 
@@ -176,31 +190,58 @@ $(TARGET_SASC_DEBUG): $(REV_H) $(SRC_SASC) src/debug.h $(VAMOSRC)
 	$(VAMOS_SLINK) slink FROM lib:c.o proj:build/debug/main_sasc.o TO proj:$(TARGET_SASC_DEBUG) LIB lib:sc.lib lib:amiga.lib lib:debug.lib
 
 # --- Workbench desktop run scripts -------------------------------------------
-# Two IconX scripts staged on DEV: with icons and a .backdrop file. A .backdrop
-# file in a volume's ROOT lists icons (one path per line, relative to the root)
-# that Workbench shows directly on the desktop -- so when DEV: mounts, both
-# icons sit on the Workbench ready to double-click:
+# Three IconX scripts staged on DEV: with icons and a .backdrop file. A
+# .backdrop file in a volume's ROOT lists icons (one path per line, relative to
+# the root) that Workbench shows directly on the desktop -- so when DEV:
+# mounts, the icons sit on the Workbench ready to double-click:
 #   Run      -- runs the release (GCC) build.
 #   RunDebug -- starts MuForce/MuGuardianAngel (DEV:mutools), then runs the
 #               kprintf debug build; trace via `telnet 127.0.0.1 1234`.
-# The icons (icons/run*.info, regenerate with tools/make_run_icons.py) carry
-# C:IconX as default tool and a WINDOW tooltype so output stays visible.
+#   MuTools  -- starts MuForce/MuGuardianAngel and nothing else, so ANY other
+#               icon can then be run guarded.
+# The icons (icons/run*.info, icons/mutools.info -- regenerate with
+# tools/make_run_icons.py) carry C:IconX as default tool and a WINDOW tooltype
+# so output stays visible.
+#
+# ⚠ EVERY script starts with `Assign >NIL: DEV: ""`. IconX makes the icon's own
+# drawer the current directory, so this makes DEV: mean "wherever this script
+# lives" -- and a dist/ drawer simply COPIED onto real hardware then resolves
+# its DEV: paths unchanged, with no assign to set up by hand. Under FS-UAE it
+# reassigns DEV: to the place it already is, so nothing changes there.
+#
+# Whenever the user is asked to test something in the emulator or on hardware,
+# stage it this way: binaries, volumes and arguments baked in, so they
+# double-click an icon instead of typing paths into the emulated Shell. Name a
+# script after what it proves and keep the icon name stable as its contents
+# change. A test script must also INSTALL what it tests -- one that only opens
+# something exercises whatever build is already resident and reports the old
+# behaviour, convincingly.
+#
 # NOTE: this rule must stay below the TARGET_GCC_DEBUG definition --
 # prerequisites expand when the rule is read.
+WB_ASSIGN_DEV := Assign >NIL: DEV: ""
+
 wb-run: $(TARGET_GCC) $(TARGET_GCC_DEBUG) dist/mutools
 	@mkdir -p dist
-	@printf 'echo "Running $(PROJECT_NAME)..."\n' > dist/Run
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Run
+	@printf 'echo "Running $(PROJECT_NAME)..."\n' >> dist/Run
 	@printf 'DEV:%s\n' "$(notdir $(TARGET_GCC))" >> dist/Run
 	@printf 'echo "Done."\n' >> dist/Run
-	@printf 'echo "Starting MuForce/MuGuardianAngel (trace: telnet 127.0.0.1 1234)..."\n' > dist/RunDebug
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/RunDebug
+	@printf 'echo "Starting MuForce/MuGuardianAngel (trace: telnet 127.0.0.1 1234)..."\n' >> dist/RunDebug
 	@printf 'execute DEV:mutools\n' >> dist/RunDebug
 	@printf 'echo "Running the kprintf debug build..."\n' >> dist/RunDebug
 	@printf 'DEV:%s\n' "$(notdir $(TARGET_GCC_DEBUG))" >> dist/RunDebug
 	@printf 'echo "Done. The serial trace is on telnet 127.0.0.1:1234."\n' >> dist/RunDebug
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/MuTools
+	@printf 'echo "Starting MuForce/MuGuardianAngel..."\n' >> dist/MuTools
+	@printf 'execute DEV:mutools\n' >> dist/MuTools
+	@printf 'echo "Loaded. Run anything now -- hits go to telnet 127.0.0.1:1234."\n' >> dist/MuTools
 	@if [ -f icons/run.info ]; then cp icons/run.info dist/Run.info; fi
 	@if [ -f icons/rundebug.info ]; then cp icons/rundebug.info dist/RunDebug.info; fi
-	@printf 'Run\nRunDebug\n' > dist/.backdrop
-	@echo "wb-run: staged Run + RunDebug icons (+ .backdrop) on DEV:"
+	@if [ -f icons/mutools.info ]; then cp icons/mutools.info dist/MuTools.info; fi
+	@printf 'Run\nRunDebug\nMuTools\n' > dist/.backdrop
+	@echo "wb-run: staged Run + RunDebug + MuTools icons (+ .backdrop) on DEV:"
 
 $(VAMOSRC): .vamosrc.in
 	sed \
@@ -276,13 +317,19 @@ dist-icons:
 guides:
 	@if [ -f guide/$(GUIDE_DEFAULT_LANG)/$(PROJECT_NAME).guide ]; then \
 		mkdir -p dist dist/Help; \
-		cp guide/$(GUIDE_DEFAULT_LANG)/$(PROJECT_NAME).guide dist/$(PROJECT_NAME).guide; \
-		cp guide/$(GUIDE_DEFAULT_LANG)/$(PROJECT_NAME).guide dist/Help/$(PROJECT_NAME).guide; \
+		iconv -f UTF-8 -t ISO-8859-1 guide/$(GUIDE_DEFAULT_LANG)/$(PROJECT_NAME).guide > dist/$(PROJECT_NAME).guide; \
+		cp dist/$(PROJECT_NAME).guide dist/Help/$(PROJECT_NAME).guide; \
+		if [ -f icons/guide.info ]; then \
+			cp icons/guide.info dist/$(PROJECT_NAME).guide.info; \
+		fi; \
 		echo "guides: staged PROGDIR: + HELP:$(PROJECT_NAME).guide ($(GUIDE_DEFAULT_LANG))"; \
 		for lang in $(GUIDE_LANGS); do \
 			if [ -f guide/$$lang/$(PROJECT_NAME).guide ]; then \
 				mkdir -p dist/Help/$$lang; \
-				cp guide/$$lang/$(PROJECT_NAME).guide dist/Help/$$lang/$(PROJECT_NAME).guide; \
+				iconv -f UTF-8 -t ISO-8859-1 guide/$$lang/$(PROJECT_NAME).guide > dist/Help/$$lang/$(PROJECT_NAME).guide; \
+				if [ -f icons/guide.info ]; then \
+					cp icons/guide.info dist/Help/$$lang/$(PROJECT_NAME).guide.info; \
+				fi; \
 				echo "guides: staged HELP:$$lang/$(PROJECT_NAME).guide"; \
 			fi; \
 		done; \
@@ -363,7 +410,12 @@ catalogs:
 			printf 'echo "  %s/%s"\n' "$$lang" "$(LOCALE_CATNAME)" >> dist/gencat; \
 		done; \
 		printf 'echo "Done."\n' >> dist/gencat; \
-		echo "catalogs: built + staged for: $(LOCALE_LANGS) (sources + DEV:gencat too)"; \
+		if [ -n "$(strip $(LOCALE_LANGS))" ]; then \
+			echo "catalogs: built + staged for: $(LOCALE_LANGS) (sources + DEV:gencat too)"; \
+		else \
+			echo "catalogs: descriptor staged; no language yet --"; \
+			echo "          tools/gen_catalog.py newlang <language>, then add it to LOCALE_LANGS"; \
+		fi; \
 	else \
 		echo "catalogs: $(LOCALE_CD) not found -- nothing to stage"; \
 	fi
@@ -438,6 +490,38 @@ launch-fsuae: $(FSUAE_CONFIG)
 
 run-fsuae: all fsuae-config launch-fsuae
 
+# --- OPTIONAL Kickstart 1.3 / 68000 machine (same shape, different box) ------
+# gmake run-fsuae13 -- build, generate the 1.3 config, launch it.
+#
+# Needs a 1.3 ROM and a 1.3 system hardfile (KICKSTART13_FILE / SYSTEM13_HDF).
+# Nothing else in the build depends on it, so a machine without those files is
+# in no way broken -- `gmake check` reports them and moves on.
+fsuae-config13: $(FSUAE_CONFIG13)
+
+$(FSUAE_CONFIG13): $(FSUAE_TEMPLATE13)
+	mkdir -p fsuae/local
+	sed \
+		-e 's|@KICKSTART_FILE@|$(KICKSTART13_FILE)|g' \
+		-e 's|@SYSTEM_HDF@|$(SYSTEM13_HDF)|g' \
+		-e 's|@PROJECT_DIST@|$(PROJECT_DIST)|g' \
+		-e 's|@PROJECT_NAME@|$(PROJECT_NAME)|g' \
+		$(FSUAE_TEMPLATE13) > $(FSUAE_CONFIG13)
+
+launch-fsuae13: $(FSUAE_CONFIG13)
+	@test -f "$(KICKSTART13_FILE)" || (echo "Missing Kickstart 1.3 ROM: $(KICKSTART13_FILE)" && \
+		echo "  (set KICKSTART13_FILE=... or skip the 1.3 machine)" && exit 1)
+	@test -f "$(SYSTEM13_HDF)" || (echo "Missing AmigaOS 1.3 HDF: $(SYSTEM13_HDF)" && \
+		echo "  (set SYSTEM13_HDF=... or skip the 1.3 machine)" && exit 1)
+	@echo "Starting FS-UAE (Kickstart 1.3 / 68000) with config: $(abspath $(FSUAE_CONFIG13))"
+	@echo "FS-UAE binary: $(FSUAE)"
+	@CFG="$(abspath $(FSUAE_CONFIG13))"; \
+	"$(FSUAE)" "$$CFG" & \
+	FSUAE_PID=$$!; \
+	sleep 1; \
+	osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$FSUAE_PID"' to true' || true
+
+run-fsuae13: all fsuae-config13 launch-fsuae13
+
 run-fsuae-gcc: gcc dist/run-gcc dist/mutools mirror-src fsuae-config launch-fsuae
 
 run-fsuae-sasc: sasc dist/run-sasc dist/mutools mirror-src fsuae-config launch-fsuae
@@ -467,6 +551,22 @@ check:
 	@test -f "$(SYSTEM_HDF)" || (echo "Missing AmigaOS HDF: $(SYSTEM_HDF)" && exit 1)
 	@test -f ".vamosrc.in" || (echo "Missing .vamosrc.in" && exit 1)
 	@test -f "$(FSUAE_TEMPLATE)" || (echo "Missing FS-UAE template: $(FSUAE_TEMPLATE)" && exit 1)
+	@# Optional extras: reported, never fatal. A machine without a 1.3 ROM or
+	@# hardfile is not broken -- it simply has no `gmake run-fsuae13`.
+	@echo ""
+	@echo "Optional (absent is fine):"
+	@if [ -f "$(KICKSTART13_FILE)" ]; then s="found"; else s="absent -- no gmake run-fsuae13"; fi; \
+		printf "  %-16s %s (%s)\n" "KICK 1.3 ROM:" "$(KICKSTART13_FILE)" "$$s"
+	@if [ -f "$(SYSTEM13_HDF)" ]; then s="found"; else s="absent -- no gmake run-fsuae13"; fi; \
+		printf "  %-16s %s (%s)\n" "AmigaOS 1.3 HDF:" "$(SYSTEM13_HDF)" "$$s"
+	@# -f, not -x: these are AMIGA binaries run through vamos, so the host
+	@# execute bit says nothing (Lha_40/Lha ships mode 644 and works fine).
+	@if [ -f "$(BUMPREV)" ]; then s="found"; else s="absent -- no gmake release"; fi; \
+		printf "  %-16s %s (%s)\n" "bumprev:" "$(BUMPREV)" "$$s"
+	@if [ -f "$(AMIGA_LHA)" ]; then s="found"; else s="absent -- no gmake release-archive"; fi; \
+		printf "  %-16s %s (%s)\n" "Amiga LhA:" "$(AMIGA_LHA)" "$$s"
+	@if [ -x "$(XDFTOOL)" ]; then s="found"; else s="absent -- no gmake release-adf"; fi; \
+		printf "  %-16s %s (%s)\n" "xdftool:" "$(XDFTOOL)" "$$s"
 
 clean:
 	rm -rf build dist
@@ -513,3 +613,298 @@ push: all
 	cp -RX dist/. "$$base/$(SMB_DIR)/" || { echo "ERROR: copy failed"; exit 1; }; \
 	find "$$base/$(SMB_DIR)" \( -name '.DS_Store' -o -name '._*' \) -delete 2>/dev/null; \
 	echo "Pushed $(PROJECT_NAME) to $$share/$(SMB_DIR)."
+# =============================================================================
+# Release packaging: an LhA archive, an ADF disk image, and an Aminet pair
+# =============================================================================
+#
+#   gmake release-stage    -> build/release/  (the package tree; edit THIS one)
+#   gmake release-drawer   -> dist/Release/   (the same tree, unpacked, on DEV:)
+#   gmake release-archive  -> dist/<Project>.lha        (release-lha = synonym)
+#   gmake release-adf      -> dist/<Project>.adf        (880K DD floppy)
+#   gmake release-aminet   -> dist/aminet/   (archive + .readme, NOT uploaded)
+#   gmake release-verify   -> inspect the built archives for private state
+#   gmake release-dist     -> archive + disk + verify
+#
+# ONLY `release-stage` is project-specific. Everything below it operates on
+# whatever that target produced, so extending a project's package means editing
+# one recipe. The version comes from `gmake release` (bumprev) -- these targets
+# never bump; see the `release` target above.
+#
+# --- Tools -------------------------------------------------------------------
+# The archiver is the REAL Amiga LhA (Thomas Richter's 40.x) run through vamos.
+# The host `lha` is Lhasa, an extractor only, and cannot create an archive.
+#
+# ⚠ 68020 + 128MB, not the usual 68000/16MB: LhA's pool allocations across a
+# hundred members exceed the 68000's 16MB address-space ceiling under vamos.
+# ⚠ `--` separates vamos's own options from the Amiga command line, or vamos
+# eats `-r`.
+XDFTOOL   ?= $(HOME)/Developer/AmigaTools/venv-amitools/bin/xdftool
+AMIGA_LHA ?= $(HOME)/Developer/AmigaTools/Lha_40/Lha
+VAMOS_LHA  = $(VAMOS) -c $(CURDIR)/$(VAMOSRC) -q -H disable -C 68020 -m 131072 --
+SETPOS     = $(PYTHON) tools/set_icon_pos.py
+
+RELSTAGE  := build/release
+RELDRAWER := $(RELSTAGE)/$(PROJECT_NAME)
+RELDISK   := build/release-disk
+AMINETDIR := dist/aminet
+
+# The drawer icon dist/Release.info gets. A PRISTINE one, never the staged
+# copy: that carries a window box sized for the package's own contents, and
+# NO_ICON_POSITION on the pristine icon lets Workbench place the drawer itself
+# instead of dropping it on top of another icon in a busy DEV: window.
+REL_DRAWER_ICON := icons/release.info
+
+# --- release-stage: THE ONE TARGET A PROJECT EDITS ---------------------------
+# Builds build/release/ -- exactly the tree a user unpacks.
+#
+# The layout convention across these projects: the $(PROJECT_NAME) drawer is
+# the archive root, and its window shows only what a user should OPEN -- the
+# guide at the top, the Installer beneath it, centred. Everything the Installer
+# merely READS (binaries, icon sets, catalogs) hides in icon-less subdrawers,
+# which Workbench does not show. Icon positions and the window box are
+# snapshotted host-side with set_icon_pos.py: Workbench keeps that geometry
+# inside the .info file, so a byte patch is exact and format-preserving.
+#
+# ⚠ Copy a NAMED LIST, never `cp -R dist`. dist/ is the FS-UAE DEV: mount, so
+# it fills up with the program's own saved preferences and state while it is
+# being tested. release-verify exists because a rule nobody checks is a rule
+# until the day it is not.
+#
+# ⚠ `cp` gives the new file the SOURCE's mode, and Amiga LhA records each
+# member's protection bits from the HOST file's permissions -- so a read-only
+# source ships as `----r---`, with no `d`, and the user cannot delete it after
+# unpacking. `chmod u+w` anything staged from a deliberately read-only master.
+#
+# Extend the list below as the project grows; the rest of the pipeline follows.
+REL_CX := 104          # centre line for the drawer window's icon column
+
+release-stage: all
+	rm -rf $(RELSTAGE) $(RELDISK)
+	mkdir -p $(RELDRAWER)/Program $(RELDISK)
+	@# The program. The release ships ONE binary under the plain project name
+	@# -- which profile is a project decision; the SAS/C build is the
+	@# convention here, being the conservative one.
+	cp $(TARGET_SASC) $(RELDRAWER)/Program/$(PROJECT_NAME)
+	chmod u+w $(RELDRAWER)/Program/$(PROJECT_NAME)
+	@# The manual, with its MultiView icon, at the top of the window.
+	@if [ -f dist/$(PROJECT_NAME).guide ]; then \
+		cp dist/$(PROJECT_NAME).guide $(RELDRAWER)/; \
+		if [ -f icons/guide.info ]; then \
+			cp icons/guide.info $(RELDRAWER)/$(PROJECT_NAME).guide.info; \
+			$(SETPOS) $(RELDRAWER)/$(PROJECT_NAME).guide.info --center-x $(REL_CX) 12; \
+		fi; \
+	fi
+	@# The Installer, beneath it.
+	@if [ -f dist/Install ]; then \
+		cp dist/Install dist/Install.info $(RELDRAWER)/; \
+		$(SETPOS) $(RELDRAWER)/Install.info --center-x $(REL_CX) 96; \
+	fi
+	@if [ -f LICENSE ]; then cp LICENSE $(RELDRAWER)/LICENSE; fi
+	@# Message catalogs, when they have been built.
+	@for lang in $(LOCALE_LANGS); do \
+		if [ -f dist/Catalogs/$$lang/$(LOCALE_CATNAME) ]; then \
+			mkdir -p $(RELDRAWER)/Catalogs/$$lang; \
+			cp dist/Catalogs/$$lang/$(LOCALE_CATNAME) $(RELDRAWER)/Catalogs/$$lang/; \
+		else \
+			echo "WARNING: no built catalog for $$lang --"; \
+			echo "         the release ships without that translation"; \
+		fi; \
+	done
+	@# The package drawer's own icon, and the window it opens.
+	@if [ -f $(REL_DRAWER_ICON) ]; then \
+		cp $(REL_DRAWER_ICON) $(RELSTAGE)/$(PROJECT_NAME).info; \
+		$(SETPOS) $(RELSTAGE)/$(PROJECT_NAME).info --no-pos --window 200 100 350 200; \
+	else \
+		echo "WARNING: no $(REL_DRAWER_ICON) -- the package drawer will be"; \
+		echo "         INVISIBLE on Workbench. Run tools/make_release_icon.py --write"; \
+	fi
+	@# The disk image's root IS the drawer's content, with the same icon typed
+	@# as a disk (do_Type 2 -> 1).
+	cp -R $(RELDRAWER)/. $(RELDISK)/
+	@if [ -f $(REL_DRAWER_ICON) ]; then \
+		cp $(REL_DRAWER_ICON) $(RELDISK)/Disk.info; \
+		$(SETPOS) $(RELDISK)/Disk.info --type 1 --no-pos --window 200 100 350 200; \
+	fi
+	@echo "release-stage: $(RELSTAGE)"
+
+# --- DEV:Release -- the release archive, unpacked ----------------------------
+# dist/ is DEV: in FS-UAE, so this puts the package where the emulated (or
+# real) Amiga can reach it WITHOUT an unarchiver on that machine -- which a
+# Kickstart 1.3 boot medium typically has not got.
+#
+# It mirrors $(RELSTAGE) exactly, and $(RELSTAGE) is what the archive is built
+# from, so what gets tested here and what a downloader unpacks cannot drift.
+#
+# ⚠⚠ dist/Release.info is the point of the whole thing: a drawer with no .info
+# is INVISIBLE to Workbench. 3.x can dig it out with Window/Show/All Files, but
+# 1.3 has no such menu, so without the icon the package is unreachable there
+# except from a Shell.
+release-drawer: release-stage
+	rm -rf dist/Release
+	mkdir -p dist/Release
+	cp -R $(RELSTAGE)/. dist/Release/
+	@if [ -f $(REL_DRAWER_ICON) ]; then \
+		cp $(REL_DRAWER_ICON) dist/Release.info; \
+	elif [ -f dist/Release/$(PROJECT_NAME).info ]; then \
+		cp dist/Release/$(PROJECT_NAME).info dist/Release.info; \
+	fi
+	@echo "release-drawer: DEV:Release -- the archive contents, unpacked"
+
+# ⚠ Members are given as the `#?` wildcard so every stored name comes from a
+# directory scan and keeps its canonical case -- a literal argument would be
+# stored in its ToLower()ed matching form. `#` needs NO escape in a recipe
+# line (make hands recipe lines to the shell verbatim); `\#` would reach the
+# shell as a backslash. LhA `@file` response files crash vamos -- don't.
+# ⚠ vamos's Examine reports 1978 dates, so archive members carry them.
+release-archive: release-stage
+	rm -f dist/$(PROJECT_NAME).lha
+	cd $(RELSTAGE) && $(VAMOS_LHA) $(AMIGA_LHA) -r a \
+		proj:dist/$(PROJECT_NAME).lha "#?"
+	@echo "release-archive: dist/$(PROJECT_NAME).lha"
+	@ls -l dist/$(PROJECT_NAME).lha
+
+release-lha: release-archive          # synonym (the sibling projects' name)
+
+release-adf: release-stage
+	rm -f dist/$(PROJECT_NAME).adf
+	@cmd="create + format $(PROJECT_NAME) ffs"; \
+	for e in $(RELDISK)/*; do cmd="$$cmd + write $$e"; done; \
+	$(XDFTOOL) dist/$(PROJECT_NAME).adf $$cmd
+	@echo "release-adf: dist/$(PROJECT_NAME).adf (volume $(PROJECT_NAME))"
+
+# --- Aminet upload package ---------------------------------------------------
+# Everything Aminet wants, staged side by side and checked over -- but NOT
+# uploaded. Uploading is a deliberate act and stays a manual one.
+#
+# Aminet takes a PAIR: the archive, and a .readme of the same base name that
+# sits BESIDE it on the server and supplies the index metadata. That readme is
+# not the manual, which is why these are staged in a directory of their own.
+release-aminet: release-archive
+	@rm -rf $(AMINETDIR)
+	@mkdir -p $(AMINETDIR)
+	@# ONE top-level drawer, named for the package. An archive that unpacks
+	@# into the current directory is a classic Aminet rejection, and the
+	@# staging tree is what the archive is built FROM, so checking it here
+	@# checks the archive. The drawer's own .info belongs beside it and does
+	@# not count -- a drawer without its icon is invisible.
+	@test -d $(RELDRAWER) || \
+	  (echo "release-aminet: no $(RELDRAWER)" && exit 1)
+	@extra=`ls $(RELSTAGE) | grep -v -x -e '$(PROJECT_NAME)' \
+	                                 -e '$(PROJECT_NAME).info'`; \
+	 test -z "$$extra" || \
+	  (echo "release-aminet: $(RELSTAGE) holds more than the package" \
+	        "drawer and its icon -- the archive must unpack into one" \
+	        "drawer:" && echo "$$extra" && exit 1)
+	@cp dist/$(PROJECT_NAME).lha $(AMINETDIR)/
+	$(PYTHON) tools/make_aminet_readme.py \
+		-o $(AMINETDIR)/$(PROJECT_NAME).readme
+	@# Validate the file that will actually be uploaded, not the template it
+	@# was rendered from -- the same today and a bug away from not.
+	@$(PYTHON) tools/make_aminet_readme.py \
+		--check $(AMINETDIR)/$(PROJECT_NAME).readme
+	@echo ""
+	@echo "release-aminet: ready in $(AMINETDIR)/ -- NOT uploaded."
+	@ls -l $(AMINETDIR)/
+
+# --- Nothing private ships ---------------------------------------------------
+# release-stage copies a NAMED LIST, so the program's own state cannot reach an
+# archive by construction. But dist/ IS the FS-UAE DEV: mount, and it fills up
+# with the program's saved settings while it is being tested; one careless
+# change from a named list to `cp -R dist` would ship somebody's preferences.
+#
+# So the ARCHIVES are inspected, not the Makefile: this reads back what was
+# actually built and fails the release if anything matching REL_PRIVATE is in
+# it. Extend that pattern with whatever the project writes at run time.
+REL_PRIVATE ?= \.(prefs|config|log)([^a-z]|$$)
+
+release-verify:
+	@bad=0; \
+	echo "release-verify: inspecting the built archives"; \
+	mkdir -p build; \
+	if [ -f dist/$(PROJECT_NAME).lha ]; then \
+		$(VAMOS_LHA) $(AMIGA_LHA) l dist/$(PROJECT_NAME).lha \
+			> build/relverify.txt 2>&1 || true; \
+		if grep -iE '$(REL_PRIVATE)' build/relverify.txt; then \
+			echo "  FAIL: private state in the LhA archive"; bad=1; \
+		else echo "  ok: $(PROJECT_NAME).lha carries no private state"; fi; \
+	fi; \
+	if [ -f dist/$(PROJECT_NAME).adf ]; then \
+		$(XDFTOOL) dist/$(PROJECT_NAME).adf list \
+			> build/relverify_adf.txt 2>&1 || true; \
+		if grep -iE '$(REL_PRIVATE)' build/relverify_adf.txt; then \
+			echo "  FAIL: private state on the ADF"; bad=1; \
+		else echo "  ok: $(PROJECT_NAME).adf carries no private state"; fi; \
+	fi; \
+	if [ $$bad -ne 0 ]; then \
+		echo "release-verify: REFUSING -- see the lines above"; \
+		exit 1; \
+	fi
+
+release-dist: release-archive release-adf release-verify
+
+# =============================================================================
+# OPTIONAL: per-CPU build variants
+# =============================================================================
+#
+#   gmake build-68020      one variant  -> dist/cpu/<project>_68020
+#   gmake cpu-all          every variant in CPU_LIST, then a size table
+#   gmake print-cpudir     where they land (for a release-stage recipe)
+#
+# ⚠ OPT-IN ONLY. None of this is part of `all`, nothing else depends on it, and
+# an ordinary build is completely unaffected -- `gmake all` still builds the
+# 68000 baseline and nothing more. Reach for it when a project decides to SHIP
+# more than one processor variant; until then it costs nothing to leave alone.
+#
+# Override the set for a project that ships fewer:  CPU_LIST = 68000 68020
+CPU_LIST ?= 68000 68020 68040 68060
+
+# ⚠ Do NOT verify a CPU variant with `objdump -f`. For the Amiga hunk format it
+# reports "architecture: m68k:68000" for EVERY variant, whatever -m<cpu> was
+# used, so it looks as though the flag did nothing. Check the generated CODE
+# instead: a -m68000 build calls libgcc's __divsi3/__mulsi3 for 32-bit maths,
+# and a -m68020+ build does not (it has the hardware instructions).
+#
+#   m68k-amigaos-objdump -d dist/cpu/<project>_68020 | grep -c __divsi3
+#
+# The size table below is the other quick signal that the variants really differ.
+
+# dist/cpu/ rather than dist/ itself, deliberately: dist/ is what FS-UAE mounts
+# as DEV:, and four extra binaries loose in it show up on the emulated
+# Workbench and get into every release-stage that copies from there.
+CPU_DIR    := dist/cpu
+TARGET_CPU := $(CPU_DIR)/$(PROJECT_NAME)_$(if $(CPU),$(CPU),68000)
+
+.PHONY: cpu-one cpu-all print-cpudir $(addprefix build-,$(CPU_LIST))
+
+# GCC only. The SAS/C profile stays the second opinion that keeps the code C89;
+# it has no -m<cpu> equivalent worth matrixing here (SAS/C's CPU= option exists,
+# but a project that ships per-CPU binaries ships the GCC ones).
+cpu-one: $(REV_H) $(SRC_GCC)
+	@mkdir -p $(CPU_DIR)
+	$(GCC_CC) $(GCC_CFLAGS) $(SRC_GCC) -o $(TARGET_CPU) $(GCC_LDFLAGS)
+	@echo "cpu-one: $(TARGET_CPU)"
+
+# Every variant, then a size table -- the one number that says whether a CPU
+# option did anything, side by side rather than one build at a time.
+#
+# Serial on purpose: these could run at once, but a loop that is parallel today
+# is a trap for whoever adds a vamos step to it tomorrow (concurrent vamos
+# instances contend badly -- see docs/vamos-gotchas.md).
+cpu-all:
+	@for c in $(CPU_LIST); do \
+		echo ">>> $$c <<<"; \
+		$(MAKE) --no-print-directory CPU=$$c cpu-one || exit 1; \
+	done
+	@echo ""
+	@printf "  %-8s %12s\n" "CPU" "bytes"
+	@for c in $(CPU_LIST); do \
+		printf "  %-8s %12s\n" "$$c" \
+			"$$(wc -c < $(CPU_DIR)/$(PROJECT_NAME)_$$c | tr -d ' ')"; \
+	done
+	@echo ""
+
+$(addprefix build-,$(CPU_LIST)):
+	@$(MAKE) --no-print-directory CPU=$(patsubst build-%,%,$@) cpu-one
+
+print-cpudir:
+	@echo $(CPU_DIR)

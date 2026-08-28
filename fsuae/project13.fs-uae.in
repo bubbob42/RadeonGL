@@ -1,0 +1,62 @@
+[fs-uae]
+# Kickstart 1.3 / plain-68000 test machine (gmake run-fsuae13).
+#
+# The A500 is the canonical 1.3 box: OCS chipset and a stock 68000 with no MMU.
+# Use it to verify that a program really runs on 1.3 -- the V33/V34 API floor,
+# the absence of Workbench conveniences a 3.x machine hides (no Window/Show/All
+# Files, no MultiView, no AmigaGuide), and the plain 68000 instruction set.
+#
+# For MMU-based memory debugging (MuForce/MuGuardianAngel) use the 68030
+# machine instead: gmake run-fsuae. There is no MMU here.
+amiga_model = A500
+kickstart_file = @KICKSTART_FILE@
+
+# Plain 68000, as the A500 ships. Stated explicitly; there is no MMU here.
+cpu = 68000
+
+# Exposes the emulated serial port as a TCP socket so KPrintF/serial debug
+# output can be read with:  telnet 127.0.0.1 1234
+serial_port = tcp://127.0.0.1:1234
+
+hard_drive_0 = @SYSTEM_HDF@
+hard_drive_0_label = System
+
+# DEV: -- the project's dist/ folder, the same test drive the 3.x machine
+# mounts (gmake run-fsuae), as an FS-UAE directory hard drive.
+hard_drive_1 = @PROJECT_DIST@
+hard_drive_1_label = DEV
+
+# 512K chip (stock OCS A500) plus Zorro II fast RAM. Drop fast_memory to 0 to
+# reproduce a genuinely small machine -- that is where memory behaviour bites,
+# and it is the reason to have this box at all.
+chip_memory = 512
+fast_memory = 8192
+
+# No graphics_card: Kickstart 1.3 has no RTG (Picasso96/CyberGfx), so the
+# native OCS display is used. uaegfx needs 2.0+ and is only in the 3.x
+# template.
+
+floppy_drive_0_sounds = off
+floppy_drive_1_sounds = off
+floppy_drive_2_sounds = off
+floppy_drive_3_sounds = off
+
+# ⚠ If you ever mount a floppy here (e.g. an install ADF built by
+# release-adf), know that FS-UAE does NOT write guest floppy changes back into
+# the image: it keeps them in a per-config ".sdf" overlay under
+# "~/Documents/FS-UAE/Save States/" and REPLAYS a stale overlay on the next
+# launch, applied on top of the freshly rebuilt disk -- which garbles its
+# directory (clean on the first run, trashed every run after; write-protecting
+# the ADF does not stop it). Delete the overlay before each launch.
+
+window_width = 960
+window_height = 720
+fullscreen = 0
+
+automatic_input_grab = 1
+cursor = 1
+initial_input_grab = 1
+mouse_integration = 0
+joystick_port_1 = nothing
+
+title = AmigaOS 1.3 - @PROJECT_NAME@
