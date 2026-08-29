@@ -233,15 +233,19 @@ wb-run: $(TARGET_GCC) $(TARGET_GCC_DEBUG) dist/mutools
 	@printf 'echo "Running the kprintf debug build..."\n' >> dist/RunDebug
 	@printf 'DEV:%s\n' "$(notdir $(TARGET_GCC_DEBUG))" >> dist/RunDebug
 	@printf 'echo "Done. The serial trace is on telnet 127.0.0.1:1234."\n' >> dist/RunDebug
-	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/MuTools
-	@printf 'echo "Starting MuForce/MuGuardianAngel..."\n' >> dist/MuTools
-	@printf 'execute DEV:mutools\n' >> dist/MuTools
-	@printf 'echo "Loaded. Run anything now -- hits go to telnet 127.0.0.1:1234."\n' >> dist/MuTools
+	@# NO "dist/MuTools" wrapper script! The host filesystem is
+	@# case-INsensitive, so dist/MuTools and dist/mutools are THE SAME
+	@# FILE: such a wrapper ("execute DEV:mutools") overwrites the
+	@# payload, which then executes ITSELF forever -- an Execute
+	@# recursion that eats the Amiga's RAM (looks like a massive leak)
+	@# and never starts MuForce. AmigaDOS is case-insensitive too, so
+	@# mutools.info doubles as the desktop icon FOR the payload itself.
+	@cp fsuae/mutools dist/mutools
 	@if [ -f icons/run.info ]; then cp icons/run.info dist/Run.info; fi
 	@if [ -f icons/rundebug.info ]; then cp icons/rundebug.info dist/RunDebug.info; fi
-	@if [ -f icons/mutools.info ]; then cp icons/mutools.info dist/MuTools.info; fi
-	@printf 'Run\nRunDebug\nMuTools\n' > dist/.backdrop
-	@echo "wb-run: staged Run + RunDebug + MuTools icons (+ .backdrop) on DEV:"
+	@if [ -f icons/mutools.info ]; then cp icons/mutools.info dist/mutools.info; fi
+	@printf 'Run\nRunDebug\nmutools\n' > dist/.backdrop
+	@echo "wb-run: staged Run + RunDebug + mutools icons (+ .backdrop) on DEV:"
 
 $(VAMOSRC): .vamosrc.in
 	sed \
