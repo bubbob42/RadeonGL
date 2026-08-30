@@ -69,15 +69,25 @@ def _find_rev_h():
     src/. Ambiguity is an error, not a guess: picking one of several would
     silently stamp the readme with the wrong version.
     """
-    conventional = os.path.join(ROOT, "src", "%s_rev.h" % PROJECT)
-    if os.path.exists(conventional):
-        return conventional
-    src = os.path.join(ROOT, "src")
-    found = sorted(f for f in os.listdir(src) if f.endswith("_rev.h"))
-    if len(found) == 1:
-        return os.path.join(src, found[0])
-    raise SystemExit("make_aminet_readme: cannot tell which revision header to "
-                     "read in src/ (found: %s)" % (", ".join(found) or "none"))
+    # Flat-layout projects keep their sources (and the revision header) in
+    # the project ROOT instead of src/ -- search both, conventional name
+    # first, then the single *_rev.h of the directory.
+    for where in (os.path.join(ROOT, "src"), ROOT):
+        conventional = os.path.join(where, "%s_rev.h" % PROJECT)
+        if os.path.exists(conventional):
+            return conventional
+    for where in (os.path.join(ROOT, "src"), ROOT):
+        if not os.path.isdir(where):
+            continue
+        found = sorted(f for f in os.listdir(where) if f.endswith("_rev.h"))
+        if len(found) == 1:
+            return os.path.join(where, found[0])
+        if len(found) > 1:
+            raise SystemExit("make_aminet_readme: cannot tell which revision "
+                             "header to read in %s (found: %s)"
+                             % (where, ", ".join(found)))
+    raise SystemExit("make_aminet_readme: no *_rev.h found in src/ or the "
+                     "project root")
 
 
 REV_H = _find_rev_h()
