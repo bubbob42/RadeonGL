@@ -399,9 +399,9 @@ the frame is what makes a prefs editor look like one on the Workbench. Its
 stack is set to 16384, the value the GUI programs here use; do not drop it to
 the stock 4096.
 
-See `docs/` (`reaction-layout-cookbook.md`, `amigaguide-format.md`,
-`installer-scripting.md`, `localization-catcomp.md`, `arexx-programming.md`) and
-`tools/README.md` for the details.
+See `docs/` (`reaction-layout-cookbook.md`, `boopsi-custom-classes.md`,
+`amigaguide-format.md`, `installer-scripting.md`, `localization-catcomp.md`,
+`arexx-programming.md`) and `tools/README.md` for the details.
 
 ### Packaging a release (`gmake release-dist`)
 
