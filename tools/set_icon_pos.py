@@ -28,6 +28,9 @@ Operations (combine freely):
   --type N             do_Type (1=disk 2=drawer 3=tool 4=project ...)
   --show-icons         Workbench "Show / Only Icons" + "View / By Icon"
                        (drawer icons only; see below)
+  --show-all           "Show / All Files" + "View / By Name" -- for a drawer
+                       whose contents have no icons of their own, where
+                       --show-icons would open an EMPTY window
 
 THE SHOW MODE IS NOT IN THE DRAWERDATA WE WRITE. dd_Flags and dd_ViewModes
 are the V36 additions to struct DrawerData, but the block written inside the
@@ -40,8 +43,19 @@ extension APPENDED AFTER the whole classic structure:
 Verified against stock Commodore icons rather than worked out from headers:
 Workbench 3.2's own Prefs.info ends in 00 00 00 01 00 01 -- DDFLAGS_SHOWICONS
 and DDVM_BYICON -- while Utilities.info and Tools.info, which are set to
-inherit, end in six zero bytes. icon.library only reads the extension when
-do_Version >= 1, which everything here already is.
+inherit, end in six zero bytes.
+
+TWO fields gate the extension, and missing the second one is silent. Besides
+do_Version >= 1, icon.library reads the six bytes only when the icon's
+REVISION is in 1..WB_DISKREVISION -- and the revision is the LOW BYTE of
+do_Gadget.UserData (workbench.h: "I only use the lower 8 bits of
+Gadget.UserData for the revision #"). With a zero there the extension is
+skipped -- PDFPrinter 1.2's drawers opened showing every file -- and on a
+GlowIcon worse: icon.library then looks for the colour part six bytes too
+early, misses it, and the icon is classic (PrismaNG, 19 Oct 2026: Mason's
+drawer art lost, MEASURED in FS-UAE). Every drawer icon on a real system
+carries 1 in that byte, so --show-icons and --show-all set it too
+(PDFPrinter's fix of 13 Sep 2026, brought over).
 
 Kickstart 1.3 has no Show setting at all and stops at the classic structure,
 so the six bytes are simply ignored there -- the same way it ignores a
@@ -61,7 +75,16 @@ ICON_W_OFF = 12
 
 # workbench/workbench.h
 DDFLAGS_SHOWICONS = 0x00000001
+DDFLAGS_SHOWALL   = 0x00000002
 DDVM_BYICON       = 1
+DDVM_BYNAME       = 2
+
+# do_Gadget.UserData (file offset 44): the low byte is the icon revision, and
+# icon.library refuses to read the show-mode extension unless it is in
+# 1..WB_DISKREVISION. See the note at the top of this file.
+USERDATA_OFF        = 44
+WB_DISKREVISION     = 1
+WB_DISKREVISIONMASK = 255
 
 
 def classic_end(d):
@@ -91,8 +114,8 @@ def classic_end(d):
     return off
 
 
-def set_show_icons(data):
-    """Put DDFLAGS_SHOWICONS / DDVM_BYICON in place, keeping any tail.
+def set_show_mode(data, flags, viewmode):
+    """Put dd_Flags / dd_ViewModes in place, keeping any tail.
 
     Three cases, told apart by what is actually sitting at the classic end:
     nothing (append), an IFF "FORM" (a colour icon -- insert in front of it,
@@ -101,7 +124,7 @@ def set_show_icons(data):
     six bytes inside a GlowIcon and destroy it."""
     if struct.unpack(">I", data[66:70])[0] == 0:
         return False                             # not a drawer/disk icon
-    ext = struct.pack(">IH", DDFLAGS_SHOWICONS, DDVM_BYICON)
+    ext = struct.pack(">IH", flags, viewmode)
     end = classic_end(data)
     tail = bytes(data[end:])
     if len(tail) >= 6 and tail[:4] != b"FORM":
@@ -110,6 +133,12 @@ def set_show_icons(data):
         data[end:end] = ext                      # append, or insert before FORM
     if struct.unpack(">H", data[2:4])[0] < 1:    # icon.library ignores it below 1
         struct.pack_into(">H", data, 2, 1)
+    # ...and the revision, or the six bytes above are read by nobody (and a
+    # GlowIcon's colour part is looked for in the wrong place)
+    ud = struct.unpack_from(">I", data, USERDATA_OFF)[0]
+    if (ud & WB_DISKREVISIONMASK) != WB_DISKREVISION:
+        struct.pack_into(">I", data, USERDATA_OFF,
+                         (ud & ~WB_DISKREVISIONMASK) | WB_DISKREVISION)
     return True
 
 
@@ -151,8 +180,13 @@ def main():
             struct.pack_into(">ll", data, 78 + 48, 0, 0)
             done.append("window %d,%d %dx%d" % (l, t, w, h))
         elif op == "--show-icons":
-            if set_show_icons(data):
+            if set_show_mode(data, DDFLAGS_SHOWICONS, DDVM_BYICON):
                 done.append("show only icons, view by icon")
+            else:
+                sys.exit("%s: no DrawerData (not a drawer/disk icon)" % path)
+        elif op == "--show-all":
+            if set_show_mode(data, DDFLAGS_SHOWALL, DDVM_BYNAME):
+                done.append("show all files, view by name")
             else:
                 sys.exit("%s: no DrawerData (not a drawer/disk icon)" % path)
         elif op == "--type":
