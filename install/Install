@@ -18,6 +18,26 @@
 ;       @PROJECT_NAME@(.info)
 ;
 ; The chosen program is always installed as "@PROJECT_NAME@".
+;
+; NOVICE asks nothing -- the Installer's own rule, and MEASURED on the 3.2
+; Installer: at that level it answers every ask from its (default). The
+; script still says each novice default itself, in a nested if.
+;
+; Measured traps (docs/installer-scripting.md, section 10; tools/
+; check_installer.py catches the mechanical ones before staging):
+;
+; WARNING: askchoice answers the CHOICE NUMBER from 0, NOT a bit mask --
+; whatever the Installer guide says (askoptions is the one with a mask).
+; Read as a mask, the second of two choices installed the first.
+; WARNING: (OR ...) and (AND ...) evaluate every argument: an ask inside
+; one shows its requester even to the novice it should spare.
+; WARNING: a | in a (patmatch) pattern alternates only inside parentheses;
+; compare CPUs with (database "cpu" "68000"), the exact two-argument form.
+; WARNING: never (exists "Vol:") for a volume that may not be mounted: DOS
+; asks for the disk. (getassign "Work" "av") reads the list in memory.
+; WARNING: one substitution per parenthesis pair, and (set) takes PAIRS:
+; join strings with (cat). The closing text is built that way and handed
+; to (exit) as one string.
 ; =========================================================================
 
 (welcome "This will install @PROJECT_NAME@ onto your system.\n")
@@ -40,17 +60,20 @@
 (if (exists "@PROJECT_NAME@")
     (set #binary "@PROJECT_NAME@")
     (
-        (set #pick
-            (askchoice
-                (prompt "Which build of @PROJECT_NAME@ should be installed?")
-                (help "Both do the same thing. GCC is the default; SAS/C is "
-                      "the classic native-compiler build. If unsure, keep GCC.\n\n"
-                      @askchoice-help)
-                (choices "GCC (68000)" "SAS/C 6.58")
-                (default 0))
+        (if (= @user-level 0)
+            (set #pick 0)                   ; novices are not asked: GCC
+            (set #pick
+                (askchoice
+                    (prompt "Which build of @PROJECT_NAME@ should be installed?")
+                    (help "Both do the same thing. GCC is the default; SAS/C is "
+                          "the classic native-compiler build. If unsure, keep GCC.\n\n"
+                          @askchoice-help)
+                    (choices "GCC (68000)" "SAS/C 6.58")
+                    (default 0))
+            )
         )
-        ; askchoice returns a one-bit mask: bit0 -> GCC, bit1 -> SAS/C.
-        (if (= #pick 2)
+        ; the CHOICE NUMBER from 0: 0 -> GCC, 1 -> SAS/C (not a bit mask)
+        (if (= #pick 1)
             (set #binary "@PROJECT_NAME@_sasc")
             (set #binary "@PROJECT_NAME@_gcc"))
     )
@@ -60,14 +83,23 @@
 )
 
 ; --- choose the destination ------------------------------------------------
-(set #where
-    (askdir
-        (prompt "In which drawer should @PROJECT_NAME@ be installed?\n"
-                "A new '@PROJECT_NAME@' drawer will be created inside it.")
-        (help "Select the drawer that will hold the new @PROJECT_NAME@ drawer, "
-              "for example Work: or SYS:Tools.\n\n"
-              @askdir-help)
-        (default @default-dest)
+; The parent: Work: when it is mounted, else SYS:Tools, else SYS: -- an
+; askdir cannot offer a drawer that is not there, and a novice gets it
+; unasked.
+(set #defbase "SYS:")
+(if (= (exists "SYS:Tools" (noreq)) 2) (set #defbase "SYS:Tools"))
+(if (NOT (= (getassign "Work" "av") "")) (set #defbase "Work:"))
+(if (= @user-level 0)
+    (set #where #defbase)
+    (set #where
+        (askdir
+            (prompt "In which drawer should @PROJECT_NAME@ be installed?\n"
+                    "A new '@PROJECT_NAME@' drawer will be created inside it.")
+            (help "Select the drawer that will hold the new @PROJECT_NAME@ drawer, "
+                  "for example Work: or SYS:Tools.\n\n"
+                  @askdir-help)
+            (default #defbase)
+        )
     )
 )
 (set #dest (tackon #where "@PROJECT_NAME@"))
@@ -105,8 +137,10 @@
 
 ; --- done ------------------------------------------------------------------
 (complete 100)
-(exit "@PROJECT_NAME@ has been installed into\n\n    " #dest "\n\n"
-      "Open that drawer and double-click the @PROJECT_NAME@ icon to start.")
+(set #closing
+    (cat ("@PROJECT_NAME@ has been installed into\n\n    %s\n\n" #dest)
+         "Open that drawer and double-click the @PROJECT_NAME@ icon to start."))
+(exit #closing)
 
 ; =========================================================================
 ; EXTENDING THIS SCRIPT (examples -- see docs/installer-scripting.md)
