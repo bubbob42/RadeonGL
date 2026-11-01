@@ -1,0 +1,95 @@
+# GLQuake as a minigl.library client (ABI 5), for testing RadeonGL.
+#
+# Run from the project root:  gmake glquake        (or gmake -f glquake/Makefile.radeongl)
+#
+# Source: glquake/ = Aminet MiniGL_Library_Quake1 (Dennis Boon, Steffen
+# Haeuser), built here as a SHARED-LIBRARY client against the minigl.library
+# 29.1 SDK in sdk/minigl-29.1 -- every gl and mgl call goes through the
+# dispatch table, so the same binary runs on any ABI-5 minigl.library
+# (PiStorm3D, Warp3D Classic, RadeonGL). Upstream's own script
+# (build_glquake_wsl_showcase.sh) links MiniGLV3D statically instead.
+#
+# Differences from upstream's build:
+#   -noixemul (libnix) instead of -mcrt=clib2 (no clib2 in this toolchain)
+#   -m68060 -m68881 for C (upstream: -mcpu=68020, whose code traps on a 68060)
+#   -include proto/minigl.h + -DMINIGL_SHARED_CLIENT: MiniGLOpen/MiniGLClose
+#   replace MGLInit/MGLTerm (gl_vidamiga.c)
+#
+# Game data is never built in or committed: `gmake glquake-data` copies the
+# id1 drawer named by QUAKE_ID1 next to the binary in dist/Quake/.
+
+CROSS    ?= $(HOME)/amiga-arm/bin/m68k-amigaos-
+CC       := $(CROSS)gcc
+AS       := $(CROSS)as
+
+SDK      := sdk/minigl-29.1
+QSRC     := glquake
+QOBJ     := build/glquake
+QOUT     := dist/Quake
+QEXE     := $(QOUT)/GLQuake
+
+QUAKE_ID1 ?= /path/to/quake/ID1
+
+QDEFS    := -DLITFILES -DGLOWEFFECTS -DFASTBOPS -DGLQUAKE -DAMIGA -DAMIGAOS \
+            -DNDEBUG -DGLM68KASM -DMGLV3D_NO_LOGGING -DMINIGL_SHARED_CLIENT
+QINC     := -I$(QSRC)/gcc_compat -I$(SDK)/minigl-shared-library/include \
+            -Isdk/ahi/include -Isdk/cgx/include \
+            -include $(QSRC)/minigl_client_compat.h
+QOPT     := -O2 -fno-strict-aliasing -fno-builtin-cos -fno-builtin-sin \
+            -finline-functions
+QCFLAGS  := -std=gnu99 -noixemul -m68060 -m68881 $(QOPT) $(QDEFS) $(QINC)
+QASFLAGS := -m68020 -m68881
+
+QFILES := chase cl_demo cl_input cl_main cl_parse cl_tent cmd common console \
+          crc cvar host host_cmd in_amiga in_amigajoy in_amigapsx in_amigamouse \
+          keys location menu mathlib net_amiga net_dgrm net_loop net_main \
+          net_vcr nonintel pr_cmds pr_edict pr_exec r_part gl_draw gl_mesh \
+          gl_model gl_refrag gl_rlight gl_rmain gl_fog gl_mirror gl_wiredraw \
+          gl_rmisc gl_rsurf miniglext gl_warp gl_screen gl_vidamiga sbar \
+          sv_main sv_phys sv_move sv_user zone view wad world cd_amiga \
+          twfsound_cd snd_dma snd_mix snd_mem sys_amiga sys_amigaclip \
+          snd_amiga snd_ahieff keys_amiga68k snd_paula snd_ahi net_bsdsocket \
+          minigl_client_compat
+QASFILES := in_amigamouse68k in_amigamousewin68k snd_int68k sys_amiga68k \
+            snd_mixamiga68k common68k
+
+QOBJS := $(addprefix $(QOBJ)/,$(addsuffix .o,$(QFILES) $(QASFILES) mathlib68k))
+
+.PHONY: glquake glquake-data clean-glquake
+
+glquake: $(QEXE)
+
+$(QEXE): $(QOBJS) $(SDK)/lib/libminigl.a | $(QOUT)
+	$(CC) -noixemul -m68060 -m68881 -s -o $@ $(QOBJS) \
+	    -L$(SDK)/lib -lminigl -lm -lamiga
+
+# Every C object also depends on the forced-in compat header and on this file
+# (flags); Quake's own headers are not tracked -- `gmake clean-glquake` after
+# editing one.
+QDEPS := $(QSRC)/minigl_client_compat.h glquake/Makefile.radeongl
+
+$(QOBJ)/net_bsdsocket.o: $(QSRC)/net_bsdsocket.c $(QDEPS) | $(QOBJ)
+	$(CC) $(QCFLAGS) -D__NO_NET_API -c $< -o $@
+
+$(QOBJ)/%.o: $(QSRC)/%.c $(QDEPS) | $(QOBJ)
+	$(CC) $(QCFLAGS) -c $< -o $@
+
+$(QOBJ)/mathlib68k.o: $(QSRC)/mathlib68k_gas.s | $(QOBJ)
+	$(AS) $(QASFLAGS) --defsym M881=1 $< -o $@
+
+$(QOBJ)/%.o: $(QSRC)/%_gas.s | $(QOBJ)
+	$(AS) $(QASFLAGS) $< -o $@
+
+$(QOBJ) $(QOUT):
+	mkdir -p $@
+
+# 54 MB from the share; only on request. Upper-case names on the share are
+# fine: AmigaDOS and Quake's own file lookup are case-insensitive there.
+glquake-data: | $(QOUT)
+	@test -d "$(QUAKE_ID1)" || { echo "QUAKE_ID1=$(QUAKE_ID1) not found"; exit 1; }
+	mkdir -p $(QOUT)/id1
+	cp -X "$(QUAKE_ID1)"/PAK0.PAK $(QOUT)/id1/pak0.pak
+	cp -X "$(QUAKE_ID1)"/PAK1.PAK $(QOUT)/id1/pak1.pak
+
+clean-glquake:
+	rm -rf $(QOBJ) $(QEXE)

@@ -634,6 +634,15 @@ push: all
 # one recipe. The version comes from `gmake release` (bumprev) -- these targets
 # never bump; see the `release` target above.
 #
+# --- GLQuake test client -----------------------------------------------------
+# A minigl.library ABI-5 dispatch client (glquake/, GPL), built with its own
+# makefile so its flags never mix with the project's. `glquake-data` copies
+# the id1 paks from QUAKE_ID1 (default: the Quake data drawer) into
+# dist/Quake/id1 -- 54 MB, never committed. See glquake/README.md.
+.PHONY: glquake glquake-data clean-glquake
+glquake glquake-data clean-glquake:
+	$(MAKE) -f glquake/Makefile.radeongl $@
+
 # --- Tools -------------------------------------------------------------------
 # The archiver is the REAL Amiga LhA (Thomas Richter's 40.x) run through vamos.
 # The host `lha` is Lhasa, an extractor only, and cannot create an archive.

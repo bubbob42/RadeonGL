@@ -23,7 +23,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <mgl/mglmacros.h>
 
+#ifdef MINIGL_SHARED_CLIENT
+/* RadeonGL: the MiniGLV3D debug header is not in the client SDK; only its
+ * D() macro is used here, and that is empty without -DDEBUG anyway. */
+#define D(x)
+#else
 #include "../MiniGLV3D/backend/hw/v3d_debug.h"
+#endif
 
 #ifdef __VBCC__
 #include "miniglext.h"	//optimized vertexbuffer construct

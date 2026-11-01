@@ -256,8 +256,13 @@ void VID_Shutdown(void)
 {     
 	//DeletePointer(QuakeWindow);
 	mglClearPointer(); // new minigl - Cowcat 2022
-	mglDeleteContext();	 
+	mglDeleteContext();
+#ifdef MINIGL_SHARED_CLIENT
+	/* RadeonGL: a dispatch client has no MGLTerm; the library cleans up */
+	MiniGLClose();
+#else
 	MGLTerm();
+#endif
 }
 
 static void Check_Gamma (unsigned char *pal)
@@ -1016,8 +1021,16 @@ void VID_Init(unsigned char *palette)
 	vid.numpages = 2 + numb - 2;
 	gl_width.value = vid.width;
 
+#ifdef MINIGL_SHARED_CLIENT
+	/* RadeonGL: open minigl.library and take its ABI-5 dispatch table;
+	 * MGLInit runs inside the library. Same messages as the shipped binary. */
+	Con_Printf("Opening minigl.library...\n");
+	if (!MiniGLOpen())
+		Sys_Error("Unable to open minigl.library V%d or obtain a compatible dispatch table\n", MINIGL_VERSION);
+#else
 	Con_Printf("Calling MGLInit...\n");
 	MGLInit();
+#endif
 
 	mglChooseGuardBand(guardband);
 	
