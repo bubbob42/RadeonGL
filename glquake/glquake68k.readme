@@ -1,0 +1,189 @@
+VBCC 0.8 compile of GLquake and GLqwcl for M68060
+- ported by Christian Michael aka 'SuRgEoN'
+
+
+Version: Beta 1.0, 03 sep 2001
+
+
+Minimum recommended HW/SW:
+68060 with FPU, 64MB RAM, Voodoo3 or Permedia2, Warp3D v 4.2
+
+
+
+Thanks:
+=======
+- Frank Wille, Steffen Haeuser and Thomas Frieden for a lot of good advice and helping me with locating bugs.
+- Thomas Frieden and Steffen Haeuser for explaining some technical details of MiniGL and providing me with latest internal sources.
+- The Hyperion-guys for writing MiniGL in their spare time.
+- Volker Barthelman and Frank Wille for the VBCC compiler
+- Timothy De Groote and Fabio Trotta for patient testing.
+
+- Elbox for finally signing the W3D deal with Hyperion,
+thus providing me with an opportunity to actually see my
+work in action.
+During the entire development-phase (more than 7 months)
+I had no W3D access except for the last hectic 10 days before this release :)
+
+
+
+Known bugs:
+===========
+
+GLqwcl68k:
+- luminance lightmaps do not work
+- going through certain teleporters can mess up rendering
+
+GLquake68k
+- sprites are not always rendered (mostly not) 
+- going through certain teleporters can mess up rendering
+- luminance lightmaps do not work
+
+- gl_warp introduced in glquakePPC causes that torches are
+not rendered. I have disabled it by default, but if you want
+the extra speedup then feel free to use it.
+
+
+
+Performance:
+============
+With particles disabled or set low (<128) timedemo results
+with the gl renderer (512x384) are a bit faster than software renderer (320x200). Framerate fluctuates more than software renderer, but in GLqwcl I have added a lot of options to lower the peak-throughput of triangles.
+However, in simple maps framerate can be the double of
+software renderer without loosing visual quality :)
+
+
+
+Speedup Hints:
+==============
+Use the parameter -particles to reduce number of particles.
+try 64 . Default # of particles is 256 in 68k versions. Normally it is 2048 but this is intolerably slow)
+
+- r_waterwarp 0 (glquake only)
+- r_drawviewmodel 0
+- r_dynamic 0
+- gl_warp 1 (in glqwcl use the details menu)
+- gl_flashblend 0
+- gl_polyblend 0
+- gl_keeptjunctions 0 (default)
+- gl_ztrick 1 (default)
+- gl_subdivide_size 16384 (beyond 8192 it doesn't make much
+difference, but compared to the default it will improve
+performance significantly - especially in maps with large
+strecthes of sky and liquid. It was 128 default, but I
+increased it to 1024.
+
+- decrease audio mixing frequency (-audspeed 5513)
+- sound may be messed up when going slow
+solution: set the variable "_snd_mixahead to 0.2 or 0.25
+
+GLqwcl only:
+- noskins 1 (prevents the use of custom skins)
+- gl_nocolors 1 (disables shirt/pants color on playermodels)
+- Use the normal statusbar (cl_sbar 1).
+- make use of bodyfilter, gibfilter, muzzleflash, teleport
+and explosions restriction (details costumization menu)
+
+System:
+- Don't overclock the Voodoo3 - it will be slower.
+  Besides, GLQuake/GLQwcl is purely CPU-limited on V3
+- P96 Voodoo tooltypes: Ignoremask=Yes, others: NO
+- Enable vblank interrupts if possible.
+  Active vblank will improve performance by 5% on Blizz1260
+
+
+GLquake/GLqwcl settings
+(read qwcl68k.readme for lowdown on the Quakeworld features)
+============================================================
+
+Startup parameters: () indicates default setting
+
+[vid settings]
+-gamma (0.7) : valid values range from 0 to 1
+-width (320) : note that if only -width ### is specified
+ then aspect will be set to 4*3. If width 512 is selected,
+ then choose a 512*384 screenmode from the requester
+-height (240)
+-bpp (15) 16 24 32
+-windowmode
+-buf (3) : valid 2 or 3 (no singlebuffer support)
+ 2 makes sense if gl_triplebuffer is 0 and gl_videosync is 1
++gl_videosync (0) : valid 0-1
+
+[texture settings]
+-texturemode (LINEAR) : valid LINEAR | NEAREST
+-dither (ON) : valid ON | OFF
+-maxsize (256) : sets maximum texture-dimentions
++gl_picmip (0) : texture cropping valid 0-4
++gl_playermip (0) : skin texture cropping valid 0-4
++gl_max_size (256) : same as -maxsize
+
+[lightmap formats]
+-lm_1 LUMINANCE, 1 byte/pixel (dysfunctional)
+-lm_4 RGBA (default setting), 4 bytes/pixel
+
+[memory allocation]
+-mem (16)        : set to 6 on a 32MB system - it may work
+-zone (128)      : set to 1024 to ba safe
+
+[effects]
+-particles (256) : use 128, 64 or 0 for better performance
+
+
+Console variables:
+(some has to be set before the level is loaded)
+
+v_gamma (1) : valid 0.2 - 1 (dysfunctional)
+gl_triplebuffer (1) : valid 0-1
+gl_videosync (0) : valid 0-1
+gl_width (320) : resizes rendering context - dysfunctional
+gl_dithering (1): valid 0-1
+gl_ztrick (1) : 0 clears the zbuffer, 1 doesn't
+gl_cull (1) : gl dependant front/backface culling
+gl_keeptjunctions (0) : 0 skips colinear vertices
+gl_subdivide_size (1024) : sky/turbulent poly subdivision
+   valid: 128,256,512,1024,2048... (128 is very slow!)
+
+gl_texturemode (LINEAR) : GL_LINEAR | GL_NEAREST
+gl_lightmapformat (RGBA) : override default lightmap format
+   valid: LUMINANCE RGBA
+gl_playermip (0) :texture scaling
+gl_picmip (0) :texture scaling (see startup parameters)
+gl_max_size (256) : texture scaling (use 128 for virge)
+gl_warp (0) : 1 is faster because torches are not drawn
+gl_affinemodels (0)
+gl_smoothmodels (1)
+gl_texsort (1) :use 0 if it turns out faster..
+gl_finish (0) :issue gl_finish call at the end of each frame
+gl_clear (0) :
+gl_nocolors (0) : toggles palette changes
+gl_polyblend (1) : toggles "event" palette changes
+gl_flashblend (1) : toggles dynamic lighting method
+r_novis (0) :set to 1 for maps vid'ed for transparant water
+r_wateralpha (1) : values < 1 adjusts transparency
+r_mirroralpha (1) : values < 1 adjusts reflectiveness
+r_shadows (0) : 1 enables shadows
+r_waterwarp (0) : 0 disables warping
+ note: waterwarp is always disabled in GLqwcl
+r_dynamic (1) : 0 disables dynamic lighting
+
+
+
+
+To do:
+- compile stable versions for WOS
+- bugfixes
+- try to reduce memory requirements
+- use multitexturing on Voodoo3 when it becomes available
+(expect almost double rendering speed with multitexturing)
+- implement vertex arrays for models (if I have the time)
+
+
+
+Source is available upon request.
+
+
+Bugreports, comments:
+
+email: christian.michael@groenjord.dk
+http://surgeon.users2.50megs.com/quake.htm
+

@@ -1,0 +1,412 @@
+#
+# Quake Makefile for M68k Amiga
+#
+# Dec '99 by Frank Wille <frank@phoenix.owl.de>
+# Nov '02 by Christian Michael
+#
+
+VERSION=1.09
+ARCH=m68k040/glquake
+EXED=m68k
+BUILDDIR=$(ARCH)
+EXEDIR=$(EXED)
+CC=vc +aos68k_warpos
+CC68=vc +aos68k_warpos
+
+EYECANDY= -DLITFILES -DGLOWEFFECTS
+
+CFLAGS=-c99 -O2 -cpu=68040 -fpu=68040 -no-trigraphs -dontwarn=129 \
+       $(EYECANDY) -DFASTBOPS -DGLQUAKE -DAMIGA -DNDEBUG -DGLM68KASM -DOPTIMIZE_060
+
+
+NOP_CFLAGS=-c99 -cpu=68040 -fpu=68040 -no-trigraphs -dontwarn=129 \
+       $(EYECANDY) -DFASTBOPS -DGLQUAKE -DAMIGA -DNDEBUG -DGLM68KASM -DOPTIMIZE_060 
+
+OPT_CFLAGS=-c99 -O2 -maxoptpasses=40 -cpu=68040 -fpu=68040 -no-trigraphs -dontwarn=129 \
+       $(EYECANDY) -DFASTBOPS -DGLQUAKE -DAMIGA -DGLM68KASM -DOPTIMIZE_060 -DNDEBUG
+
+MAXOPT_CFLAGS=-c99 -O2 -maxoptpasses=100 -cpu=68040 -fpu=68040 -no-trigraphs -dontwarn=129 \
+       $(EYECANDY) -DFASTBOPS -DGLQUAKE -DAMIGA -DGLM68KASM -DOPTIMIZE_060 -DNDEBUG
+
+XOPT_CFLAGS=-c99 -O3 -maxoptpasses=100 -cpu=68040 -fpu=68040 -no-trigraphs -dontwarn=129 \
+       $(EYECANDY) -DFASTBOPS -DGLQUAKE -DAMIGA -DGLM68KASM -DOPTIMIZE_060 -DNDEBUG
+
+SPEED_CFLAGS=-c99 -O2 -speed -unroll-size=2 -maxoptpasses=40 -cpu=68040 -fpu=68040 -no-trigraphs -dontwarn=129 \
+       $(EYECANDY) -DFASTBOPS -DGLQUAKE -DAMIGA -DGLM68KASM -DOPTIMIZE_060 -DNDEBUG
+
+
+NETINC=-Ivincludeos3: -Idevel:amitcp/netinclude
+LDFLAGS=-lm040 -lvc -lmgl040blitz -lamiga
+//AS=phxass
+//ASFLAGS=q noexe m=68060 opt=2 i=devel:ndk_3.9/INCLUDE/include_i
+
+AS= vasmm68k_mot_wos
+ASFLAGS= -Fhunk -m68040 -phxass -opt-fconst -showopt -x -nosym -I devel:NDK_3.9/Include/include_i
+
+DO_CC=$(CC) $(CFLAGS) -o $@ -c $<
+DO_NOP_CC=$(CC) $(NOP_CFLAGS) -o $@ -c $<
+DO_LOWOP_CC=$(CC) $(LOWOP_CFLAGS) -o $@ -c $<
+DO_OPT_CC=$(CC) $(OPT_CFLAGS) -o $@ -c $<
+DO_MAXOPT_CC=$(CC) $(MAXOPT_CFLAGS) -o $@ -c $<
+DO_XOPT_CC=$(CC) $(XOPT_CFLAGS) -o $@ -c $<
+DO_CCNET=$(CC) $(CFLAGS) $(NETINC) -o $@ -c $<
+DO_SPEED_CC=$(CC) $(SPEED_CFLAGS) -o $@ -c $<
+
+DO_AS=$(AS) $(ASFLAGS) -o $@ $<
+
+
+#############################################################################
+# SETUP AND BUILD
+#############################################################################
+
+TARGETS=$(BUILDDIR)/glquake68040_vbcc
+
+all: $(TARGETS)
+
+
+#############################################################################
+# CLIENT/SERVER
+#############################################################################
+
+QUAKE_OBJS= \
+	$(BUILDDIR)/chase.o \
+	$(BUILDDIR)/cl_demo.o \
+	$(BUILDDIR)/cl_input.o \
+	$(BUILDDIR)/cl_main.o \
+	$(BUILDDIR)/cl_parse.o \
+	$(BUILDDIR)/cl_tent.o \
+	$(BUILDDIR)/cmd.o \
+	$(BUILDDIR)/common.o \
+	$(BUILDDIR)/console.o \
+	$(BUILDDIR)/crc.o \
+	$(BUILDDIR)/cvar.o \
+	$(BUILDDIR)/host.o \
+	$(BUILDDIR)/host_cmd.o \
+	$(BUILDDIR)/in_amiga.o \
+	$(BUILDDIR)/in_amigajoy.o \
+	$(BUILDDIR)/in_amigapsx.o \
+	$(BUILDDIR)/in_amigamouse.o \
+	$(BUILDDIR)/keys.o \
+	$(BUILDDIR)/location.o \
+	$(BUILDDIR)/menu.o \
+	$(BUILDDIR)/mathlib.o \
+	$(BUILDDIR)/net_amiga.o \
+	$(BUILDDIR)/net_bsdsocket.o \
+	$(BUILDDIR)/net_dgrm.o \
+	$(BUILDDIR)/net_loop.o \
+	$(BUILDDIR)/net_main.o \
+	$(BUILDDIR)/net_vcr.o \
+	$(BUILDDIR)/nonintel.o \
+	$(BUILDDIR)/pr_cmds.o \
+	$(BUILDDIR)/pr_edict.o \
+	$(BUILDDIR)/pr_exec.o \
+	$(BUILDDIR)/r_part.o \
+	$(BUILDDIR)/gl_draw.o \
+	$(BUILDDIR)/gl_mesh.o \
+	$(BUILDDIR)/gl_model.o \
+	$(BUILDDIR)/gl_refrag.o \
+	$(BUILDDIR)/gl_rlight.o \
+	$(BUILDDIR)/gl_rmain.o \
+	$(BUILDDIR)/gl_fog.o \
+	$(BUILDDIR)/gl_mirror.o \
+	$(BUILDDIR)/gl_wiredraw.o \
+	$(BUILDDIR)/gl_rmisc.o \
+	$(BUILDDIR)/gl_rsurf.o \
+	$(BUILDDIR)/gl_screen.o \
+	$(BUILDDIR)/gl_vidamiga.o \
+	$(BUILDDIR)/sbar.o \
+	$(BUILDDIR)/sv_main.o \
+	$(BUILDDIR)/sv_phys.o \
+	$(BUILDDIR)/sv_move.o \
+	$(BUILDDIR)/sv_user.o \
+	$(BUILDDIR)/zone.o \
+	$(BUILDDIR)/view.o \
+	$(BUILDDIR)/wad.o \
+	$(BUILDDIR)/world.o \
+	$(BUILDDIR)/cd_amiga.o \
+	$(BUILDDIR)/snd_amiga.o \
+	$(BUILDDIR)/snd_paula.o \
+	$(BUILDDIR)/snd_ahi.o \
+	$(BUILDDIR)/snd_ahieff.o \
+	$(BUILDDIR)/snd_dma.o \
+	$(BUILDDIR)/snd_mix.o \
+	$(BUILDDIR)/snd_mem.o \
+	$(BUILDDIR)/sys_amiga.o \
+	$(BUILDDIR)/sys_amigaclip.o \
+	$(BUILDDIR)/twfsound_cd.o \
+	$(BUILDDIR)/keys_amiga68k.o
+
+
+QUAKE_AS_OBJS= \
+	$(BUILDDIR)/in_amigamouse68k.o \
+ 	$(BUILDDIR)/in_amigamousewin68k.o \
+	$(BUILDDIR)/snd_int68k.o \
+	$(BUILDDIR)/snd_mixamiga68k.o \
+	$(BUILDDIR)/sys_amiga68k.o 
+
+
+# use -DGLM68KASM when you want to use the following
+GLQUAKE_ASOPT_OBJS= \
+	$(BUILDDIR)/common68k.o \
+	$(BUILDDIR)/mathlib68k.o 
+
+INCS = quakedef.h \
+       common.h bspfile.h vid.h sys.h \
+       zone.h mathlib.h wad.h draw.h \
+       cvar.h screen.h net.h protocol.h \
+       cmd.h sbar.h sound.h render.h \
+       client.h progs.h server.h \
+       gl_model.h input.h \
+       world.h keys.h console.h location.h \
+       view.h menu.h crc.h cdaudio.h \
+       pr_comp.h progdefs.h modelgen.h spritegn.h glquake.h
+
+
+$(BUILDDIR)/glquake68040_vbcc: $(QUAKE_OBJS) $(QUAKE_AS_OBJS) $(GLQUAKE_ASOPT_OBJS)
+	$(CC) -o $@ $(BUILDDIR)/#?.o $(LDFLAGS)
+
+quakedef68k.i: genasmheaders glquakeasmheaders.gen
+	genasmheaders glquakeasmheaders.gen $@ 0 "$(CC) $(CFLAGS) -DGENDEFS"
+
+glquakedef68k.i: genasmheaders glquakeasmheaders.gen
+	genasmheaders glquakeasmheaders.gen $@ 0 "$(CC) $(CFLAGS) -DGENDEFS"
+
+genasmheaders: genasmheaders.c
+	$(CC68) -o $@ genasmheaders.c
+
+##
+
+
+$(BUILDDIR)/chase.o :               chase.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/cl_demo.o :             cl_demo.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/cl_input.o :            cl_input.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/cl_main.o :             cl_main.c $(INCS)
+	$(DO_CC)
+
+$(BUILDDIR)/cl_parse.o :            cl_parse.c $(INCS)
+	$(DO_CC)
+
+$(BUILDDIR)/cl_tent.o :             cl_tent.c $(INCS)
+	$(DO_CC)
+
+$(BUILDDIR)/cmd.o :                 cmd.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/common.o :              common.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/console.o :             console.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/crc.o :                 crc.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/cvar.o :                cvar.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/host.o :                host.c $(INCS)  r_local.h r_shared.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/host_cmd.o :            host_cmd.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/keys.o :                keys.c $(INCS) sys_amigaclip.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/location.o :            location.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/menu.o :                menu.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/mathlib.o :             mathlib.c $(INCS)
+	$(DO_MAXOPT_CC)
+
+$(BUILDDIR)/nonintel.o :            nonintel.c $(INCS) r_local.h  r_shared.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/pr_cmds.o :             pr_cmds.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/pr_edict.o :            pr_edict.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/pr_exec.o :             pr_exec.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/r_part.o :              r_part.c $(INCS) r_local.h r_shared.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_draw.o :        gl_draw.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_mesh.o :        gl_mesh.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_model.o :        gl_model.c $(INCS) gl_model.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_refrag.o :        gl_refrag.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_rlight.o :        gl_rlight.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_rmain.o :        gl_rmain.c $(INCS)
+	$(DO_MAXOPT_CC)
+
+$(BUILDDIR)/gl_fog.o :        gl_fog.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_mirror.o :        gl_mirror.c $(INCS)
+	$(DO_XOPT_CC)
+
+$(BUILDDIR)/gl_wiredraw.o :        gl_wiredraw.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_rmisc.o :        gl_rmisc.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_rsurf.o :        gl_rsurf.c miniglext.c gl_warp.c $(INCS)
+	$(DO_XOPT_CC) miniglext.c gl_warp.c
+
+$(BUILDDIR)/gl_screen.o :        gl_screen.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/gl_vidamiga.o :        gl_vidamiga.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/sbar.o :                sbar.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/sv_main.o :             sv_main.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/sv_phys.o :             sv_phys.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/sv_move.o :             sv_move.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/sv_user.o :             sv_user.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/zone.o	:           zone.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/view.o	:           view.c $(INCS) 
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/wad.o :                 wad.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/world.o :               world.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/cd_amiga.o :            cd_amiga.c $(INCS) twfsound_cd.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/twfsound_cd.o :         twfsound_cd.c twfsound_cd.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/snd_dma.o :             snd_dma.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/snd_mix.o :             snd_mix.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/snd_mem.o :             snd_mem.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/net_amiga.o :           net_amiga.c $(INCS) net_loop.h net_dgrm.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/net_bsdsocket.o :       net_bsdsocket.c $(INCS)
+	$(DO_CCNET)
+
+$(BUILDDIR)/net_dgrm.o :            net_dgrm.c $(INCS) net_dgrm.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/net_loop.o :            net_loop.c $(INCS) net_loop.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/net_main.o :            net_main.c $(INCS) net_vcr.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/net_vcr.o :             net_vcr.c $(INCS) net_vcr.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/sys_amiga.o :           sys_amiga.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/sys_amigaclip.o :       sys_amigaclip.c $(INCS) sys_amigaclip.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/snd_amiga.o :           snd_amiga.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/in_amiga.o :            in_amiga.c $(INCS) in_amiga.h
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/in_amigajoy.o :         in_amigajoy.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/in_amigapsx.o :         in_amigapsx.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/in_amigamouse.o :       in_amigamouse.c $(INCS)
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/snd_ahieff.o: 	    snd_ahieff.c
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/keys_amiga68k.o:	   keys_amiga68k.c
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/snd_paula.o:	   snd_paula.c
+	$(DO_OPT_CC)
+
+$(BUILDDIR)/snd_ahi.o:	   	snd_ahi.c
+	$(DO_OPT_CC)
+#####
+
+$(BUILDDIR)/snd_mixamiga68k.o:      snd_mixamiga68k.s quakedef68k.i
+	$(DO_AS)
+
+$(BUILDDIR)/in_amigamouse68k.o:     in_amigamouse68k.s
+	$(DO_AS)
+
+$(BUILDDIR)/in_amigamousewin68k.o:     in_amigamousewin68k.s
+	$(DO_AS)
+
+$(BUILDDIR)/snd_int68k.o:           snd_int68k.s
+	$(DO_AS)
+
+$(BUILDDIR)/sys_amiga68k.o:         sys_amiga68k.s
+	$(DO_AS)
+
+#####
+
+
+$(BUILDDIR)/common68k.o:            common68k.s 
+	$(DO_AS)
+
+$(BUILDDIR)/mathlib68k.o:            mathlib68k.s glquakedef68k.i
+	$(DO_AS)
+
+#$(BUILDDIR)/gl_rlight68k.o:            gl_rlight68k.s glquakedef68k.i
+#	$(DO_AS)
+
+#############################################################################
+# MISC
+#############################################################################
+
+clean:
+	delete force quiet $(QUAKE_OBJS) $(QUAKE_AS_OBJS) $(QUAKE_AS68_OBJS)
+

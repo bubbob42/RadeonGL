@@ -1,0 +1,3670 @@
+/*
+Copyright (C) 1996-1997 Id Software, Inc.
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
+
+See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
+*/
+// r_main.c
+
+//Surgeon: notes regarding model-flatshading:
+//precalc dotproducts are within the range [0.70;1.99]
+//I have selected 1.20 as constant flatshade multiplier
+
+
+#include "quakedef.h"
+
+#include <mgl/mglmacros.h>
+
+cvar_t r_interpolations = {"r_interpolations","0", true}; // now true - Cowcat 2019
+
+//surgeon:
+extern qboolean mtexenabled;
+
+//surgeon: some constants 
+#define MPIMUL (M_PI*180)
+#define MPIDIV (M_PI/360)
+
+extern void R_DrawWaterSurfaces (void);
+extern void R_DrawParticles (void);
+extern void R_DrawParticles_Classic(void); // Cowcat
+extern void R_RenderBrushPoly (msurface_t *fa);
+extern void V_CalcBlend (void);
+//extern void RotatePointAroundVector( vec3_t dst, const vec3_t dir, const vec3_t point, float degrees );
+extern void RotatePointAroundVectorNEW( vec3_t dst, vec3_t dst2, const vec3_t dir, const vec3_t point, float degrees );
+
+extern qboolean SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace);
+
+extern void Mirror_Scale(); // 
+extern void R_Mirror(void); // 
+
+entity_t r_worldentity;
+
+qboolean r_cache_thrash;	// compatability
+
+vec3_t	  modelorg, r_entorigin;
+entity_t  *currententity;
+
+int	r_visframecount;	// bumped when going to a new PVS
+int	r_framecount;		// used for dlight push checking
+
+mplane_t  frustum[4]; //
+
+int	c_brush_polys, c_alias_polys;
+
+//qboolean  envmap;		// true during envmap command capture - was disabled Cowcat
+
+int	currenttexture = -1;	// to avoid unnecessary texture sets
+
+int	cnttextures[2] = {-1, -1};     // cached
+
+int	particletexture;	// little dot for particles
+int	playertextures;		// up to 16 color translated skins
+
+extern	mplane_t  *mirror_plane;	//
+extern	qboolean  mirror;
+
+qboolean r_dowarp = true;	//waterwarp switch by SuRgEoN
+//qboolean smoothmodels = true; 	// Cowcat 2019
+
+//
+// view origin
+//
+
+vec3_t	vup;
+vec3_t	vpn;
+vec3_t	vright;
+vec3_t	r_origin;
+
+float r_world_matrix[16];
+
+//
+// screen size info
+//
+
+refdef_t  r_refdef;
+
+mleaf_t	  *r_viewleaf, *r_oldviewleaf;
+
+texture_t *r_notexture_mip;
+
+int	d_lightstylevalue[256];		// 8.8 fraction of base light value
+
+void	R_MarkLeaves (void);
+
+cvar_t	r_elim_areasize = {"r_elim_areasize","0.50", true};
+cvar_t	r_cullworld = {"r_cullworld","0"};	//Surgeon
+cvar_t	r_norefresh = {"r_norefresh","0"};
+cvar_t	r_drawentities = {"r_drawentities","1"};
+cvar_t	r_drawviewmodel = {"r_drawviewmodel","1"};
+cvar_t	r_speeds = {"r_speeds","0"};
+cvar_t	r_fullbright = {"r_fullbright","0"};
+cvar_t	r_lightmap = {"r_lightmap","0"};
+cvar_t	r_shadows = {"r_shadows","0", true}; // true Cowcat
+cvar_t	r_wateralpha = {"r_wateralpha","1", true}; // true Cowcat
+cvar_t	r_waterwarp = {"r_waterwarp","1", true}; //by surgeon - now true -Cowcat
+cvar_t	r_dynamic = {"r_dynamic","1"};
+cvar_t	r_novis = {"r_novis","0"};
+
+cvar_t	gl_finish = {"gl_finish","0"};
+cvar_t	gl_clear = {"gl_clear","0"};
+cvar_t	gl_cull = {"gl_cull","1"};
+cvar_t	gl_texsort = {"gl_texsort","1"};
+cvar_t	gl_smoothmodels = {"gl_smoothmodels","1"};
+cvar_t	gl_affinemodels = {"gl_affinemodels","0"};
+cvar_t	gl_polyblend = {"gl_polyblend","1"};
+cvar_t	gl_flashblend = {"gl_flashblend","1"};
+cvar_t	gl_playermip = {"gl_playermip","0"};
+cvar_t	gl_nocolors = {"gl_nocolors","0"};
+cvar_t	gl_keeptjunctions = {"gl_keeptjunctions","0"};
+cvar_t	gl_reporttjunctions = {"gl_reporttjunctions","0"};
+cvar_t	gl_doubleeyes = {"gl_doubleeyes", "1"};
+
+extern void R_Fog_BeginFrame(void);
+extern qboolean fog;
+
+extern cvar_t r_showbboxes;
+extern void R_ShowBBoxes();
+
+cvar_t	gl_glows = {"gl_glows", "1", true};
+
+cvar_t	gl_classic_particles = {"gl_classic_particles","0", true}; // Cowcat
+cvar_t	cl_gunfov = {"cl_gunfov","0", true}; // ROOk
+cvar_t	shadowalpha = {"shadowalpha","1.0", true}; // Cowcat
+cvar_t	gl_farclip = {"gl_farclip","4096", true}; // 16384 max - Cowcat 2019
+
+extern	cvar_t	gl_ztrick;
+extern	qboolean gl_warp;
+
+#ifdef AMIGAOS
+cvar_t	r_cull_aggressive = {"r_cull_aggressive","0", true};
+cvar_t	r_vertexarrays = {"r_vertexarrays","1", true};
+cvar_t	r_model_maxdist = {"r_model_maxdist","2048"};
+static	ULONG r_mod_maxdist;	//default 4096 units
+#endif
+
+cvar_t	r_stereo = {"r_stereo","0"};
+cvar_t	r_stereodepth = {"r_stereodepth","128"};
+qboolean stereoview = false;
+
+cvar_t	gl_showpolys = {"gl_showpolys","0"};
+cvar_t	gl_wireframe = {"gl_wireframe","0"};
+cvar_t	gl_wireonly = {"gl_wireonly","0"};
+qboolean wireframe = false;
+
+float	r_shadow_matrix[16]; // Cowcat
+
+float	entalpha;	// johnfitz
+float	r_fovx, r_fovy; // johnfitz - rendering fov may be different for r_stereo
+
+typedef struct qglarray_s
+{
+	float	x,y,z;	
+	float	s,t,w;		//w is for MiniGL
+
+	#ifdef OPTIMIZE_060
+	int	xi,yi,zi;	//MiniGL has fast integer pipeline
+	#endif
+
+	ULONG	c;		//rgba packed
+
+} qglarray_t;
+
+
+static qglarray_t *global_qglarray = NULL;
+
+void qgl_InitArrays(void)
+{
+	int i;
+
+	global_qglarray = malloc(sizeof(qglarray_t)*4096);
+
+	#define maxlight 0xffffffff
+
+	for (i=0; i<4096; i++)
+	{
+		global_qglarray[i].w = 1.0;
+		global_qglarray[i].c = maxlight;
+	}
+}
+
+void qgl_FreeArrays(void)
+{
+	free(global_qglarray);
+}
+
+static void qgl_EnableArray()
+{
+	glEnableClientState(GL_VERTEX_ARRAY);
+
+	#ifdef OPTIMIZE_060
+
+	if(r_interpolations.value)
+	{
+		glVertexPointer(3, GL_FLOAT, sizeof(qglarray_t), &global_qglarray->x);
+	}
+
+	else
+	{
+		glVertexPointer(3, GL_INT, sizeof(qglarray_t), &global_qglarray->xi);
+	}
+
+	#else
+		glVertexPointer(3, GL_FLOAT, sizeof(qglarray_t), &global_qglarray->x);
+
+	#endif
+
+	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	glTexCoordPointer(3, GL_FLOAT, sizeof(qglarray_t), &global_qglarray->s);
+
+	if(gl_smoothmodels.value)
+	//if(smoothmodels)
+	{
+		glEnableClientState(GL_COLOR_ARRAY);
+		glColorPointer(4, MGL_UBYTE_ARGB, sizeof(qglarray_t), &global_qglarray->c);
+	}
+}
+
+static void qgl_DisableArray()
+{
+	glDisableClientState(GL_COLOR_ARRAY);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	glDisableClientState(GL_VERTEX_ARRAY);
+}
+
+
+#ifndef FASTBOPS //made a macro in mathlib.h
+/*
+=================
+R_CullBox
+
+Returns true if the box is completely outside the frustom
+=================
+*/
+qboolean R_CullBox (vec3_t mins, vec3_t maxs)
+{
+	int   i;
+
+	for (i=0 ; i<4 ; i++)
+		if (BoxOnPlaneSide (mins, maxs, &frustum[i]) == 2)
+			return true;
+
+	return false;
+}
+#endif
+
+
+
+//void R_RotateForEntity (entity_t *e, int shadow)
+void R_RotateForEntity (entity_t *e)
+{
+	glTranslatef (e->origin[0],  e->origin[1],  e->origin[2]);
+
+#ifdef AMIGAOS
+	glRotatefEXT(e->angles[1], GLROT_001);
+	
+	if(r_shadows.value && e->model->type == mod_alias)
+		glGetFloatv (GL_MODELVIEW_MATRIX, r_shadow_matrix);
+
+	//if(shadow == 0)
+	{
+		glRotatefEXT(-e->angles[0], GLROT_010);
+		//ZOID: fixed z angle
+		glRotatefEXT(e->angles[2], GLROT_100);
+	}
+#else
+	glRotatef (e->angles[1],  0, 0, 1);
+	glRotatef (-e->angles[0],  0, 1, 0);
+	glRotatef (e->angles[2],  1, 0, 0);
+#endif
+
+}
+
+
+//void R_RotateInterpolatedForEntity (entity_t *e, int shadow)
+void R_RotateInterpolatedForEntity (entity_t *e) // modded 2019 - Cowcat
+{
+	float	blend, timepassed;
+	vec3_t	d;
+	int	i;
+
+	// positional interpolation
+
+	timepassed = cl.time - e->translate_start_time;
+	//timepassed = realtime - e->translate_start_time; 
+	
+	if (e->translate_start_time == 0 || timepassed > 1)
+	{
+		//e->translate_start_time = realtime;
+		e->translate_start_time = cl.time;
+		VectorCopy (e->origin, e->origin1);
+		VectorCopy (e->origin, e->origin2);
+	}
+
+	if (!VectorCompare (e->origin, e->origin2))
+	{
+		//e->translate_start_time = realtime;
+		e->translate_start_time = cl.time;
+		VectorCopy (e->origin2, e->origin1);
+		VectorCopy (e->origin,	e->origin2);
+		blend = 0;
+	}
+
+	else
+	{
+		blend = timepassed / 0.1;
+		//blend = ( timepassed * 10 ) * r_interpolations.value; 
+		//blend = timepassed * 10;
+
+		if (cl.paused || blend > 1)
+			blend = 1;
+	}
+
+	VectorSubtract (e->origin2, e->origin1, d);
+
+	glTranslatef ( e->origin1[0] + (blend * d[0]), e->origin1[1] + (blend * d[1]), e->origin1[2] + (blend * d[2]));
+
+	// orientation interpolation (Euler angles, yuck!)
+	timepassed = cl.time - e->rotate_start_time;
+	//timepassed = realtime - e->rotate_start_time;
+
+	if (e->rotate_start_time == 0 || timepassed > 1)
+	{
+		//e->rotate_start_time = realtime;
+		e->rotate_start_time = cl.time;
+		VectorCopy (e->angles, e->angles1);
+		VectorCopy (e->angles, e->angles2);
+	}
+
+	if (!VectorCompare (e->angles, e->angles2))
+	{
+		//e->rotate_start_time = realtime;
+		e->rotate_start_time = cl.time;
+		VectorCopy (e->angles2, e->angles1);
+		VectorCopy (e->angles,	e->angles2);
+		blend = 0;
+	}
+
+	else
+	{
+		blend = timepassed / 0.1;
+		//blend = ( timepassed * 10 ) * r_interpolations.value;
+		//blend = timepassed * 10;
+
+		if (cl.paused || blend > 1)
+			blend = 1;
+	}
+
+	VectorSubtract (e->angles2, e->angles1, d);
+
+	// always interpolate along the shortest path
+	for (i = 0; i < 3; i++) 
+	{
+		if (d[i] > 180)
+		{
+			d[i] -= 360;
+		}
+
+		else if (d[i] < -180)
+		{
+			d[i] += 360;
+		}
+	}
+
+	glRotatefEXT ( e->angles1[1] + ( blend * d[1]),	 GLROT_001);
+
+	if(r_shadows.value && e->model->type == mod_alias)
+		glGetFloatv (GL_MODELVIEW_MATRIX, r_shadow_matrix);
+
+	//if( shadow == 0)
+	{
+		glRotatefEXT (-e->angles1[0] + (-blend * d[0]),	 GLROT_010);
+		glRotatefEXT ( e->angles1[2] + ( blend * d[2]),	 GLROT_100);
+	}
+}
+
+
+/*
+=============================================================
+
+  SPRITE MODELS
+
+=============================================================
+*/
+
+/*
+================
+R_GetSpriteFrame
+================
+*/
+
+mspriteframe_t *R_GetSpriteFrame (entity_t *currententity)
+{
+	msprite_t	*psprite;
+	mspritegroup_t	*pspritegroup;
+	mspriteframe_t	*pspriteframe;
+	int		i, numframes, frame;
+	float		*pintervals, fullinterval, targettime, time;
+
+	psprite = currententity->model->cache.data;
+	frame = currententity->frame;
+
+	if ((frame >= psprite->numframes) || (frame < 0))
+	{
+		Con_Printf ("R_DrawSprite: no such frame %d\n", frame);
+		frame = 0;
+	}
+
+	if (psprite->frames[frame].type == SPR_SINGLE)
+	{
+		pspriteframe = psprite->frames[frame].frameptr;
+	}
+
+	else
+	{
+		pspritegroup = (mspritegroup_t *)psprite->frames[frame].frameptr;
+		pintervals = pspritegroup->intervals;
+		numframes = pspritegroup->numframes;
+		fullinterval = pintervals[numframes-1];
+
+		time = cl.time + currententity->syncbase;
+
+		// when loading in Mod_LoadSpriteGroup, we guaranteed all interval values
+		// are positive, so we don't have to worry about division by 0
+
+		targettime = time - ((int)(time / fullinterval)) * fullinterval;
+
+		for (i=0 ; i<(numframes-1) ; i++)
+		{
+			if (pintervals[i] > targettime)
+				break;
+		}
+
+		pspriteframe = pspritegroup->frames[i];
+	}
+
+	return pspriteframe;
+}
+
+
+/*
+=================
+R_DrawSpriteModel
+
+=================
+*/
+
+void R_DrawSpriteModel (entity_t *e)
+{
+	vec3_t		point, v_forward, v_right, v_up;
+	mspriteframe_t	*frame;
+	msprite_t	*psprite;
+	float		*up, *right;
+	
+
+	// don't even bother culling, because it's just a single
+	// polygon without a surface cache
+
+	frame = R_GetSpriteFrame (e);
+	psprite = currententity->model->cache.data;
+
+	if (psprite->type == SPR_ORIENTED)
+	{
+		//Con_Printf("SPR_ORIENTED\n");
+
+		// bullet marks on walls
+		AngleVectors (currententity->angles, v_forward, v_right, v_up);
+		up = v_up;
+		right = v_right;
+	}
+
+	else
+	{
+		//Con_Printf("SPR_normal\n");
+		// normal sprite
+		up = vup;
+		right = vright;
+	}
+
+	//if(mtexenabled)
+		//GL_DisableMultitexture(); // already disabled
+
+	GL_Bind(frame->gl_texturenum);
+
+	glColor3f(1,1,1);
+	glEnable(GL_ALPHA_TEST);
+	glBegin (GL_QUADS);
+
+#if 1 //VectorMA inlined
+	
+	point[0] = e->origin[0] + frame->down*up[0];
+	point[1] = e->origin[1] + frame->down*up[1];
+	point[2] = e->origin[2] + frame->down*up[2];
+	point[0] += frame->left*right[0];
+	point[1] += frame->left*right[1];
+	point[2] += frame->left*right[2];
+
+	glTexCoord2f (0, 1);
+	glVertex3fv (point);
+
+	point[0] = e->origin[0] + frame->up*up[0];
+	point[1] = e->origin[1] + frame->up*up[1];
+	point[2] = e->origin[2] + frame->up*up[2];
+	point[0] += frame->left*right[0];
+	point[1] += frame->left*right[1];
+	point[2] += frame->left*right[2];
+
+	glTexCoord2f (0, 0);
+	glVertex3fv (point);
+
+	point[0] = e->origin[0] + frame->up*up[0];
+	point[1] = e->origin[1] + frame->up*up[1];
+	point[2] = e->origin[2] + frame->up*up[2];
+	point[0] += frame->right*right[0];
+	point[1] += frame->right*right[1];
+	point[2] += frame->right*right[2];
+
+	glTexCoord2f (1, 0);
+	glVertex3fv (point);
+
+	point[0] = e->origin[0] + frame->down*up[0];
+	point[1] = e->origin[1] + frame->down*up[1];
+	point[2] = e->origin[2] + frame->down*up[2];
+	point[0] += frame->right*right[0];
+	point[1] += frame->right*right[1];
+	point[2] += frame->right*right[2];
+
+	glTexCoord2f (1, 1);
+	glVertex3fv (point);
+
+#else
+
+	glTexCoord2f (0, 1);
+	VectorMA (e->origin, frame->down, up, point);
+	VectorMA (point, frame->left, right, point);
+	glVertex3fv (point);
+
+	glTexCoord2f (0, 0);
+	VectorMA (e->origin, frame->up, up, point);
+	VectorMA (point, frame->left, right, point);
+	glVertex3fv (point);
+
+	glTexCoord2f (1, 0);
+	VectorMA (e->origin, frame->up, up, point);
+	VectorMA (point, frame->right, right, point);
+	glVertex3fv (point);
+
+	glTexCoord2f (1, 1);
+	VectorMA (e->origin, frame->down, up, point);
+	VectorMA (point, frame->right, right, point);
+	glVertex3fv (point);
+
+#endif
+ 
+	glEnd ();
+	glDisable(GL_ALPHA_TEST);
+}
+
+
+/*
+=============================================================
+
+  ALIAS MODELS
+
+=============================================================
+*/
+
+/* moved to r_part.c
+#define NUMVERTEXNORMALS  162
+
+float r_avertexnormals[NUMVERTEXNORMALS][3] = {
+#include "anorms.h"
+};
+*/
+
+vec3_t	shadevector;
+
+float	shadelight, ambientlight;
+
+// precalculated dot products for quantized angles
+#define SHADEDOT_QUANT 16
+//surgeon: static
+static float r_avertexnormal_dots[SHADEDOT_QUANT][256] =
+#include "anorm_dots.h"
+;
+
+static float *shadedots = r_avertexnormal_dots[0];
+
+//light lerping // test 2019 - Cowcat
+//float *shadedots2 = r_avertexnormal_dots[0];
+//float lightlerpoffset;
+//
+
+int	lastposenum;
+int	lastposenum0; // new Cowcat 2019
+
+#ifdef LITFILES
+extern	vec3_t lightcolor;
+extern	qboolean eyecandy;
+extern	int R_LightPointColor (vec3_t p);
+#endif
+
+
+/*
+=============
+GL_DrawAliasFrame
+=============
+*/
+
+#if 1
+
+void GL_DrawAliasBlendedFrame (aliashdr_t *paliashdr, int pose1, int pose2, float blend) // 2019 - cowcat
+{ 
+	#ifdef LITFILES
+	float		r, g, b, a; // alpha
+	#endif
+
+	float		l;
+	trivertx_t	*verts1, *verts2;
+	int		*order, count;
+	vec3_t		d;
+
+	//qboolean	smoothmodels = true; // Cowcat 2019
+	a = entalpha; // johnfitz
+
+	lastposenum0 = pose1;
+	lastposenum = pose2;
+
+	verts1 = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts2 = verts1;
+
+	verts1 += pose1 * paliashdr->poseverts; 
+	verts2 += pose2 * paliashdr->poseverts; 
+
+	order = (int *)((byte *)paliashdr + paliashdr->commands); 
+
+	#ifndef LITFILES
+
+	if(!gl_smoothmodels.value) //Surgeon 
+	{
+		l = shadelight * 1.20;
+
+		if (l > 255)
+			l = 255.f;
+
+		l *= 1.f / 255.f;
+
+		glColor3f(l,l,l);
+	}
+
+	#else
+
+	if(!gl_smoothmodels.value) //Surgeon
+	//if(!smoothmodels)
+	{
+		if(eyecandy)
+		{
+			r = (1.2/255.0)*lightcolor[0]; if(r > 1.0) r = 1.0;
+			g = (1.2/255.0)*lightcolor[1]; if(g > 1.0) g = 1.0;
+			b = (1.2/255.0)*lightcolor[2]; if(b > 1.0) b = 1.0;
+
+			//glColor3f(r,g,b);
+			glColor4f(r, g, b, a);
+		}
+
+		else
+		{
+			l = shadelight * 1.20;
+
+			if (l > 255)
+				l = 255.f;
+
+			l *= 1.f / 255.f;
+
+			//glColor3f(l,l,l);
+			glColor4f(l, l, l, a);
+		}
+
+		//smoothmodels = false; // Cowcat 2019
+	}
+
+	#endif
+
+	while (1) 
+	{ 
+		// get the vertex count and primitive type 
+		count = *order++;
+ 
+		if (!count) 
+			break;	// done
+
+		if (count <  0) 
+		{ 
+			count = -count; 
+			glBegin (GL_TRIANGLE_FAN); 
+		}
+ 
+		else
+		{ 
+			glBegin (GL_TRIANGLE_STRIP); 
+		}
+
+		if(gl_smoothmodels.value)
+		//if(smoothmodels) // Cowcat 2019
+		{
+			do 
+			{ 
+				// texture coordinates come from the draw list 
+				glTexCoord2f (((float *)order)[0], ((float *)order)[1]); 
+				order += 2;
+
+				#ifndef LITFILES
+
+				l = shadedots[verts->lightnormalindex] * shadelight;
+
+				if(l>255)
+					l=255; //clamp
+
+				l *= 1.0 / 255.0;
+
+				glColor3f (l, l, l);
+
+				#else
+
+				if(eyecandy)
+				{
+					#if 1
+
+					l = shadedots[verts1->lightnormalindex]*(1.0/255.0);
+
+					r = l*lightcolor[0]; if(r > 1.0) r = 1.0;
+					g = l*lightcolor[1]; if(g > 1.0) g = 1.0;
+					b = l*lightcolor[2]; if(b > 1.0) b = 1.0;
+
+					//glColor3f(r,g,b);
+					glColor4f (r, g, b, a);
+
+					#else // test Cowcat - 2019
+
+					d[0] = shadedots[verts2->lightnormalindex] - shadedots[verts1->lightnormalindex];
+					l = shadelight * (shadedots[verts1->lightnormalindex] + (blend * d[0]));
+					
+					glColor3f(r,g,b);
+					glColor4f (r, g, b, a);
+
+					/*
+
+					// light lerping test
+					float d2, l1, l2, diff;
+
+					d[0] = shadedots[verts2->lightnormalindex] - shadedots[verts1->lightnormalindex];
+					d2 = shadedots2[verts2->lightnormalindex] - shadedots2[verts1->lightnormalindex];
+
+					l1 = shadelight * ( shadedots[verts1->lightnormalindex] + (blend * d[0]) );
+					l2 = shadelight * ( shadedots2[verts1->lightnormalindex] + (blend * d2) );
+
+					if( l1 != l2)
+					{
+						if(l1 > l2)
+						{
+							diff = l1 - l2;
+							diff *= lightlerpoffset;
+							l = l1 - diff;
+						}
+
+						else
+						{
+							diff = l2 - l1;
+							diff *= lightlerpoffset;
+							l = l1 + diff;
+						}
+					}
+
+					else
+						l = l1;
+	
+					r = l*lightcolor[0]; if(r > 1.0) r = 1.0;
+					g = l*lightcolor[1]; if(r > 1.0) g = 1.0;
+					b = l*lightcolor[2]; if(r > 1.0) b = 1.0;
+ 
+					//glColor3f(r,g,b);
+					glColor4f (r, g, b, a);
+
+					*/
+
+					#endif
+				}
+
+				else
+				{
+					#if 1
+
+					l = shadedots[verts1->lightnormalindex] * shadelight;
+
+					if(l>255)
+						l=255; //clamp
+
+					l *= 1.0 / 255.0;
+
+					//glColor3f (l, l, l);
+					glColor4f (l, l, l, a);
+
+					#else // test Cowcat 2019
+					
+					d[0] = shadedots[verts2->lightnormalindex] - shadedots[verts1->lightnormalindex];
+					l = shadelight * ( shadedots[verts1->lightnormalindex] + (blend * d[0]) );
+					
+					if(l>255)
+						l=255; //clamp
+
+					l *= 1.0 / 255.0;
+
+					//glColor3f (l, l, l);
+					glColor4f (l, l, l, a);
+
+					#endif
+				}
+
+				#endif
+
+				// normals and vertexes come from the frame list
+				VectorSubtract(verts2->v, verts1->v, d);
+
+				glVertex3f ( verts1->v[0] + (blend * d[0]), 
+					verts1->v[1] + (blend * d[1]),	
+					verts1->v[2] + (blend * d[2]) );
+
+				verts1++; 
+				verts2++;
+
+			} while (--count);
+		}
+
+		else
+		{
+			do 
+			{ 
+				// texture coordinates come from the draw list 
+				glTexCoord2f (((float *)order)[0], ((float *)order)[1]); 
+				order += 2; 
+
+				VectorSubtract(verts2->v, verts1->v, d);
+
+				glVertex3f ( verts1->v[0] + (blend * d[0]), 
+					verts1->v[1] + (blend * d[1]),	
+					verts1->v[2] + (blend * d[2]) );
+
+				verts1++; 
+				verts2++;
+ 
+			} while (--count); 
+		}
+
+		glEnd (); 
+	} 
+}
+
+#else
+
+#define NUMVERTEXNORMALS 162
+
+static float r_avertexnormals[NUMVERTEXNORMALS][3] = {
+#include "anorms.h"
+};
+
+
+void GL_DrawAliasBlendedFrame (aliashdr_t *paliashdr, int pose1, int pose2, float blend) // 2019 - cowcat
+{ 
+	#ifdef LITFILES
+	float		r,g,b,a; // alpha
+	#endif
+
+	float		l;
+	trivertx_t	*verts1, *verts2;
+	int		*order, count;
+	vec3_t		d;
+
+	float baselight = ambientlight * ( 1.0f / 200.0f );
+	float temp;
+	float alias_forward[3], alias_right[3], alias_up[3];
+	float r_plightvec[3], lightvec[3] = {-1, 0, 0};
+
+	currententity->angles[0] = -currententity->angles[0];
+	AngleVectors(currententity->angles, alias_forward, alias_right, alias_up);
+	currententity->angles[0] = -currententity->angles[0];
+
+	r_plightvec[0] = DotProduct(lightvec, alias_forward);
+	r_plightvec[1] = -DotProduct(lightvec, alias_right);
+	r_plightvec[2] = DotProduct(lightvec, alias_up);
+
+	a = entalpha; // johnfitz
+
+	lastposenum0 = pose1;
+	lastposenum = pose2;
+
+	verts1 = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts2 = verts1;
+
+	verts1 += pose1 * paliashdr->poseverts; 
+	verts2 += pose2 * paliashdr->poseverts; 
+
+	order = (int *)((byte *)paliashdr + paliashdr->commands); 
+
+	#ifndef LITFILES
+
+	if(!gl_smoothmodels.value) //Surgeon 
+	{
+		l = shadelight * 1.20;
+
+		if (l > 255)
+			l = 255.f;
+
+		l *= 1.f / 255.f;
+
+		glColor3f(l,l,l);
+	}
+
+	#else
+
+	if(!gl_smoothmodels.value) //Surgeon
+	//if(!smoothmodels)
+	{
+		if(eyecandy)
+		{
+			r = (1.2/255.0)*lightcolor[0]; if(r > 1.0) r = 1.0;
+			g = (1.2/255.0)*lightcolor[1]; if(g > 1.0) g = 1.0;
+			b = (1.2/255.0)*lightcolor[2]; if(b > 1.0) b = 1.0;
+
+			//glColor3f(r,g,b);
+			glColor4f(r, g, b, a);
+		}
+
+		else
+		{
+			l = shadelight * 1.20;
+
+			if (l > 255)
+				l = 255.f;
+
+			l *= 1.f / 255.f;
+
+			//glColor3f(l,l,l);
+			glColor4f(l, l, l, a);
+		}
+	}
+
+	#endif
+
+	while (1) 
+	{ 
+		// get the vertex count and primitive type 
+		count = *order++;
+ 
+		if (!count) 
+			break;	// done
+
+		if (count <  0) 
+		{ 
+			count = -count; 
+			glBegin (GL_TRIANGLE_FAN); 
+		}
+ 
+		else
+		{ 
+			glBegin (GL_TRIANGLE_STRIP); 
+		}
+
+		if(gl_smoothmodels.value)
+		{
+			do 
+			{ 
+				// texture coordinates come from the draw list 
+				glTexCoord2f (((float *)order)[0], ((float *)order)[1]); 
+				order += 2;
+
+				// normals and vertexes come from the frame list
+				temp = baselight;
+				l = DotProduct(r_avertexnormals[verts1->lightnormalindex], r_plightvec);
+
+				//d[0] = r_avertexnormals[verts2->lightnormalindex] - r_avertexnormals[verts1->lightnormalindex];
+				//r_avertexnormals[verts1->lightnormalindex] += blend * d[0];
+				//l = DotProduct(r_avertexnormals[verts2->lightnormalindex], r_plightvec );
+
+				if(l < 0)
+					temp -= shadelight * l;
+
+				glColor4f(temp, temp, temp, a);
+
+				VectorSubtract(verts2->v, verts1->v, d);
+
+				glVertex3f ( verts1->v[0] + (blend * d[0]), 
+					verts1->v[1] + (blend * d[1]),	
+					verts1->v[2] + (blend * d[2]) );
+
+				verts1++; 
+				verts2++;
+
+			} while (--count);
+		}
+
+		else
+		{
+			do 
+			{ 
+				// texture coordinates come from the draw list 
+				glTexCoord2f (((float *)order)[0], ((float *)order)[1]); 
+				order += 2; 
+
+				VectorSubtract(verts2->v, verts1->v, d);
+
+				glVertex3f ( verts1->v[0] + (blend * d[0]), 
+					verts1->v[1] + (blend * d[1]),	
+					verts1->v[2] + (blend * d[2]) );
+
+				verts1++; 
+				verts2++;
+ 
+			} while (--count); 
+		}
+
+		glEnd (); 
+	} 
+}
+
+#endif
+
+void GL_DrawAliasFrame (aliashdr_t *paliashdr, int posenum)
+{
+	#ifdef LITFILES
+	float		r,g,b,a; // alpha
+	#endif
+
+	float		l;
+	trivertx_t	*verts;
+	int		*order, count;
+
+	a = entalpha; // johnfitz
+
+	lastposenum = posenum;
+
+	verts = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts += posenum * paliashdr->poseverts;
+	order = (int *)((byte *)paliashdr + paliashdr->commands);
+
+	#ifndef LITFILES
+
+	if(!gl_smoothmodels.value) //Surgeon 
+	{
+		l = shadelight * 1.20;
+
+		if (l > 255)
+			l = 255.f;
+
+		l *= 1.f / 255.f;
+
+		glColor3f(l,l,l);
+	}
+
+	#else
+
+	if(!gl_smoothmodels.value) //Surgeon
+	//if(!smoothmodels)
+	{
+		if(eyecandy)
+		{
+			r = (1.2/255.0)*lightcolor[0]; if(r > 1.0) r = 1.0;
+			g = (1.2/255.0)*lightcolor[1]; if(g > 1.0) g = 1.0;
+			b = (1.2/255.0)*lightcolor[2]; if(b > 1.0) b = 1.0;
+
+			//glColor3f(r, g, b);
+			glColor4f(r, g, b, a);
+		}
+
+		else
+		{
+			l = shadelight * 1.20;
+
+			if (l > 255)
+				l = 255.f;
+
+			l *= 1.f / 255.f;
+
+			//glColor3f(l, l, l);
+			glColor4f(l, l, l, a);
+		}
+	}
+
+	#endif
+
+	while (1)
+	{
+		// get the vertex count and primitive type
+		count = *order++;
+
+		if (!count)
+			break;	  // done
+
+		if (count < 0)
+		{
+			count = -count;
+			glBegin (GL_TRIANGLE_FAN);
+		}
+
+		else
+		{
+			glBegin (GL_TRIANGLE_STRIP);
+		}
+
+		// Surgeon: HACK - flatshading implemented - works fine
+
+		if (gl_smoothmodels.value)
+		//if (smoothmodels) // Cowcat 2019
+		{
+			do
+			{
+				// texture coordinates come from the draw list
+				glTexCoord2f (((float *)order)[0], ((float *)order)[1]); 
+				order += 2;
+
+				// normals and vertexes come from the frame list
+
+				#ifndef LITFILES
+
+				l = shadedots[verts->lightnormalindex] * shadelight;
+
+				//printf("%f\n", l); //for debugging
+
+				if(l>255)
+					l=255; //clamp
+
+				l *= 1.0/255.0;
+
+				glColor3f (l, l, l);
+
+				#else
+
+				if(eyecandy)
+				{
+					l = shadedots[verts->lightnormalindex]*(1.0/255.0);
+
+					r = l*lightcolor[0]; if(r > 1.0) r = 1.0;
+					g = l*lightcolor[1]; if(g > 1.0) g = 1.0;
+					b = l*lightcolor[2]; if(b > 1.0) b = 1.0;
+
+					//glColor3f(r,g,b);
+					glColor4f (r, g, b, a);
+				}
+
+				else
+				{
+					l = shadedots[verts->lightnormalindex] * shadelight;
+
+					if(l>255)
+						l=255; //clamp
+
+					l *= 1.0 / 255.0;
+
+					//glColor3f (l, l, l);
+					glColor4f (l, l, l, a);
+				}
+
+				#endif
+
+				glVertex3f (verts->v[0], verts->v[1], verts->v[2]);
+
+				verts++;
+
+			} while (--count);
+		}
+
+		else //moved glColor outside loop
+		{
+			do
+			{
+				// texture coordinates come from the draw list
+				glTexCoord2f (((float *)order)[0], ((float *)order)[1]); 
+				order += 2;
+
+				glVertex3f (verts->v[0], verts->v[1], verts->v[2]);
+
+				verts++;
+
+			} while (--count);
+		}
+
+		glEnd ();
+	}
+}
+
+
+
+#if 0
+static GLsizei fcount[256];
+static GLsizei scount[256];
+static GLint   ffirst[256];
+static GLint   sfirst[256];
+#endif
+
+#if 0 // Cowcat - not used due to alpha support
+
+#ifndef __PPC__
+/*
+** Surgeon: used for vertexarrays
+** Table of 256 unsigned longs mimmicking the rgba ubytes
+*/
+
+const ULONG lighttab[256] = {
+#include "whitelight.h"
+};
+#endif
+
+#endif
+
+void GL_DrawAliasArrayFrame (aliashdr_t *paliashdr, int posenum)
+{
+	#ifdef LITFILES
+	ULONG		r,g,b,a; // alpha
+	#endif
+	float		alpha;	// johnfitz
+
+	float		l;
+	trivertx_t	*verts;
+	int		*order;
+	int		count;
+	int		vcount;
+	GLenum		prim;
+	qglarray_t	*lva;
+	
+	#if 0
+	int fans, strips;
+	fans = 0;
+	strips = 0;
+	vcount = 0;
+	lva = global_qglarray;
+	#endif
+
+	alpha = entalpha; // johnfitz
+
+	lastposenum = posenum;
+
+	verts = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts += posenum * paliashdr->poseverts;
+	order = (int *)((byte *)paliashdr + paliashdr->commands);
+
+	#ifndef LITFILES
+
+	if(!gl_smoothmodels.value) //Surgeon
+	{
+		l = shadelight * 1.20;
+
+		if (l > 255)
+			l = 255.f;
+
+		l *= 1.f / 255.f;
+
+		glColor3f(l,l,l);
+	}
+
+	#else
+
+	if(!gl_smoothmodels.value) //Surgeon
+	//if(!smoothmodels)
+	{
+		if(eyecandy)
+		{
+			float fr, fg, fb;
+
+			fr = (1.2/255.0)*lightcolor[0]; if(fr > 1.0) fr = 1.0;
+			fg = (1.2/255.0)*lightcolor[1]; if(fg > 1.0) fg = 1.0;
+			fb = (1.2/255.0)*lightcolor[2]; if(fb > 1.0) fb = 1.0;
+
+			//glColor3f(fr, fg, fb);
+			glColor4f(fr, fg, fb, alpha);
+		}
+
+		else
+		{
+			l = shadelight * 1.20;
+
+			if (l > 255)
+				l = 255.f;
+
+			l *= 1.f / 255.f;
+
+			//glColor3f(l, l, l);
+			glColor4f(l, l, l, alpha);
+		}
+	}
+
+	#endif
+	
+	if(alpha < 1)
+		a = ((GLuint)(alpha*255.f))<<24; // from Q2 Amiga :)
+
+	else
+		a = 0xFF000000;
+
+	while (1)
+	{
+		// get the vertex count and primitive type
+		count = *order++;
+
+		if (!count)
+			break;	  // done
+
+		#if 1
+
+		if (count < 0)
+		{
+			count = -count;
+			prim = GL_TRIANGLE_FAN;
+			//vcount = count;
+			//lva = global_qglarray;
+		}
+
+		else
+		{
+			prim = GL_TRIANGLE_STRIP;
+			//vcount = count;
+			//lva = global_qglarray;
+		}
+
+		vcount = count;
+		lva = &global_qglarray[0];
+		
+		#else
+
+		if (count < 0)
+		{
+			count = -count;
+			ffirst[fans] = vcount;
+			fcount[fans] = count;
+			vcount += count;
+			fans++;
+		}
+
+		else
+		{
+			sfirst[strips] = vcount;
+			scount[strips] = count;
+			strips++;
+			vcount += count;
+		}
+
+		#endif
+
+		// Surgeon: HACK - flatshading implemented - works fine
+
+		if (gl_smoothmodels.value)
+		//if(smoothmodels) // Cowcat 2019
+		{
+			ULONG c;
+			ULONG argb = a; // added
+
+			do
+			{
+				// texture coordinates come from the draw list
+				lva->s = ((float *)order)[0];
+				lva->t = ((float *)order)[1];
+
+				order += 2;
+
+				// normals and vertexes come from the frame list
+
+				#ifndef LITFILES
+
+				c = (ULONG)(shadedots[verts->lightnormalindex] * shadelight);
+
+				if(c>255)
+					c=255; //clamp
+
+				#ifndef __PPC__
+				lva->c = lighttab[c];
+				#else
+				lva->c = 0xFF000000 | (c<<16) | (c<<8) | c;
+				#endif
+
+				#else
+
+				if(eyecandy)
+				{
+					l = shadedots[verts->lightnormalindex];
+
+					r = (ULONG)(lightcolor[0]*l);
+					g = (ULONG)(lightcolor[1]*l);
+					b = (ULONG)(lightcolor[2]*l);
+
+					if(r > 255) r = 255;
+					if(g > 255) g = 255;
+					if(b > 255) b = 255;
+
+					//lva->c = (0xFF000000 | (r<<16) | (g<<8) | b);
+					lva->c = (argb | (r<<16) | (g<<8) | b);
+				}
+
+				else
+				{
+					c = (ULONG)(shadedots[verts->lightnormalindex] * shadelight);
+
+					if(c>255)
+						c=255; //clamp
+
+					//#ifndef __PPC__
+					//lva->c = lighttab[c]; // solution for m68k ???
+	
+					//#else
+					//lva->c = 0xFF000000 | (c<<16) | (c<<8) | c;
+					lva->c = argb | (c<<16) | (c<<8) | c;
+					
+					//#endif
+				}
+
+				#endif
+
+				#ifdef OPTIMIZE_060
+				lva->xi = verts->v[0];
+				lva->yi = verts->v[1];
+				lva->zi = verts->v[2];
+				#else
+				lva->x = (float)verts->v[0];
+				lva->y = (float)verts->v[1];
+				lva->z = (float)verts->v[2];
+				#endif
+
+				lva++;
+				verts++;
+
+			} while (--count);
+		}
+
+		else //glColor moved outside loop
+		{
+			do
+			{
+				// texture coordinates come from the draw list
+				lva->s = ((float *)order)[0];
+				lva->t = ((float *)order)[1];
+
+				order += 2;
+
+				#ifdef OPTIMIZE_060
+				lva->xi = verts->v[0];
+				lva->yi = verts->v[1];
+				lva->zi = verts->v[2];
+				#else
+				lva->x = (float)verts->v[0];
+				lva->y = (float)verts->v[1];
+				lva->z = (float)verts->v[2];
+				#endif
+
+				lva++;
+				verts++;
+
+			} while (--count);
+		}
+
+		#if 0
+		if(r_vertexarrays.value == 2)
+		{
+			UWORD index[256];
+
+			for (count=0; count<vcount; count++)
+				index[count] = count;
+  
+			glDrawElements(prim, vcount, GL_UNSIGNED_SHORT, (void *)index);
+		}
+
+		else
+		#endif
+
+		glDrawArrays(prim, 0, vcount);
+
+	}
+
+	#if 0
+	if(fans)
+	{
+		glMultiDrawArrays(GL_TRIANGLE_FAN, ffirst, fcount, fans);
+	}
+
+	if(strips)
+	{
+		glMultiDrawArrays(GL_TRIANGLE_STRIP, sfirst, scount, strips);
+	}
+	#endif
+}
+
+void GL_DrawAliasArrayBlendedFrame (aliashdr_t *paliashdr, int pose1, int pose2, float blend) // modded 2019 - Cowcat
+{
+	#ifdef LITFILES
+	ULONG		r,g,b,a; // added a
+	#endif
+	float		alpha;	// johnfitz
+
+	GLenum		primitive;
+	ULONG		vcount;
+	qglarray_t	*lva;
+	float		l;
+	trivertx_t	*verts1, *verts2; 
+	int		*order, count;
+	vec3_t		d;
+
+	alpha = entalpha;	// johnfitz
+
+	lastposenum0 = pose1;
+	lastposenum = pose2;
+
+	verts1 = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts2 = verts1;
+
+	verts1 += pose1 * paliashdr->poseverts; 
+	verts2 += pose2 * paliashdr->poseverts; 
+
+	order = (int *)((byte *)paliashdr + paliashdr->commands); 
+
+	#ifndef LITFILES
+
+	if(!gl_smoothmodels.value) //Surgeon 
+	{
+		l = shadelight * 1.20;
+
+		if (l > 255)
+			l = 255.f;
+
+		l *= 1.f / 255.f;
+
+		glColor3f(l,l,l);
+	}
+
+	#else
+
+	if(!gl_smoothmodels.value) //Surgeon
+	//if(!smoothmodels)
+	{
+		if(eyecandy)
+		{
+			float fr, fg, fb;
+
+			fr = (1.2/255.0)*lightcolor[0]; if(fr > 1.0) fr = 1.0;
+			fg = (1.2/255.0)*lightcolor[1]; if(fg > 1.0) fg = 1.0;
+			fb = (1.2/255.0)*lightcolor[2]; if(fb > 1.0) fb = 1.0;
+
+			//glColor3f(fr, fg, fb);
+			glColor4f (fr, fg, fb, alpha);
+		}
+
+		else
+		{
+			l = shadelight * 1.20;
+
+			if (l > 255)
+				l = 255.f;
+
+			l *= 1.f / 255.f;
+
+			//glColor3f(l, l, l);
+			glColor4f (l, l, l, alpha);
+		}
+	}
+
+	#endif
+
+	if(alpha < 1)
+		a = ((GLuint)(alpha*255.f))<<24; // from Q2 Amiga :)
+
+	else
+		a = 0xFF000000;
+
+	while (1)
+	{
+		// get the vertex count and primitive type
+		count = *order++;
+
+		if (!count)
+			break;	  // done
+
+		if (count < 0)
+		{
+			count = -count;
+			primitive = GL_TRIANGLE_FAN;
+		}
+
+		else
+		{
+			primitive = GL_TRIANGLE_STRIP;
+		}
+
+		lva = &global_qglarray[0];
+		vcount = count;
+
+		// Surgeon: HACK - flatshading implemented - works fine
+
+		if (gl_smoothmodels.value)
+		//if (smoothmodels) // Cowcat 2019
+		{
+			ULONG c;
+			ULONG argb = a;
+
+			do
+			{
+				// texture coordinates come from the draw list
+				lva->s = ((float *)order)[0];
+				lva->t = ((float *)order)[1];
+
+				order += 2;
+
+				// normals and vertexes come from the frame list
+
+				#ifndef LITFILES
+
+				c = (ULONG)(shadedots[verts1->lightnormalindex] * shadelight);
+
+				if(c>255)
+					c=255; //clamp
+
+				#ifndef __PPC__
+				lva->c = lighttab[c];
+				#else
+				lva->c = 0xFF000000 | (c<<16) | (c<<8) | c;
+				#endif
+
+				#else
+
+				if(eyecandy)
+				{
+					l = shadedots[verts1->lightnormalindex];
+					//d[0] = shadedots[verts2->lightnormalindex] - shadedots[verts1->lightnormalindex];
+					//l = shadedots[verts1->lightnormalindex] + (blend * d[0]);
+
+					r = (ULONG)(lightcolor[0]*l);
+					g = (ULONG)(lightcolor[1]*l);
+					b = (ULONG)(lightcolor[2]*l);
+ 
+					if(r > 255) r = 255;
+					if(g > 255) g = 255;
+					if(b > 255) b = 255;
+
+					//lva->c = (0xFF000000 | (r<<16) | (g<<8) | b);
+					lva->c = argb | (r<<16) | (g<<8) | b; // 
+				}
+
+				else
+				{
+					c = (ULONG)(shadedots[verts1->lightnormalindex] * shadelight);
+					//d[0] = shadedots[verts2->lightnormalindex] - shadedots[verts1->lightnormalindex];
+					//c = (ULONG) shadelight * (shadedots[verts1->lightnormalindex] + (blend * d[0]));
+
+					if(c>255)
+						c=255; //clamp
+
+					//#ifndef __PPC__
+					//lva->c = lighttab[c];
+					//#else
+					//lva->c = 0xFF000000 | (c<<16) | (c<<8) | c;
+					lva->c = argb | (c<<16) | (c<<8) | c; // 
+					//#endif
+				}
+
+				#endif
+
+				VectorSubtract(verts2->v, verts1->v, d);
+
+				lva->x = verts1->v[0] + (blend * d[0]);
+				lva->y = verts1->v[1] + (blend * d[1]);
+				lva->z = verts1->v[2] + (blend * d[2]);
+		
+				lva++;
+				verts1++;
+				verts2++;
+
+			} while (--count);
+		}
+
+		else // glColor moved outside loop
+		{
+			do
+			{
+				// texture coordinates come from the draw list
+				lva->s = ((float *)order)[0];
+				lva->t = ((float *)order)[1];
+
+				order += 2;
+
+				VectorSubtract(verts2->v, verts1->v, d);
+
+				lva->x = verts1->v[0] + (blend * d[0]);
+				lva->y = verts1->v[1] + (blend * d[1]);
+				lva->z = verts1->v[2] + (blend * d[2]);
+		
+				lva++;
+				verts1++;
+				verts2++;
+
+			} while (--count);
+		}
+
+		glDrawArrays(primitive, 0, vcount);
+	}
+}
+
+
+/*
+=============
+GL_DrawAliasShadow
+=============
+*/
+extern	vec3_t	lightspot;
+
+void GL_DrawAliasBlendedShadow (aliashdr_t *paliashdr, int pose1, int pose2, entity_t *e, trace_t downtrace)
+{
+	int		*order, count;
+	trivertx_t	*verts1, *verts2;
+	vec3_t		point1;
+	vec3_t		point2;
+	vec3_t		d;	
+	float		lheight;
+	float		s1, c1, an;
+	float		blend;
+
+	float shadescale = 0.707106781187;
+
+	blend = (realtime - e->frame_start_time) / e->frame_interval;
+
+	if (blend > 1 )
+		blend = 1;
+
+	lheight = e->origin[2] - lightspot[2];
+
+	verts1 = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts2 = verts1;
+
+	verts1 += pose1 * paliashdr->poseverts;
+	verts2 += pose2 * paliashdr->poseverts;
+
+	an = e->angles[1] / 180 * M_PI;
+	c1 = cos(an);
+	s1 = sin(an);
+
+	shadevector[0] = c1 * shadescale;
+	shadevector[1] = -s1 * shadescale;
+	shadevector[2] = shadescale;
+	
+	order = (int *)((byte *)paliashdr + paliashdr->commands);	
+	
+	while (1)
+	{
+		// get the vertex count and primitive type
+		count = *order++;
+
+		if (!count)
+			break;	  // done
+
+		if (count < 0)
+		{
+			count = -count;
+			glBegin (GL_TRIANGLE_FAN);
+		}
+
+		else
+		{
+			glBegin (GL_TRIANGLE_STRIP);
+		}
+
+		do
+		{	
+			order += 2;
+
+			// normals and vertexes come from the frame list
+			point1[0] = verts1->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+			point1[1] = verts1->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+			point1[2] = verts1->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+
+			point1[0] -= shadevector[0] * (point1[2] + lheight);
+			point1[1] -= shadevector[1] * (point1[2] + lheight);
+
+			point2[0] = verts2->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+			point2[1] = verts2->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+			point2[2] = verts2->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+
+			point2[0] -= shadevector[0] * (point2[2] + lheight);
+			point2[1] -= shadevector[1] * (point2[2] + lheight);
+
+			#if 1
+
+			VectorSubtract(point2, point1, d);
+
+			point1[0] = point1[0] + (blend * d[0]);
+			point1[1] = point1[1] + (blend * d[1]);
+			point1[2] = point1[2] + (blend * d[2]);
+
+			point1[2] = -(e->origin[2] - downtrace.endpos[2]);
+		
+			point1[2] += ((point1[1] * (s1 * downtrace.plane.normal[0])) -
+				(point1[0] * (c1 * downtrace.plane.normal[0])) -
+				(point1[0] * (s1 * downtrace.plane.normal[1])) -
+				(point1[1] * (c1 * downtrace.plane.normal[1]))) +
+				((1.0 - downtrace.plane.normal[2]) * 20) + 0.2 ;
+
+			glVertex3fv (point1);
+
+			#else
+
+			d[0] = point1[0] + blend * (point2[0] - point1[0]);
+			d[1] = point1[1] + blend * (point2[1] - point1[1]);
+			d[2] = point1[2] + blend * (point2[2] - point1[2]);
+
+			d[2] = -(e->origin[2] - downtrace.endpos[2]);
+		
+			d[2] += ((d[1] * (s1 * downtrace.plane.normal[0])) -
+				(d[0] * (c1 * downtrace.plane.normal[0])) -
+				(d[0] * (s1 * downtrace.plane.normal[1])) -
+				(d[1] * (c1 * downtrace.plane.normal[1]))) +
+				((1.0 - downtrace.plane.normal[2]) * 20) + 0.2 ;
+
+			glVertex3fv (d);
+
+			#endif
+
+			verts1++;
+			verts2++;
+
+		} while (--count);
+
+		glEnd ();
+	}
+}
+
+void GL_DrawAliasShadow (aliashdr_t *paliashdr, int posenum, entity_t *e, trace_t downtrace)
+{
+	int		*order;
+	trivertx_t	*verts;
+	vec3_t		point;		
+	float		lheight;
+	int		count;	
+	float		s1, c1, an;
+
+	//if(!shadescale)
+		//shadescale = 1 / sqrt(2);
+	float shadescale = 0.707106781187;
+
+	lheight = e->origin[2] - lightspot[2];
+
+	verts = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts += posenum * paliashdr->poseverts;
+
+	order = (int *)((byte *)paliashdr + paliashdr->commands);	
+	
+	an = e->angles[1] / 180 * M_PI;
+	c1 = cos(an);
+	s1 = sin(an);
+
+	shadevector[0] = c1 * shadescale;
+	shadevector[1] = -s1 * shadescale;
+	shadevector[2] = shadescale;
+
+	//if (!r_vertexarrays.value)
+	{
+		while (1)
+		{
+			// get the vertex count and primitive type
+			count = *order++;
+
+			if (!count)
+				break;	  // done
+
+			if (count < 0)
+			{
+				count = -count;
+				glBegin (GL_TRIANGLE_FAN);
+			}
+
+			else
+			{
+				glBegin (GL_TRIANGLE_STRIP);
+			}
+
+			do
+			{	
+				order += 2;
+	
+				// normals and vertexes come from the frame list
+				point[0] = verts->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+				point[1] = verts->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+				point[2] = verts->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+	
+				point[0] -= shadevector[0] * (point[2] + lheight);
+				point[1] -= shadevector[1] * (point[2] + lheight);
+
+				point[2] = - (e->origin[2] - downtrace.endpos[2]);
+
+				point[2] += ((point[1] * (s1 * downtrace.plane.normal[0])) -
+					     (point[0] * (c1 * downtrace.plane.normal[0])) -
+					     (point[0] * (s1 * downtrace.plane.normal[1])) -
+					     (point[1] * (c1 * downtrace.plane.normal[1]))) +
+					     ((1.0 - downtrace.plane.normal[2]) * 20) + 0.2 ;
+
+				glVertex3fv (point);
+
+				verts++;
+
+			} while (--count);
+
+			glEnd ();
+		}
+	}
+
+	#if 0 // didn´t work ok with vertexarrays (clipping issues & not fading in fog) - Cowcat 2019
+	else
+	{
+		GLenum	primitive;
+		ULONG	vcount;
+		qglarray_t *lva;
+		
+		while (1)
+		{
+			count = *order++;
+
+			if (!count)
+				break;	  // done
+
+			if (count < 0)
+			{
+				count = -count;
+				primitive = GL_TRIANGLE_FAN;
+				
+			}
+
+			else
+			{
+				primitive = GL_TRIANGLE_STRIP;
+				
+			}
+
+			vcount = count;
+			lva = &global_qglarray[0];
+			//ULONG a,r,g,b;
+
+			do
+			{
+				order += 2;
+				
+				/*
+				//c = (ULONG)(shadedots[verts->lightnormalindex] * shadelight);
+				r = 155;
+				g = 200;
+				b = 20;
+				a = ((GLuint)(shadowalpha.value*255.f))<<24;
+
+				lva->c = a | (r<<16) | (g<<8) | b;
+				*/
+
+				#ifdef OPTIMIZE_060
+				
+				lva->xi = verts->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+				lva->yi = verts->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+				lva->zi = verts->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+
+				lva->xi -= shadevector[0] * (lva->zi + lheight);
+				lva->yi -= shadevector[1] * (lva->zi + lheight);
+
+				lva->zi = - (e->origin[2] - downtrace.endpos[2]);
+
+				lva->zi += ((lva->yi * (s1 * downtrace.plane.normal[0])) -
+					    (lva->xi * (c1 * downtrace.plane.normal[0])) -
+					    (lva->xi * (s1 * downtrace.plane.normal[1])) -
+					    (lva->yi * (c1 * downtrace.plane.normal[1]))) +
+					    ((1.0 - downtrace.plane.normal[2]) * 20) + 0.2 ;
+				#else
+
+				lva->x = verts->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+				lva->y = verts->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+				lva->z = verts->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+
+				lva->x -= shadevector[0] * (lva->z + lheight);
+				lva->y -= shadevector[1] * (lva->z + lheight);
+
+				lva->z = - (e->origin[2] - downtrace.endpos[2]);
+
+				lva->z += ((lva->y * (s1 * downtrace.plane.normal[0])) -
+					   (lva->x * (c1 * downtrace.plane.normal[0])) -
+					   (lva->x * (s1 * downtrace.plane.normal[1])) -
+					   (lva->y * (c1 * downtrace.plane.normal[1]))) +
+					   ((1.0 - downtrace.plane.normal[2]) * 20) + 0.2 ;
+
+				#endif
+
+				lva++;
+				verts++;
+
+			} while (--count);
+
+			glDrawArrays(primitive, 0, vcount);
+		}
+	}
+
+	#endif
+}
+
+/*
+=================
+R_SetupAliasFrame
+
+=================
+*/
+
+//void R_SetupAliasInterpolatedFrame (int frame, aliashdr_t *paliashdr, entity_t *e)
+void R_SetupAliasInterpolatedFrame (aliashdr_t *paliashdr, entity_t *e) // Tomaz - new Cowcat 2019
+{ 
+	int	pose, numposes; 
+	float	blend;
+
+	int	frame = e->frame;
+
+	if ((frame >= paliashdr->numframes) || (frame < 0))
+	{ 
+		Con_DPrintf ("R_AliasSetupFrame: no such frame %d\n", frame); 
+		frame = 0; 
+	} 
+
+	pose = paliashdr->frames[frame].firstpose; 
+	numposes = paliashdr->frames[frame].numposes; 
+
+	if (numposes > 1) 
+	{ 
+		e->frame_interval = paliashdr->frames[frame].interval; 
+		pose += (int)(cl.time / e->frame_interval) % numposes; 
+	} 
+
+	else
+		e->frame_interval = 0.1;
+
+	if (e->pose2 != pose) 
+	{ 
+		e->frame_start_time = cl.time;
+		e->pose1 = e->pose2;
+		e->pose2 = pose;
+		blend = 0;
+	}
+
+	else
+	{
+		//blend = ((realtime - e->frame_start_time) * r_interpolations.value ) / e->frame_interval;
+		blend = (cl.time - e->frame_start_time) / e->frame_interval;
+
+		if(cl.paused || blend > 1)
+			blend =	 1;
+	}
+
+	if (!r_vertexarrays.value)
+		GL_DrawAliasBlendedFrame (paliashdr, e->pose1, e->pose2, blend );
+
+	else
+		GL_DrawAliasArrayBlendedFrame (paliashdr, e->pose1, e->pose2, blend );
+} 
+
+void R_SetupAliasFrame (int frame, aliashdr_t *paliashdr)
+{
+	int	  pose, numposes;
+	float	  interval;
+
+	if ((frame >= paliashdr->numframes) || (frame < 0))
+	{
+		Con_DPrintf ("R_AliasSetupFrame: no such frame %d\n", frame);
+		frame = 0;
+	}
+
+	pose = paliashdr->frames[frame].firstpose;
+	numposes = paliashdr->frames[frame].numposes;
+
+	if (numposes > 1)
+	{
+		interval = paliashdr->frames[frame].interval;
+		pose += (int)(cl.time / interval) % numposes;
+	}
+
+	if (!r_vertexarrays.value)
+	{
+		GL_DrawAliasFrame (paliashdr, pose);
+	}
+
+	else
+	{
+	#if 0
+		if (r_vertexarrays.value > 2)
+			GL_DrawAliasTrisFrame (paliashdr, pose);
+		else
+	#endif
+		GL_DrawAliasArrayFrame (paliashdr, pose);
+	
+	}
+}
+
+
+
+/*
+=================
+R_DrawAliasModel
+
+=================
+*/
+
+#ifdef GLOWEFFECTS
+extern void R_AddGlow (entity_t *e); //gl_rlight.c
+extern void R_RenderGlows (void);
+#endif
+
+#define DEG2RAD( a ) ( a * M_PI ) / 180.0F
+
+#define MOD_NOSHADOW	256
+#define MOD_GLOWS	512
+#define MOD_FULLBRIGHT	1024
+
+#if 1 // Cowcat
+
+#define PlaneDiff(point, plane) (((plane)->type < 3) ? (point)[(plane)->type] - (plane)->dist : DotProduct((point), (plane)->normal) - (plane)->dist)
+
+qboolean R_CullSphere (vec3_t centre, float radius)
+{
+	int i;
+	mplane_t *p;
+
+	for(i=0, p = frustum; i < 4; i++, p++)
+		if(PlaneDiff(centre, p) <= -radius)
+			return true;
+
+	return false;
+}
+
+#endif
+
+#define GL_BindCheck(texnum)	\
+	if (currenttexture != (texnum)) \
+	{				\
+		currenttexture = (texnum);	\
+		glBindTexture(GL_TEXTURE_2D, currenttexture);	\
+	}	\
+
+#if 0
+void GL_BindTest(int texnum)
+{
+	if(currenttexture == texnum)
+	{
+		Con_Printf("Same texture %d!\n", texnum);
+		return;
+	}
+
+	currenttexture = texnum;
+	glBindTexture(GL_TEXTURE_2D, currenttexture);
+	//Con_Printf("texnum %d\n", texnum);
+}
+#endif
+
+extern float chase_alpha;
+//#define ENTALPHA_DECODE2(a) (((a)==ENTALPHA_DEFAULT)?1.0f:((float)(a)-1)*(float)0.003937007874)
+
+void R_DrawAliasModel (entity_t *e) // modded - Cowcat
+{
+	#ifdef LITFILES
+	extern vec3_t	lightcolor;
+	#endif
+
+	int		i, lnum, anim;
+	vec3_t		dist;
+	float		add;
+	model_t		*clmodel;
+	vec3_t		mins, maxs;
+	aliashdr_t	*paliashdr;
+
+	float		clipdist, scale;
+	vec3_t		cvec, mod_orig;
+	float		distfromplane, reference;
+	float		d_forward, d_right, d_up;
+	float		viewfield, vd_ratio;
+
+	extern	cvar_t scr_fov;
+
+	clmodel = e->model;
+
+	VectorAdd (e->origin, clmodel->mins, mins);
+	VectorAdd (e->origin, clmodel->maxs, maxs);
+	
+	#ifdef FASTBOPS
+	//Surgeon: bugfix
+	if (e->model->flags & EF_ROTATE)
+	{
+		mins[2] += 16;
+		maxs[2] += 16;
+	}
+	#endif
+	
+	#if 0 // test 2019 - Cowcat - not to be used till full hardcoded fixbounds - entities disappear now on angle view.
+
+	if(e != &cl.viewent)
+	{
+		if(e->angles[0] || e->angles[1] || e->angles[2])
+		{
+			if(R_CullSphere(e->origin, clmodel->radius))
+				return;
+		}
+	}	
+
+	else
+	#endif
+
+	if (R_CullBox (mins, maxs))
+			return;
+
+	//Surgeon: far culling
+	cvec[0] = r_refdef.vieworg[0] - e->origin[0];
+	cvec[1] = r_refdef.vieworg[1] - e->origin[1];
+
+	if (e->model->flags & EF_ROTATE)
+		cvec[2] = r_refdef.vieworg[2] - e->origin[2] + 32;
+
+	else
+		cvec[2] = r_refdef.vieworg[2] - e->origin[2];
+
+	clipdist = (cvec[0]*cvec[0] + cvec[1]*cvec[1] + cvec[2]*cvec[2]);
+
+	if (clipdist > r_mod_maxdist)
+		return;
+
+	//optional aggressive frustum culling
+
+	if(r_cull_aggressive.value && (clipdist > 256))
+	{
+		mod_orig[0] = e->origin[0];
+		mod_orig[1] = e->origin[1];
+		
+		if (e->model->flags & EF_ROTATE)
+		{
+			mod_orig[2] = e->origin[2] + 32;
+		}
+
+		else
+		{
+			mod_orig[2] = e->origin[2];
+		}
+
+		distfromplane = DotProduct(mod_orig, vpn);
+		reference = DotProduct(r_origin, vpn); 
+		d_forward = distfromplane - reference;
+
+		if(d_forward < 0.0)
+			return;
+
+		else
+		{
+			viewfield = scr_fov.value;
+
+			if(viewfield > 90.0)
+				vd_ratio = viewfield / (90.0 - (viewfield - 90.0));
+
+			else
+				vd_ratio = viewfield * (1.0/90.0);
+
+			distfromplane = DotProduct(mod_orig, vright);
+			reference = DotProduct(r_origin, vright); 
+
+			d_right = fabs(distfromplane - reference);	
+
+			d_right /= d_forward;
+
+			if(d_right > vd_ratio)
+				return;
+
+			distfromplane = DotProduct(mod_orig, vup);
+			reference = DotProduct(r_origin, vup); 
+
+			d_up = fabs(distfromplane - reference); 
+
+			d_up /= d_forward;
+
+			if(d_up > vd_ratio * 0.75)
+				return;
+		}
+	}
+
+	VectorCopy (e->origin, r_entorigin);
+	VectorSubtract (r_origin, r_entorigin, modelorg);
+
+	//if (!chase_active.value)
+		//entalpha = ENTALPHA_DECODE(e->alpha); // johnfitz
+	
+	if( currententity == &cl_entities[cl.viewentity] ) // alpha workaround for chasecam - Cowcat 2019
+		entalpha = chase_alpha;
+
+	else
+		entalpha = ENTALPHA_DECODE(e->alpha); // johnfitz
+
+	if(entalpha == 0) // new 2019 - Cowcat
+		goto cleanup;
+
+	if(entalpha < 1) // johnfitz
+	{
+		//glDepthMask(GL_FALSE);
+		glEnable(GL_BLEND);
+		//Con_Printf("alpha entity\n");
+	}
+
+	#ifdef LITFILES
+	if(!eyecandy)
+	{
+	#endif
+		//if ( clmodel->modhint == MOD_FLAME )
+		if ( clmodel->flags & MOD_FULLBRIGHT )
+		{
+			ambientlight = shadelight = 255; // JPG 3.02 says 255 - was 256 - Cowcat
+		}
+
+		else
+		{
+			ambientlight = shadelight = (float)R_LightPoint (e->origin);
+
+			// always give the gun some light
+			if (e == &cl.viewent && ambientlight < 24)
+				ambientlight = shadelight = 24;
+
+			for (lnum=0 ; lnum<MAX_DLIGHTS ; lnum++)
+			{
+				if (cl_dlights[lnum].die < cl.time || !cl_dlights[lnum].radius)
+					continue; // test 2019 - Cowcat
+
+				//if (cl_dlights[lnum].die >= cl.time)
+				{
+					VectorSubtract (e->origin, cl_dlights[lnum].origin, dist);
+					add = cl_dlights[lnum].radius - Length(dist);
+
+					if (add > 0)
+					{
+						ambientlight += add;
+						//ZOID models should be affected by dlights as well
+						shadelight += add;
+					}
+				}
+			}
+
+			// clamp lighting so it doesn't overbright as much
+			if (ambientlight > 128)
+				ambientlight = 128;
+
+			if (ambientlight + shadelight > 192)
+				shadelight = 192 - ambientlight;
+
+			// ZOID: never allow players to go totally black
+			i = currententity - cl_entities;
+
+			#if 1
+
+			if (i >= 1 && i <= cl.maxclients)
+			{
+				if (ambientlight < 8)
+					ambientlight = shadelight = 8;
+			}
+
+			#else
+
+			if ( clmodel->modhint == MOD_PLAYER )
+			{
+				if (ambientlight < 8)
+					ambientlight = shadelight = 8;
+			}
+
+			#endif
+		}
+
+		//shadelight = shadelight / 200.0;
+		shadelight *= 1.275; //use ubytes unstead
+		
+	#ifdef LITFILES
+	}
+
+	else
+	{
+		// 
+		// get lighting information 
+		// 
+	
+		//if ( clmodel->modhint == MOD_FLAME )
+		if ( clmodel->flags & MOD_FULLBRIGHT)
+		{
+			lightcolor[0] = lightcolor[1] = lightcolor[2] = 255; // 256 / 200; - new Cowcat 2019
+		}
+
+		else
+		{
+			R_LightPointColor(e->origin); // LordHavoc: lightcolor is all that matters from this 
+
+			if (e == &cl.viewent) 
+			{ 
+				if (lightcolor[0] < 24) lightcolor[0] = 24; 
+				if (lightcolor[1] < 24) lightcolor[1] = 24; 
+				if (lightcolor[2] < 24) lightcolor[2] = 24; 
+			} 
+
+			for (lnum=0 ; lnum < MAX_DLIGHTS ; lnum++)
+			{ 
+				if (cl_dlights[lnum].die < cl.time || !cl_dlights[lnum].radius)
+					continue; // test 2019 - Cowcat
+
+				//if (cl_dlights[lnum].die >= cl.time)
+				{ 
+					VectorSubtract (e->origin, cl_dlights[lnum].origin, dist); 
+
+					add = cl_dlights[lnum].radius - Length(dist); 
+ 
+					if (add > 0) 
+					{ 
+						lightcolor[0] += add * cl_dlights[lnum].color[0]; 
+						lightcolor[1] += add * cl_dlights[lnum].color[1]; 
+						lightcolor[2] += add * cl_dlights[lnum].color[2]; 
+					}
+				}
+			}
+
+			// ZOID: never allow players to go totally black 
+			i = e - cl_entities;
+			
+			if (i >= 1 && i <= cl.maxclients) 
+			{ 
+				if (lightcolor[0] < 8) lightcolor[0] = 8; 
+				if (lightcolor[1] < 8) lightcolor[1] = 8; 
+				if (lightcolor[2] < 8) lightcolor[2] = 8; 
+			} 
+
+			VectorScale(lightcolor, 1.275, lightcolor); 
+
+			// clamp lighting so it doesn't overbright
+			
+			if(lightcolor[0] > 255.0) lightcolor[0] = 255.0;
+			if(lightcolor[1] > 255.0) lightcolor[1] = 255.0;
+			if(lightcolor[2] > 255.0) lightcolor[2] = 255.0;
+		}
+	}
+	#endif
+
+	#if 1
+
+	shadedots = r_avertexnormal_dots[((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1)];
+
+	#else // test light lerping 2019 - Cowcat
+
+	float ang_ceil, ang_floor;
+
+	lightlerpoffset = (e->angles[1] + e->angles[0]) * (SHADEDOT_QUANT / 360.0);
+
+	ang_ceil = ceil(lightlerpoffset);
+	ang_floor = floor(lightlerpoffset);
+
+	lightlerpoffset = ang_ceil - lightlerpoffset;
+
+	shadedots = r_avertexnormal_dots[(int)ang_ceil & (SHADEDOT_QUANT - 1)];
+	shadedots2 = r_avertexnormal_dots[(int)ang_floor & (SHADEDOT_QUANT - 1)];
+
+	#endif
+
+	//
+	// locate the proper data
+	//
+	paliashdr = (aliashdr_t *)Mod_Extradata (e->model);
+	c_alias_polys += paliashdr->numtris;
+
+	//
+	// draw all the triangles
+	//
+
+	//if(mtexenabled)
+		//GL_DisableMultitexture(); // already disabled - Cowcat
+
+	glPushMatrix ();
+
+	#if 0
+	if(r_interpolations.value && e != &cl.viewent)
+		R_RotateInterpolatedForEntity (e);
+
+	else
+		R_RotateForEntity (e);
+
+	#else
+
+	if( (e == &cl.viewent) || (clmodel->modhint == MOD_FLAME) || (r_interpolations.value == 0) )
+		R_RotateForEntity (e); //, false);
+
+	else
+		R_RotateInterpolatedForEntity (e); //, false);
+
+	#endif
+	
+	if ( clmodel->modhint == MOD_EYES  && gl_doubleeyes.value)
+	{
+		glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2] - (22 + 8));
+		// double size of eyes, since they are really hard to see in gl
+		glScalef (paliashdr->scale[0]*2, paliashdr->scale[1]*2, paliashdr->scale[2]*2);
+	}
+
+	else
+	{
+		if ( (e == &cl.viewent) && (cl_gunfov.value) )
+		{
+			if (scr_fov.value <= 90)
+				goto nogunfov; //scale = 1.0f;
+
+			else
+				scale = 1.0f / tan(DEG2RAD(scr_fov.value / 2)); // Phoenix
+
+			glTranslatef (paliashdr->scale_origin[0]*scale, paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
+			glScalef (paliashdr->scale[0] * scale, paliashdr->scale[1], paliashdr->scale[2]);
+		}
+
+		else
+		{
+
+		nogunfov:
+			glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
+			glScalef (paliashdr->scale[0], paliashdr->scale[1], paliashdr->scale[2]);
+		}
+	}
+
+	anim = (int)(cl.time*10) & 3;
+
+	GL_BindCheck(paliashdr->gl_texturenum[e->skinnum][anim]); // textures repeat - Cowcat 2019
+
+	// we can't dynamically colormap textures, so they are cached
+	// seperately for the players.	Heads are just uncolored.
+	if (e->colormap != vid.colormap && !gl_nocolors.value)
+	{
+		i = e - cl_entities;
+
+		if (i >= 1 && i <= cl.maxclients /* && !strcmp (currententity->model->name, "progs/player.mdl") */)
+			GL_Bind(playertextures - 1 + i);
+	}
+
+	if(r_shadows.value)
+	{
+		if (gl_smoothmodels.value)
+		//if(smoothmodels)
+			glShadeModel (GL_SMOOTH);
+
+		else
+			glShadeModel (GL_FLAT); //SuRgEoN
+
+		glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+	}
+
+	if (r_interpolations.value && clmodel->modhint != MOD_FLAME) // - I like flames interpolated !! - Cowcat
+		//R_SetupAliasInterpolatedFrame (e->frame, paliashdr, e);
+		R_SetupAliasInterpolatedFrame (paliashdr, e); // changed - 2019 - Cowcat
+
+	else 
+		R_SetupAliasFrame (e->frame, paliashdr);
+
+	glPopMatrix ();
+
+	#ifdef GLOWEFFECTS
+	if(gl_glows.value)
+	{
+		if(clmodel->flags & MOD_GLOWS)
+			R_AddGlow (e);
+			
+	}
+	#endif
+
+	// shadows - Cowcat
+	
+	if( r_shadows.value && e != &cl.viewent && !(clmodel->flags & MOD_NOSHADOW) && r_refdef.vieworg[2] - lightspot[2] + 1 > 0 )	
+	{
+		trace_t downtrace;
+		vec3_t	downmove;
+
+		VectorCopy (e->origin, downmove);
+		downmove[2] -= 4096;
+		memset (&downtrace, 0, sizeof(downtrace));
+		downtrace.fraction = 1;
+	
+		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1, e->origin, downmove, &downtrace);
+					
+		if(downtrace.fraction < 1) //R00k
+		{
+			glPushMatrix ();
+	
+			/*
+			if(r_interpolations.value)
+				R_RotateInterpolatedForEntity(e, true);
+		
+			else
+				R_RotateForEntity(e, true);
+			*/
+
+			glLoadMatrixf(r_shadow_matrix); // bypass transformations - R_Rotate (Realm engine idea - Cowcat)
+
+			glDisable (GL_TEXTURE_2D);
+			glEnable (GL_BLEND);
+			
+			if (r_shadows.value == 2)
+				{ glColor4f(0.0f, 0.0f, 0.0f, 0.5f); } //keep those {} - macros are in use !! - Cowcat
+
+			else
+				{ glColor4f( 0.0f, 0.0f, 0.0f, shadowalpha.value - ((mins[2]-downtrace.endpos[2])/60) ); }
+
+			glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+			glShadeModel (GL_FLAT);
+				
+			/*
+			glEnable(GL_STENCIL_TEST);
+			glStencilFunc(GL_EQUAL, 1, 2);
+			glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+			*/
+
+			//glDepthFunc(GL_NOTEQUAL);
+
+			if(r_interpolations.value)
+				GL_DrawAliasBlendedShadow (paliashdr, lastposenum0, lastposenum, e, downtrace);
+
+			else
+				GL_DrawAliasShadow (paliashdr, lastposenum, e, downtrace);
+				
+			glEnable (GL_TEXTURE_2D);
+			glDisable (GL_BLEND);
+
+			/*
+			glDisable(GL_STENCIL_TEST);
+			*/
+
+			//glDepthFunc(GL_LEQUAL);
+
+			glColor4f (1,1,1,1);
+			glPopMatrix ();
+		}
+	}
+	
+cleanup:
+	if(entalpha < 1 ) // johnfitz
+	{
+		//glDepthMask(GL_TRUE);
+		glDisable(GL_BLEND);
+	}
+
+	//glPopMatrix (); // needed ? - Cowcat 2019
+}
+
+
+//==================================================================================
+
+void R_DrawViewModel (void);
+
+/*
+=============
+R_DrawEntitiesOnList
+=============
+*/
+
+#if 0
+void SortEntitiesByTransparency(void)
+{
+	int		i, j;
+	entity_t	*tmp;
+	qboolean	istransparent = false;
+
+	for(i = 0; i < cl_numvisedicts; i++)
+	{
+		currententity = cl_visedicts[i];
+
+		if (currententity->model->type != mod_alias)
+				continue;
+
+		if(ENTALPHA_DECODE(currententity->alpha) < 1)
+			istransparent = true;
+
+		else
+			istransparent = false;
+		
+		if( istransparent )
+		{
+			for( j = cl_numvisedicts - i; j > i ; j--)
+			{
+				if(!istransparent)
+				{
+					tmp = cl_visedicts[i];
+					cl_visedicts[i] = cl_visedicts[j];
+					cl_visedicts[j] = tmp;
+					break;
+				}
+			}
+
+			if (j == i)
+				return;
+		}
+	}
+}
+#endif
+
+void R_DrawEntitiesOnList (int routine)
+{
+	int	i;
+  
+	if (!r_drawentities.value)
+		return;
+
+	if(routine == 1)
+	{
+		for (i=0; i<cl_numvisedicts; i++)
+		{
+			currententity = cl_visedicts[i];
+
+			if (currententity->model->type != mod_brush)
+				continue;
+
+			R_DrawBrushModel(currententity);
+
+			/*
+			if(gl_wireframe.value)
+			{
+				wireframe = true;
+				glDisable(GL_DEPTH_TEST);
+				R_DrawBrushModel(currententity);
+				glEnable(GL_DEPTH_TEST);
+				wireframe = false;
+			}
+			*/
+		}
+
+		return;
+	}
+
+	if(routine == 2)
+	{
+		// draw sprites seperately, because of alpha blending
+
+		if(mtexenabled)
+			GL_DisableMultitexture();
+
+		if (gl_affinemodels.value)
+		#ifndef AMIGAOS
+			glHint (GL_PERSPECTIVE_CORRECTION_HINT, GL_FASTEST);
+		#else
+			glDisable(MGL_PERSPECTIVE_MAPPING);
+		#endif
+
+		glDisable(GL_CULL_FACE);
+
+		//glDepthMask(GL_FALSE);
+	
+		for (i=0; i<cl_numvisedicts; i++)
+		{
+			currententity = cl_visedicts[i];
+
+			if (currententity->model->type != mod_sprite)
+				continue;
+
+			R_DrawSpriteModel(currententity);
+		}
+
+		//glDepthMask(GL_TRUE);
+
+		if(gl_cull.value)
+			glEnable(GL_CULL_FACE); // Cowcat
+
+		if (gl_smoothmodels.value)
+		//if(smoothmodels)
+			glShadeModel (GL_SMOOTH);
+
+		if(r_vertexarrays.value)
+			qgl_EnableArray();
+
+		glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+		for (i=0; i<cl_numvisedicts; i++)
+		{
+			currententity = cl_visedicts[i];
+
+			if (currententity->model->type != mod_alias)
+				continue;
+
+			//if(ENTALPHA_DECODE(currententity->alpha) < 1)
+				//continue;
+
+			if (currententity == &cl_entities[cl.viewentity] && chase_active.value)
+			{
+				currententity->angles[0] *= 0.3; //
+			}
+			
+			R_DrawAliasModel(currententity);
+		}
+
+		#if 0
+		for (i=0; i<cl_numvisedicts; i++)
+		{
+			currententity = cl_visedicts[i];
+
+			if (currententity->model->type != mod_alias)
+				continue;
+
+			if(ENTALPHA_DECODE(currententity->alpha) == 1)
+				continue;
+
+			if (currententity == &cl_entities[cl.viewentity] && chase_active.value)
+			{
+				currententity->angles[0] *= 0.3; //
+			}
+			
+			R_DrawAliasModel(currententity);
+		}
+		#endif
+
+		if(r_vertexarrays.value)
+		{	
+			if(fog)
+				glDisable(GL_FOG); // hack : workaround for weapon bug with fog + varrays - Cowcat
+
+			R_DrawViewModel ();
+
+			qgl_DisableArray();
+		}
+
+		else
+			R_DrawViewModel ();
+			
+		
+		if (gl_affinemodels.value)
+		#ifndef AMIGAOS
+			glHint (GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
+		#else
+			glEnable(MGL_PERSPECTIVE_MAPPING);
+		#endif
+
+		glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+
+		return;
+	}
+}
+
+extern	cvar_t	scr_fov; //Surgeon
+
+/*
+=============
+R_DrawViewModel
+=============
+*/
+void R_DrawViewModel (void)
+{
+	#if 0
+
+	if (!r_drawviewmodel.value)
+		return;
+
+	//  if(r_framecount < 2) //surgeon
+	//	return;
+
+	if (scr_fov.value > 170) //surgeon: like soft renderer (was 90 - Cowcat)
+		return;
+
+	if (chase_active.value)
+		return;
+
+	//if (envmap)
+		//return; // Cowcat
+
+	//if (!r_drawentities.value)
+		//return; // Cowcat
+
+	if (cl.items & IT_INVISIBILITY)
+		return;
+
+	if (cl.stats[STAT_HEALTH] <= 0)
+		return;
+
+	currententity = &cl.viewent;
+
+	if (!currententity->model)
+		return;
+
+	#else
+
+	currententity = &cl.viewent;
+
+	if ( !r_drawviewmodel.value || chase_active.value || cl.items & IT_INVISIBILITY ||
+		cl.stats[STAT_HEALTH] <= 0 || !currententity->model)
+		return;
+
+	#endif
+
+	// hack the depth range to prevent view model from poking into walls
+	glDepthRange (gldepthmin, gldepthmin + 0.3 * (gldepthmax-gldepthmin));
+	R_DrawAliasModel (currententity);
+	glDepthRange (gldepthmin, gldepthmax);
+}
+
+
+#ifdef AMIGAOS //surgeon: MGL_FLATFAN is fastest method..
+
+/*
+============
+R_PolyBlend
+============
+*/
+
+void R_PolyBlend (void)
+{
+	if (!gl_polyblend.value || !v_blend[3] )
+		return;
+
+	if(mtexenabled)
+		GL_DisableMultitexture();
+
+	glDisable (GL_ALPHA_TEST);
+	glDisable (GL_DEPTH_TEST);
+	glDisable (GL_TEXTURE_2D);
+	glEnable (GL_BLEND);
+
+	glColor4fv (v_blend);
+
+	glBegin (MGL_FLATFAN);
+
+	glVertex2f (0, 0);
+	glVertex2f (vid.width, 0);
+	glVertex2f (vid.width, vid.height - sb_lines);
+	glVertex2f (0, vid.height - sb_lines);
+
+	glEnd ();
+
+	glColor4f (1, 1, 1, 1);
+
+	glDisable (GL_BLEND);
+	glEnable (GL_TEXTURE_2D);
+	//glEnable (GL_ALPHA_TEST);
+}
+
+#else
+
+/*
+============
+R_PolyBlend
+============
+*/
+void R_PolyBlend (void)
+{
+	if (!gl_polyblend.value)
+		return;
+
+	if (!v_blend[3])
+		return;
+  
+	if(mtexenabled)
+		GL_DisableMultitexture();
+	
+	glEnable (GL_BLEND);
+	glDisable (GL_DEPTH_TEST);
+	glDisable (GL_TEXTURE_2D);
+
+	glLoadIdentity ();
+
+	glRotatef (-90,	 1, 0, 0);	// put Z going up
+	glRotatef (90,	0, 0, 1);	// put Z going up
+
+	glColor4fv (v_blend);
+
+	glBegin (GL_QUADS);
+
+	glVertex3f (10, 100, 100);
+	glVertex3f (10, -100, 100);
+	glVertex3f (10, -100, -100);
+	glVertex3f (10, 100, -100);
+
+	glEnd ();
+
+	glDisable (GL_BLEND);
+	glEnable (GL_TEXTURE_2D);
+	//glEnable (GL_ALPHA_TEST);
+}
+
+#endif
+
+
+#ifndef FASTBOPS
+int SignbitsForPlane (mplane_t *out)
+{
+	int bits, j;
+
+	// for fast box on planeside test
+
+	bits = 0;
+
+	for (j=0 ; j<3 ; j++)
+	{
+		if (out->normal[j] < 0)
+			bits |= 1<<j;
+	}
+
+	return bits;
+}
+#endif
+
+/*
+static void TurnVector (vec3_t out, const vec3_t forward, const vec3_t side, float angle)
+{
+	float	scale_forward, scale_side;
+
+	scale_forward = cos(angle * (M_PI / 180.0));
+	scale_side = sin(angle * (M_PI / 180.0));
+
+	out[0] = scale_forward*forward[0] + scale_side*side[0];
+	out[1] = scale_forward*forward[1] + scale_side*side[1];
+	out[2] = scale_forward*forward[2] + scale_side*side[2];
+}
+*/
+
+#if 1
+
+void R_SetFrustum (float fovx, float fovy)
+{
+	//float vpnrx, vpnry; //SuRgEoN
+
+	if(stereoview)
+		fovx += 10; // stereo
+	
+	RotatePointAroundVectorNEW( frustum[0].normal, frustum[1].normal, vup, vpn, -(90-fovx * 0.5) ); 
+	RotatePointAroundVectorNEW( frustum[2].normal, frustum[3].normal, vright, vpn, 90-fovy * 0.5 );
+	//TurnVector(frustum[0].normal, vpn, vright, fovx/2 - 90);
+	//TurnVector(frustum[1].normal, vpn, vright, 90 - fovx/2);
+	//TurnVector(frustum[2].normal, vpn, vup, 90 - fovy/2);
+	//TurnVector(frustum[3].normal, vpn, vup, fovy/2 - 90);
+
+	#ifndef FASTBOPS
+
+	int i;
+
+	for (i=0 ; i<4 ; i++)
+	{
+		frustum[i].type = PLANE_ANYZ;
+		frustum[i].dist = DotProduct (r_origin, frustum[i].normal);
+		frustum[i].signbits = SignbitsForPlane (&frustum[i]);
+	#else
+
+	frustum[0].type = PLANE_ANYZ;
+	frustum[1].type = PLANE_ANYZ;
+	frustum[2].type = PLANE_ANYZ;
+	frustum[3].type = PLANE_ANYZ;
+
+	frustum[0].dist = DotProduct (r_origin, frustum[0].normal);
+	frustum[1].dist = DotProduct (r_origin, frustum[1].normal);
+	frustum[2].dist = DotProduct (r_origin, frustum[2].normal);
+	frustum[3].dist = DotProduct (r_origin, frustum[3].normal);
+
+	BoxOnPlaneSideClassify(&frustum[0]);
+	BoxOnPlaneSideClassify(&frustum[1]);
+	BoxOnPlaneSideClassify(&frustum[2]);
+	BoxOnPlaneSideClassify(&frustum[3]);
+
+	#endif
+
+	#ifndef FASTBOPS
+
+	}
+
+	#endif
+}
+
+#else // test
+
+float r_projection_matrix[16];
+
+void GL_MultiplyMatrix( const float *a, const float *b, float *out )
+{
+	int	i, j;
+
+	for ( i = 0 ; i < 4 ; i++ )
+	{
+		for ( j = 0 ; j < 4 ; j++ )
+		{
+			out[ i * 4 + j ] =
+				a [ i * 4 + 0 ] * b [ 0 * 4 + j ]
+				+ a [ i * 4 + 1 ] * b [ 1 * 4 + j ]
+				+ a [ i * 4 + 2 ] * b [ 2 * 4 + j ]
+				+ a [ i * 4 + 3 ] * b [ 3 * 4 + j ];
+		}
+	}
+}
+
+void R_ExtractFrustum(void)
+{
+	int i;
+	float r_mvp_matrix[16];
+
+	GL_MultiplyMatrix(r_mvp_matrix, r_world_matrix, r_projection_matrix);
+
+	frustum[0].normal[0] = r_mvp_matrix[3] - r_mvp_matrix[0];
+	frustum[0].normal[1] = r_mvp_matrix[7] - r_mvp_matrix[4];
+	frustum[0].normal[2] = r_mvp_matrix[11] - r_mvp_matrix[8];
+
+	frustum[1].normal[0] = r_mvp_matrix[3] + r_mvp_matrix[0];
+	frustum[1].normal[1] = r_mvp_matrix[7] + r_mvp_matrix[4];
+	frustum[1].normal[2] = r_mvp_matrix[11] + r_mvp_matrix[8];
+
+	frustum[2].normal[0] = r_mvp_matrix[3] + r_mvp_matrix[1];
+	frustum[2].normal[1] = r_mvp_matrix[7] + r_mvp_matrix[5];
+	frustum[2].normal[2] = r_mvp_matrix[11] + r_mvp_matrix[9];
+
+	frustum[3].normal[0] = r_mvp_matrix[3] - r_mvp_matrix[1];
+	frustum[3].normal[1] = r_mvp_matrix[7] - r_mvp_matrix[5];
+	frustum[3].normal[2] = r_mvp_matrix[11] - r_mvp_matrix[9];
+
+	for( i = 0; i < 4; i++)
+	{
+		VectorNormalize(frustum[i].normal);
+
+		frustum[0].type = PLANE_ANYZ;
+		frustum[1].type = PLANE_ANYZ;
+		frustum[2].type = PLANE_ANYZ;
+		frustum[3].type = PLANE_ANYZ;
+
+		frustum[0].dist = DotProduct (r_origin, frustum[0].normal);
+		frustum[1].dist = DotProduct (r_origin, frustum[1].normal);
+		frustum[2].dist = DotProduct (r_origin, frustum[2].normal);
+		frustum[3].dist = DotProduct (r_origin, frustum[3].normal);
+
+		BoxOnPlaneSideClassify(&frustum[0]);
+		BoxOnPlaneSideClassify(&frustum[1]);
+		BoxOnPlaneSideClassify(&frustum[2]);
+		BoxOnPlaneSideClassify(&frustum[3]);
+	}
+}
+
+#endif
+
+/*
+===============
+R_SetupFrame
+===============
+*/
+
+void R_SetupFrame (void)
+{
+	r_mod_maxdist = (ULONG)r_model_maxdist.value;
+	r_mod_maxdist *= r_mod_maxdist;
+
+	// don't allow cheats in multiplayer
+	if (cl.maxclients > 1)
+		//Cvar_Set ("r_fullbright", "0");
+		r_fullbright.value = 0;
+
+	r_dowarp = (r_waterwarp.value != 0); // r_waterwarp switch enable by SuRgEoN
+
+	R_AnimateLight ();
+
+	r_framecount++;
+
+	// build the transformation matrix for the given view angles
+	VectorCopy (r_refdef.vieworg, r_origin);
+	AngleVectors (r_refdef.viewangles, vpn, vright, vup);
+
+	// current viewleaf
+	r_oldviewleaf = r_viewleaf;
+	r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
+
+	if(!mirror)
+	{
+		V_SetContentsColor (r_viewleaf->contents);
+		V_CalcBlend ();
+	}
+
+	r_fovx = r_refdef.fov_x; // johnfitz
+	r_fovy = r_refdef.fov_y; //
+
+	r_cache_thrash = false;
+
+	c_brush_polys = 0;
+	c_alias_polys = 0;
+}
+
+
+float frustum_skew = 0.0; // stereo
+
+void MYgluPerspective( GLdouble fovy, GLdouble aspect, GLdouble zNear) // , GLdouble zFar )
+{
+	GLdouble xmin, xmax, ymin, ymax;
+
+	//ymax = zNear * tan( fovy * M_PI / 360.0 );
+
+	ymax = zNear * tan( fovy * MPIDIV);
+	ymin = -ymax;
+
+	xmax = ymax * aspect;
+	xmin = -xmax;
+
+	//glFrustum( xmin + frustum_skew, xmax + frustum_skew, ymin, ymax, zNear, zFar );
+	glFrustum( xmin + frustum_skew, xmax + frustum_skew, ymin, ymax, zNear, gl_farclip.value );
+}
+
+/*
+=============
+R_SetupGL
+=============
+*/
+
+void R_SetupGL (void)
+{
+	float	screenaspect;
+	//float	yfov;
+	extern	int glwidth, glheight;
+	int	x, x2, y2, y, w, h;
+
+	//surgeon: constant optimization
+	int	glhght,glwdth;		//note these will typically be constant
+
+	//
+	// set up viewpoint
+	//
+
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity ();
+
+	glhght = glheight/vid.height;
+	glwdth = glwidth/vid.width;
+
+	x = r_refdef.vrect.x * glwdth;
+	x2 = (r_refdef.vrect.x + r_refdef.vrect.width) * glwdth;
+	y = (vid.height-r_refdef.vrect.y) * glhght;
+	y2 = (vid.height - (r_refdef.vrect.y + r_refdef.vrect.height)) * glhght;
+
+/*
+	x = r_refdef.vrect.x * glwidth/vid.width;
+	x2 = (r_refdef.vrect.x + r_refdef.vrect.width) * glwidth/vid.width;
+	y = (vid.height-r_refdef.vrect.y) * glheight/vid.height;
+	y2 = (vid.height - (r_refdef.vrect.y + r_refdef.vrect.height)) * glheight/vid.height;
+*/
+
+	// fudge around because of frac screen scale
+	if (x > 0)
+		x--;
+
+	if (x2 < glwidth)
+		x2++;
+
+	if (y2 < 0)
+		y2--;
+
+	if (y < glheight)
+		y++;
+
+	w = x2 - x;
+	h = y - y2;
+
+	// no envmap tests - Cowcat
+/*
+	if (envmap)
+	{
+		x = y2 = 0;
+		w = h = 256;
+	}
+*/
+
+/*
+	if ((h + y2) == vid.height)
+	{
+		y2 = 0;	  //  30/01/2000 added: M.Tretene
+	}
+
+	Surgeon: this causes offset to always be 0 for viewsizes less than fullscreen! - causes the console/sbar bug!
+*/
+
+	glViewport ((glx + x), (gly + y2), w, h);
+
+	//glGetFloatv(GL_PROJECTION_MATRIX, r_projection_matrix); // save for mirrors - test 
+
+	//Surgeon: take vid.aspect into account
+	screenaspect = (float)r_refdef.vrect.width/r_refdef.vrect.height*vid.aspect;
+
+	if(chase_active.value) // R00k
+		//MYgluPerspective (r_refdef.fov_y,  screenaspect,  1,	4096);
+		MYgluPerspective (r_fovy,  screenaspect,  1); //,  4096);
+
+	else
+		//MYgluPerspective (r_refdef.fov_y,  screenaspect,  4,	4096);
+		MYgluPerspective (r_fovy,  screenaspect,  4); //,  4096);
+
+	if (mirror)
+	{
+		/*
+		if (mirror_plane->normal[2])
+			glScalef (1, -1, 1);
+
+		else
+			glScalef (-1, 1, 1);
+
+		glCullFace(GL_BACK);
+		*/
+
+		Mirror_Scale();
+	}
+
+	else
+	{
+		glCullFace(GL_FRONT);
+	}
+
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity ();
+
+#ifdef AMIGAOS
+	
+	glRotatefEXTs(-1.f, 0.f, GLROT_100);
+	glRotatefEXTs( 1.f, 0.f, GLROT_001);
+	glRotatefEXT (-r_refdef.viewangles[2], GLROT_100);
+	glRotatefEXT (-r_refdef.viewangles[0], GLROT_010);
+	glRotatefEXT (-r_refdef.viewangles[1], GLROT_001);
+
+#else
+	glRotatef (-90, 1, 0, 0);    // put Z going up
+	glRotatef (90, 0, 0, 1);     // put Z going up
+	glRotatef (-r_refdef.viewangles[2],  1, 0, 0);
+	glRotatef (-r_refdef.viewangles[0],  0, 1, 0);
+	glRotatef (-r_refdef.viewangles[1],  0, 0, 1);
+#endif
+		
+	glTranslatef (-r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
+
+	glGetFloatv (GL_MODELVIEW_MATRIX, r_world_matrix); // needed for mirror - Cowcat 2019
+
+	//
+	// set drawing parms
+	//
+
+	if (gl_cull.value)
+		glEnable(GL_CULL_FACE);
+
+	else
+		glDisable(GL_CULL_FACE);
+
+	glDisable(GL_BLEND);
+	glDisable(GL_ALPHA_TEST);
+	glEnable(GL_DEPTH_TEST);
+
+#ifdef AMIGAOS //was disabled for 2D
+	glEnable(MGL_PERSPECTIVE_MAPPING);
+#endif
+
+}
+
+
+/*
+================
+R_RenderScene
+
+r_refdef must be set before the first call
+================
+*/
+
+void R_RenderScene (void)
+{
+	R_SetupFrame ();
+
+	R_SetFrustum (r_fovx, r_fovy);
+	//R_ExtractFrustum();
+
+	R_SetupGL ();
+
+	R_MarkLeaves ();		// done here so we know if we're in water
+
+	//clamp triangle elimination area: (vertexarrays)
+	
+	#ifdef AMIGAOS
+	
+	if(r_elim_areasize.value > 10.0)
+		Cvar_SetValue("r_elim_areasize", 10.0);
+
+	else if (r_elim_areasize.value < 0.5)
+		Cvar_SetValue("r_elim_areasize", 0.5);
+
+	mglMinTriArea(r_elim_areasize.value);
+
+	#endif
+
+	if(!r_cullworld.value && !r_novis.value)
+		glDisable(GL_CULL_FACE);
+
+	glShadeModel(GL_FLAT);		//SuRgEoN
+
+	glColor4f(1,1,1,1);		// brushmodels, world and sprites are drawn before alias models
+
+	R_DrawEntitiesOnList (1);	// brushmodels
+
+	R_DrawWorld ();			// adds static entities to the list
+
+	S_ExtraUpdate ();		// don't let sound get messed up if going slow
+ 
+	//if(gl_cull.value)
+		//glEnable(GL_CULL_FACE); // GL_CULL_FACE is disabled/enabled when DrawEntitiesOnList(2) - Cowcat
+
+	//smoothmodels = (gl_smoothmodels.value != 0); // ala SuRgEoN - Cowcat 2019
+
+	R_DrawEntitiesOnList (2);
+
+	glShadeModel(GL_SMOOTH);	//SuRgEoN
+
+	#ifdef GLOWEFFECTS
+	if(gl_glows.value)
+		R_RenderGlows ();
+	#endif
+
+	R_RenderDlights ();
+
+	glDisable(GL_CULL_FACE);	//Surgeon: particle cullung is a waste of time
+
+	if(!gl_classic_particles.value)
+		R_DrawParticles ();
+
+	else
+		R_DrawParticles_Classic(); // Cowcat
+
+	if(gl_cull.value)
+		glEnable(GL_CULL_FACE);
+
+	#ifdef GLTEST
+		Test_Draw ();
+	#endif
+
+	R_DrawWaterSurfaces (); // was in RenderView (needed here for stereoview & mirrors) - Cowcat
+}
+
+/*
+=============
+R_Clear
+=============
+*/
+
+void R_Clear (void)
+{
+	#if 1
+
+	GLbitfield clearbits;
+
+	clearbits = GL_DEPTH_BUFFER_BIT;
+
+	//glClearColor(0, 0, 0, 1);
+	//Surgeon - minimize gl_keeptjunctions 0 errors
+
+	if (r_mirroralpha.value != 1.0)
+	{
+		if (gl_clear.value)
+			clearbits |= GL_COLOR_BUFFER_BIT;
+
+		gldepthmin = 0;
+		gldepthmax = 0.5;
+		glDepthFunc (GL_LEQUAL);
+	}
+
+	else if (gl_ztrick.value)
+	{
+		static int trickframe;
+
+		if (gl_clear.value)
+			glClear (GL_COLOR_BUFFER_BIT);
+
+		trickframe++;
+
+		if (trickframe & 1)
+		{
+			gldepthmin = 0;
+			gldepthmax = 0.49999;
+			glDepthFunc (GL_LEQUAL);
+		}
+
+		else
+		{
+			gldepthmin = 1;
+			gldepthmax = 0.5;
+			glDepthFunc (GL_GEQUAL);
+		}
+
+		goto dr;
+	}
+
+	else
+	{
+		if (gl_clear.value || gl_wireonly.value)
+			clearbits |= GL_COLOR_BUFFER_BIT;
+
+		gldepthmin = 0;
+		gldepthmax = 1;
+		glDepthFunc (GL_LEQUAL);
+	}
+
+	//if(r_viewleaf && r_viewleaf->contents == CONTENTS_SOLID)
+		//glClearColor(0.01f, 0.01f, 0.01f, 1.0f);
+
+	//else
+		glClearColor(0, 0, 0, 1);
+
+	glClear(clearbits);
+
+dr:
+	glDepthRange (gldepthmin, gldepthmax);
+
+	/*
+	if(r_shadows.value)
+	{
+		glClearStencil(GL_TRUE);
+		glClear(GL_STENCIL_BUFFER_BIT);
+	}
+	*/
+
+	#else // test Cowcat 2019
+
+	GLbitfield clearbits;
+
+	clearbits = GL_DEPTH_BUFFER_BIT;
+
+	if (gl_clear.value)
+		clearbits |= GL_COLOR_BUFFER_BIT;
+	
+	glClear(clearbits);
+
+	gldepthmin = 0;
+	gldepthmax = 1;
+	glDepthFunc (GL_LEQUAL);
+
+	glDepthRange (gldepthmin, gldepthmax);
+
+	#endif
+}
+
+
+/*
+================
+R_RenderView
+
+r_refdef must be set before the first call
+================
+*/
+
+extern cvar_t r_pos; // Cowcat 2019
+
+void R_RenderView (void)
+{
+	double	time1 = 0, time2;
+	//GLfloat colors[4] = {(GLfloat) 0.0, (GLfloat) 0.0, (GLfloat) 1, (GLfloat) 0.20}; // 30/01/2000 modified: M.Tretene
+
+	if (r_norefresh.value)
+		return;
+
+	if (!r_worldentity.model || !cl.worldmodel)
+		Sys_Error ("R_RenderView: NULL worldmodel");
+
+	if (r_speeds.value)
+	{
+		glFinish ();
+		time1 = Sys_FloatTime ();
+		c_brush_polys = 0;
+		c_alias_polys = 0;
+	}
+
+	mirror = false;
+	
+	if (gl_finish.value)
+		glFinish ();
+
+	R_Clear();
+
+	// render normal view
+	
+	R_Fog_BeginFrame(); // Cowcat
+
+	#if 1
+	//johnfitz -- stereo rendering -- full of hacky goodness
+	if (r_stereo.value)
+	{
+		stereoview = true;
+
+		float eyesep = CLAMP(-8.0f, r_stereo.value, 8.0f);
+		float fdepth = CLAMP(32.0f, r_stereodepth.value, 1024.0f);
+
+		AngleVectors (r_refdef.viewangles, vpn, vright, vup);
+
+		//render left eye (red)
+		glColorMask(1, 0, 0, 1);
+		VectorMA (r_refdef.vieworg, -0.5f * eyesep, vright, r_refdef.vieworg);
+		frustum_skew = 0.5 * eyesep * 4 / fdepth;
+		srand((int) (cl.time * 1000)); //sync random stuff between eyes
+
+		R_RenderScene ();
+
+		//render right eye (cyan)
+		//glClear (GL_DEPTH_BUFFER_BIT); 
+		R_Clear();			 // Cowcat
+
+		glColorMask(0, 1, 1, 1);
+		VectorMA (r_refdef.vieworg, 1.0f * eyesep, vright, r_refdef.vieworg);
+		frustum_skew = -frustum_skew;
+		srand((int) (cl.time * 1000)); //sync random stuff between eyes
+
+		R_RenderScene ();
+		
+		//restore
+		glColorMask(1, 1, 1, 1);
+		VectorMA (r_refdef.vieworg, -0.5f * eyesep, vright, r_refdef.vieworg);
+		
+		frustum_skew = 0.0f;
+
+		stereoview = false;
+	}
+	else
+	#endif
+	{
+		R_RenderScene ();
+	}
+
+	//R_DrawWaterSurfaces (); // now in R_RenderScene
+
+	if(mirror)
+		R_Mirror ();
+	
+	//  More fog code right here :)
+	
+	if (fog) // Cowcat
+	{	
+		glDisable(GL_FOG);
+		fog = false;
+	}
+
+	//R_Fog_EndFrame(); // naaa...
+
+	//  End of all fog code...
+
+	// render mirror view // moved up - Cowcat
+
+	if(r_showbboxes.value)
+		R_ShowBBoxes();
+
+	R_PolyBlend ();
+
+	if(r_pos.value)
+	{
+		Con_Printf("x %i y %i z %i (pitch %i yaw %i roll %i)\n",
+			(int)cl_entities[cl.viewentity].origin[0],
+			(int)cl_entities[cl.viewentity].origin[1],
+			(int)cl_entities[cl.viewentity].origin[2],
+			(int)cl.viewangles[PITCH],
+			(int)cl.viewangles[YAW],
+			(int)cl.viewangles[ROLL]);
+	}
+			
+	else if (r_speeds.value)
+	{
+		//glFinish ();
+		time2 = Sys_FloatTime ();
+		Con_Printf ("%3i ms  %4i wpoly %4i epoly\n", (int)((time2-time1)*1000), c_brush_polys, c_alias_polys); 
+	}
+}
+

@@ -1,0 +1,27 @@
+Short:    GLQuake sources for Amiga/WarpOS
+Author:   glquake@libero.it (Massimiliano Tretene)
+Uploader: frank@phoenix.owl.de
+Version:  1.0 beta 6.1
+Type:     game/shoot
+Requires: StormC
+
+This archive contains the full GLQuake source required to compile a
+standard GLQuake running under WarpOS. This is a miniature update
+(I did not raise the version number because of this) which fixes
+the problem with Mouse Support which appeared on some systems 
+(including mine :) ).
+
+GLQuake requires the developer archives from Warp3D and MiniGL and
+compiles only with StormC for now. The StormC project file is called
+"GLQuake.¶".
+
+If you should encounter any problems, while trying to compile GLQuake,
+please contact the author, Massimiliano Tretene. His email address
+is <glquake@libero.it> or optionally <mtretene@tiscalinet.it>.
+
+
+The GLQuake source is published under the GNU General Public License.
+Please read the file COPYING for more information.
+
+
+Frank Wille                  21-Jun-2000                frank@phoenix.owl.de

@@ -1,0 +1,82 @@
+17-Jun-2000   V1.00
+	First Aminet release.
+
+
+20-Jun-2000   V1.10
+	Workaround for StormC compiler bug in GLQuake mouse support.
+
+
+31-Jul-2000   V1.20
+	Included all ProQuake extensions from J.P. Grossman:
+	Client:
+	  - precise aim for ProQuake connection
+	  - ProQuake message on connect
+	  - ProQuake version
+	  - Auto-smooth for camera/chasecam/eyecam
+	  - longer mm1, mm2 messages
+	  - (say): for messagemode2
+	  - support for mods in qsocket (EXPLAIN - byte after accept
+	    server->client; byte after connect client->server)
+	  - fixed losing backscroll on print
+	  - fixed HOME and END in console
+	  - Added proquake commands to CL_Parse
+	  - pq_teamscores: teamscores in status bar!!!
+	  - pq_timer: timer in status bar!!
+	  - put sound back to DOSquake levels!
+	  - added ping to scoreboard
+	  - added ProQuake help page
+	  - added cl_crossx, cl_crossy for GL
+	  - queries server for pings if not connected to crmod6.0 server
+	  - added pq_lag - synthetic lag!
+	  - recognizes ping +N
+	  - grab match time from crmod 4.0-5.1
+	  - added r_waterwarp to GL
+	Server:
+	  - disabled tell
+	  - () in mm2 (server side)
+	  - Allow multiple connects from any IP (server side)
+	  - precise aim for ProQuake connection
+	  - added hook for QuakeC to turn off server flag in cvars
+	  - Added ProQuake console variable (so mods can detect it)
+	  - can set logfile name; can use %d for multiple logs
+	  - log file header
+	  - dprint(proquake client connected) if proquake client detected
+	Other:
+	  - removed "backup past 0"
+	  - removed "stuck", "unstuck" messages
+
+	Implemented support for sys_ticrate.
+
+	Changed positions of F11, F12 and PAUSE keys, which used Amiga
+	keys missing on an American keyboard. New assignments:
+	  F11: Del-key
+	  F12: Help-key
+	  PAUSE: '*' on numeric key block
+
+
+25-Dec-2000   V1.30
+	- Source code cleanup.
+	- Fixed savegame bugs!
+	- Automatic stack extension to 256k (Quake needs approximately
+	  140k in M68k and in PPC version).
+	- vid.aspect is set correctly for all resolutions.
+	- New AGA options -ntsc, -pal, -dblntsc, -dblpal.
+	- gcc/68k support.
+	- Assembler include file generator, which calculates all required
+	  Quake structure offsets.
+	- Stack swap is done automatically in case there is less than
+	  256k available.
+	- -condebug does work now.
+	- chase_active no longer crashes (missing prototype in orig.
+	  source - argh!)
+
+
+03-Jan-2000   V1.31
+	- Updated ProQuake extensions to V1.03. New features:
+	  o pq_drawfps: draws fps counter
+	  o Fixed the zero-sized packet bug
+	  o Support for health, armour, time, location and rocket launcher
+	    binds in messages
+	  o Fix demo messages.
+	  o AMIGA-V can be used to paste clipboard text into console
+	- chase cam really works now, except in playdemo

@@ -1,0 +1,195 @@
+#include <stdio.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include "quakedefgen.h"
+
+int esize(size_t s)
+{
+  int i;
+  for (i=0; i<30; i++) {
+    if (s == (1<<i))
+      return i;
+  }
+  return -1;
+}
+
+main(void)
+{
+  FILE *fh;
+  if (fh = fopen("glquakedefPPC.i","w")) {
+    fprintf(fh,".set\tMSURFACE_VISFRAME,%lu\n",offsetof(msurface_t,visframe));
+    fprintf(fh,".set\tMSURFACE_DLIGHTFRAME,%lu\n",offsetof(msurface_t,dlightframe));
+    fprintf(fh,".set\tMSURFACE_DLIGHTBITS,%lu\n",offsetof(msurface_t,dlightbits));
+    fprintf(fh,".set\tMSURFACE_PLANE,%lu\n",offsetof(msurface_t,plane));
+    fprintf(fh,".set\tMSURFACE_FLAGS,%lu\n",offsetof(msurface_t,flags));
+    fprintf(fh,".set\tMSURFACE_FIRSTEDGE,%lu\n",offsetof(msurface_t,firstedge));
+    fprintf(fh,".set\tMSURFACE_NUMEDGES,%lu\n",offsetof(msurface_t,numedges));
+    fprintf(fh,".set\tMSURFACE_TEXTUREMINS,%lu\n",offsetof(msurface_t,texturemins));
+    fprintf(fh,".set\tMSURFACE_EXTENTS,%lu\n",offsetof(msurface_t,extents));
+    fprintf(fh,".set\tMSURFACE_TEXINFO,%lu\n",offsetof(msurface_t,texinfo));
+    fprintf(fh,".set\tMSURFACE_STYLES,%lu\n",offsetof(msurface_t,styles));
+    fprintf(fh,".set\tMSURFACE_SAMPLES,%lu\n",offsetof(msurface_t,samples));
+    fprintf(fh,".set\tMSURFACE_SIZEOF,%lu\n",sizeof(msurface_t));
+    fprintf(fh,".set\tMVERTEX_SIZEOF,%lu\n",sizeof(mvertex_t));
+    fprintf(fh,".set\tMEDGE_V,%lu\n",offsetof(medge_t,v));
+    fprintf(fh,".set\tMEDGE_CEO,%lu\n",offsetof(medge_t,cachededgeoffset));
+    if (esize(sizeof(medge_t)) >= 0) {
+      fprintf(fh,".set\tMEDGE_SIZEOF_EXP,%d\n",esize(sizeof(medge_t)));
+    }
+    else {
+      printf("Size of medge_t can't be represented by a base-2 exponent.\n");
+      exit(20);
+    }
+    fprintf(fh,".set\tMEDGE_SIZEOF,%lu\n",sizeof(medge_t));
+    fprintf(fh,".set\tMPLANE_NORMAL,%lu\n",offsetof(mplane_t,normal));
+    fprintf(fh,".set\tMPLANE_DIST,%lu\n",offsetof(mplane_t,dist));
+    fprintf(fh,".set\tMPLANE_TYPE,%lu\n",offsetof(mplane_t,type));
+    fprintf(fh,".set\tMPLANE_SIGNBITS,%lu\n",offsetof(mplane_t,signbits));
+    fprintf(fh,".set\tMPLANE_SIZEOF,%lu\n",sizeof(mplane_t));
+    fprintf(fh,".set\tMTEXINFO_VECS,%lu\n",offsetof(mtexinfo_t,vecs));
+    fprintf(fh,".set\tMTEXINFO_MIPADJUST,%lu\n",offsetof(mtexinfo_t,mipadjust));
+    fprintf(fh,".set\tMTEXINFO_TEXTURE,%lu\n",offsetof(mtexinfo_t,texture));
+    fprintf(fh,".set\tMTEXINFO_FLAGS,%lu\n",offsetof(mtexinfo_t,flags));
+    fprintf(fh,".set\tMTEXINFO_SIZEOF,%lu\n",sizeof(mtexinfo_t));
+    fprintf(fh,".set\tSURFCACHE_NEXT,%lu\n",offsetof(surfcache_t,next));
+    fprintf(fh,".set\tSURFCACHE_OWNER,%lu\n",offsetof(surfcache_t,owner));
+    fprintf(fh,".set\tSURFCACHE_LIGHTADJ,%lu\n",offsetof(surfcache_t,lightadj));
+    fprintf(fh,".set\tSURFCACHE_DLIGHT,%lu\n",offsetof(surfcache_t,dlight));
+    fprintf(fh,".set\tSURFCACHE_SIZE,%lu\n",offsetof(surfcache_t,size));
+    fprintf(fh,".set\tSURFCACHE_WIDTH,%lu\n",offsetof(surfcache_t,width));
+    fprintf(fh,".set\tSURFCACHE_HEIGHT,%lu\n",offsetof(surfcache_t,height));
+    fprintf(fh,".set\tSURFCACHE_MIPSCALE,%lu\n",offsetof(surfcache_t,mipscale));
+    fprintf(fh,".set\tSURFCACHE_TEXTURE,%lu\n",offsetof(surfcache_t,texture));
+    fprintf(fh,".set\tSURFCACHE_DATA,%lu\n",offsetof(surfcache_t,data));
+    fprintf(fh,".set\tSURFCACHE_SIZEOF,%lu\n",sizeof(surfcache_t));
+    fprintf(fh,".set\tTEXTURE_OFFSETS,%lu\n",offsetof(texture_t,offsets));
+    fprintf(fh,".set\tCVAR_VALUE,%lu\n",offsetof(cvar_t,value));
+    fprintf(fh,".set\tENTITY_FORCELINK,%lu\n",offsetof(entity_t,forcelink));
+    fprintf(fh,".set\tENTITY_UPDATE_TYPE,%lu\n",offsetof(entity_t,update_type));
+    fprintf(fh,".set\tENTITY_BASELINE,%lu\n",offsetof(entity_t,baseline));
+    fprintf(fh,".set\tENTITY_MSGTIME,%lu\n",offsetof(entity_t,msgtime));
+    fprintf(fh,".set\tENTITY_MSG_ORIGINS,%lu\n",offsetof(entity_t,msg_origins));
+    fprintf(fh,".set\tENTITY_ORIGIN,%lu\n",offsetof(entity_t,origin));
+    fprintf(fh,".set\tENTITY_MSG_ANGLES,%lu\n",offsetof(entity_t,msg_angles));
+    fprintf(fh,".set\tENTITY_ANGLES,%lu\n",offsetof(entity_t,angles));
+    fprintf(fh,".set\tENTITY_MODEL,%lu\n",offsetof(entity_t,model));
+    fprintf(fh,".set\tENTITY_EFRAG,%lu\n",offsetof(entity_t,efrag));
+    fprintf(fh,".set\tENTITY_FRAME,%lu\n",offsetof(entity_t,frame));
+    fprintf(fh,".set\tENTITY_SYNCBASE,%lu\n",offsetof(entity_t,syncbase));
+    fprintf(fh,".set\tENTITY_COLORMAP,%lu\n",offsetof(entity_t,colormap));
+    fprintf(fh,".set\tENTITY_EFFECTS,%lu\n",offsetof(entity_t,effects));
+    fprintf(fh,".set\tENTITY_SKINNUM,%lu\n",offsetof(entity_t,skinnum));
+    fprintf(fh,".set\tENTITY_VISFRAME,%lu\n",offsetof(entity_t,visframe));
+    fprintf(fh,".set\tENTITY_DLIGHTFRAME,%lu\n",offsetof(entity_t,dlightframe));
+    fprintf(fh,".set\tENTITY_DLIGHTBITS,%lu\n",offsetof(entity_t,dlightbits));
+    fprintf(fh,".set\tENTITY_TRIVIAL_ACCEPT,%lu\n",offsetof(entity_t,trivial_accept));
+    fprintf(fh,".set\tENTITY_TOPNODE,%lu\n",offsetof(entity_t,topnode));
+    fprintf(fh,".set\tENTITY_SIZEOF,%lu\n",sizeof(entity_t));
+    fprintf(fh,".set\tNODE_CONTENTS,%lu\n",offsetof(mnode_t,contents));
+    fprintf(fh,".set\tNODE_VISFRAME,%lu\n",offsetof(mnode_t,visframe));
+    fprintf(fh,".set\tNODE_MINMAXS,%lu\n",offsetof(mnode_t,minmaxs));
+    fprintf(fh,".set\tNODE_PARENT,%lu\n",offsetof(mnode_t,parent));
+    fprintf(fh,".set\tNODE_PLANE,%lu\n",offsetof(mnode_t,plane));
+    fprintf(fh,".set\tNODE_CHILDREN,%lu\n",offsetof(mnode_t,children));
+    fprintf(fh,".set\tNODE_FIRSTSURFACE,%lu\n",offsetof(mnode_t,firstsurface));
+    fprintf(fh,".set\tNODE_NUMSURFACES,%lu\n",offsetof(mnode_t,numsurfaces));
+    fprintf(fh,".set\tLEAF_CONTENTS,%lu\n",offsetof(mleaf_t,contents));
+    fprintf(fh,".set\tLEAF_VISFRAME,%lu\n",offsetof(mleaf_t,visframe));
+    fprintf(fh,".set\tLEAF_MINMAXS,%lu\n",offsetof(mleaf_t,minmaxs));
+    fprintf(fh,".set\tLEAF_PARENT,%lu\n",offsetof(mleaf_t,parent));
+    fprintf(fh,".set\tLEAF_COMPRESSED_VIS,%lu\n",offsetof(mleaf_t,compressed_vis));
+    fprintf(fh,".set\tLEAF_EFRAGS,%lu\n",offsetof(mleaf_t,efrags));
+    fprintf(fh,".set\tLEAF_FIRSTMARKSURFACE,%lu\n",offsetof(mleaf_t,firstmarksurface));
+    fprintf(fh,".set\tLEAF_NUMMARKSURFACES,%lu\n",offsetof(mleaf_t,nummarksurfaces));
+    fprintf(fh,".set\tLEAF_KEY,%lu\n",offsetof(mleaf_t,key));
+    fprintf(fh,".set\tCL_TIME,%lu\n",offsetof(client_state_t,time));
+    fprintf(fh,".set\tCL_WORLDMODEL,%lu\n",offsetof(client_state_t,worldmodel));
+    fprintf(fh,".set\tREFDEF_VRECT,%lu\n",offsetof(refdef_t,vrect));
+    fprintf(fh,".set\tREFDEF_ALIASVRECT,%lu\n",offsetof(refdef_t,aliasvrect));
+    fprintf(fh,".set\tREFDEF_VRECTRIGHT,%lu\n",offsetof(refdef_t,vrectright));
+    fprintf(fh,".set\tREFDEF_VRECTBOTTOM,%lu\n",offsetof(refdef_t,vrectbottom));
+    fprintf(fh,".set\tREFDEF_ALIASVRECTRIGHT,%lu\n",offsetof(refdef_t,aliasvrectright));
+    fprintf(fh,".set\tREFDEF_ALIASVRECTBOTTOM,%lu\n",offsetof(refdef_t,aliasvrectbottom));
+    fprintf(fh,".set\tREFDEF_FVRECTX_ADJ,%lu\n",offsetof(refdef_t,fvrectx_adj));
+    fprintf(fh,".set\tREFDEF_FVRECTY_ADJ,%lu\n",offsetof(refdef_t,fvrecty_adj));
+    fprintf(fh,".set\tREFDEF_VRECTX_ADJ_S20,%lu\n",offsetof(refdef_t,vrect_x_adj_shift20));
+    fprintf(fh,".set\tREFDEF_VRECTXR_ADJ_S20,%lu\n",offsetof(refdef_t,vrectright_adj_shift20));
+    fprintf(fh,".set\tREFDEF_FVRECTRIGHT_ADJ,%lu\n",offsetof(refdef_t,fvrectright_adj));
+    fprintf(fh,".set\tREFDEF_FVRECTBOTTOM_ADJ,%lu\n",offsetof(refdef_t,fvrectbottom_adj));
+    fprintf(fh,".set\tVRECT_X,%lu\n",offsetof(vrect_t,x));
+    fprintf(fh,".set\tVRECT_Y,%lu\n",offsetof(vrect_t,y));
+    fprintf(fh,".set\tVRECT_WIDTH,%lu\n",offsetof(vrect_t,width));
+    fprintf(fh,".set\tVRECT_HEIGHT,%lu\n",offsetof(vrect_t,height));
+    fprintf(fh,".set\tVRECT_PNEXT,%lu\n",offsetof(vrect_t,pnext));
+    fprintf(fh,".set\tVID_BUFFER,%lu\n",offsetof(viddef_t,buffer));
+    fprintf(fh,".set\tVID_COLORMAP,%lu\n",offsetof(viddef_t,colormap));
+    fprintf(fh,".set\tVID_WIDTH,%lu\n",offsetof(viddef_t,width));
+    fprintf(fh,".set\tVID_HEIGHT,%lu\n",offsetof(viddef_t,height));
+    fprintf(fh,".set\tVID_ROWBYTES,%lu\n",offsetof(viddef_t,rowbytes));
+    fprintf(fh,".set\tMT_FACESFRONT,%lu\n",offsetof(mtriangle_t,facesfront));
+    fprintf(fh,".set\tMT_VERTINDEX,%lu\n",offsetof(mtriangle_t,vertindex));
+    fprintf(fh,".set\tMT_SIZEOF,%lu\n",sizeof(mtriangle_t));
+    fprintf(fh,".set\tDRAWSURF_SURFDAT,%lu\n",offsetof(drawsurf_t,surfdat));
+    fprintf(fh,".set\tDRAWSURF_ROWBYTES,%lu\n",offsetof(drawsurf_t,rowbytes));
+    fprintf(fh,".set\tDRAWSURF_SURF,%lu\n",offsetof(drawsurf_t,surf));
+    fprintf(fh,".set\tDRAWSURF_LIGHTADJ,%lu\n",offsetof(drawsurf_t,lightadj));
+    fprintf(fh,".set\tDRAWSURF_TEXTURE,%lu\n",offsetof(drawsurf_t,texture));
+    fprintf(fh,".set\tDRAWSURF_SURFMIP,%lu\n",offsetof(drawsurf_t,surfmip));
+    fprintf(fh,".set\tDRAWSURF_SURFWIDTH,%lu\n",offsetof(drawsurf_t,surfwidth));
+    fprintf(fh,".set\tDRAWSURF_SURFHEIGHT,%lu\n",offsetof(drawsurf_t,surfheight));
+    fprintf(fh,".set\tDRAWSURF_SIZEOF,%lu\n",sizeof(drawsurf_t));
+    fprintf(fh,".set\tTV_V,%lu\n",offsetof(trivertx_t,v));
+    fprintf(fh,".set\tTV_LIGHTNORMALINDEX,%lu\n",offsetof(trivertx_t,lightnormalindex));
+    fprintf(fh,".set\tSV_ONSEAM,%lu\n",offsetof(stvert_t,onseam));
+    fprintf(fh,".set\tSV_S,%lu\n",offsetof(stvert_t,s));
+    fprintf(fh,".set\tSV_T,%lu\n",offsetof(stvert_t,t));
+    fprintf(fh,".set\tdma_gamealive,%lu\n",offsetof(dma_t,gamealive));
+    fprintf(fh,".set\tdma_soundalive,%lu\n",offsetof(dma_t,soundalive));
+    fprintf(fh,".set\tdma_splitbuffer,%lu\n",offsetof(dma_t,splitbuffer));
+    fprintf(fh,".set\tdma_channels,%lu\n",offsetof(dma_t,channels));
+    fprintf(fh,".set\tdma_samples,%lu\n",offsetof(dma_t,samples));
+    fprintf(fh,".set\tdma_submission_chunk,%lu\n",offsetof(dma_t,submission_chunk));
+    fprintf(fh,".set\tdma_samplepos,%lu\n",offsetof(dma_t,samplepos));
+    fprintf(fh,".set\tdma_samplebits,%lu\n",offsetof(dma_t,samplebits));
+    fprintf(fh,".set\tdma_speed,%lu\n",offsetof(dma_t,speed));
+    fprintf(fh,".set\tdma_buffer,%lu\n",offsetof(dma_t,buffer));
+    fprintf(fh,".set\tPART_ORG,%lu\n",offsetof(particle_t,org));
+    fprintf(fh,".set\tPART_COLOR,%lu\n",offsetof(particle_t,color));
+    fprintf(fh,".set\tMODEL_NAME,%lu\n",offsetof(model_t,name));
+    fprintf(fh,".set\tMODEL_NEEDLOAD,%lu\n",offsetof(model_t,needload));
+    fprintf(fh,".set\tMODEL_TYPE,%lu\n",offsetof(model_t,type));
+    fprintf(fh,".set\tMODEL_NUMFRAMES,%lu\n",offsetof(model_t,numframes));
+    fprintf(fh,".set\tMODEL_SYNCTYPE,%lu\n",offsetof(model_t,synctype));
+    fprintf(fh,".set\tMODEL_FLAGS,%lu\n",offsetof(model_t,flags));
+    fprintf(fh,".set\tMODEL_MINS,%lu\n",offsetof(model_t,mins));
+    fprintf(fh,".set\tMODEL_MAXS,%lu\n",offsetof(model_t,maxs));
+    fprintf(fh,".set\tMODEL_RADIUS,%lu\n",offsetof(model_t,radius));
+    fprintf(fh,".set\tMODEL_FIRSTMS,%lu\n",offsetof(model_t,firstmodelsurface));
+    fprintf(fh,".set\tMODEL_NUMMS,%lu\n",offsetof(model_t,nummodelsurfaces));
+    fprintf(fh,".set\tMODEL_NUMSUBMODELS,%lu\n",offsetof(model_t,numsubmodels));
+    fprintf(fh,".set\tMODEL_SUBMODELS,%lu\n",offsetof(model_t,submodels));
+    fprintf(fh,".set\tMODEL_NUMPLANES,%lu\n",offsetof(model_t,numplanes));
+    fprintf(fh,".set\tMODEL_PLANES,%lu\n",offsetof(model_t,planes));
+    fprintf(fh,".set\tMODEL_NUMLEAFS,%lu\n",offsetof(model_t,numleafs));
+    fprintf(fh,".set\tMODEL_LEAFS,%lu\n",offsetof(model_t,leafs));
+    fprintf(fh,".set\tMODEL_NUMVERTEXES,%lu\n",offsetof(model_t,numvertexes));
+    fprintf(fh,".set\tMODEL_VERTEXES,%lu\n",offsetof(model_t,vertexes));
+    fprintf(fh,".set\tMODEL_NUMEDGES,%lu\n",offsetof(model_t,numedges));
+    fprintf(fh,".set\tMODEL_EDGES,%lu\n",offsetof(model_t,edges));
+    fprintf(fh,".set\tMODEL_NUMNODES,%lu\n",offsetof(model_t,numnodes));
+    fprintf(fh,".set\tMODEL_NODES,%lu\n",offsetof(model_t,nodes));
+    fprintf(fh,".set\tMODEL_NUMTEXINFO,%lu\n",offsetof(model_t,numtexinfo));
+    fprintf(fh,".set\tMODEL_TEXINFO,%lu\n",offsetof(model_t,texinfo));
+    fprintf(fh,".set\tMODEL_NUMSURFACES,%lu\n",offsetof(model_t,numsurfaces));
+    fprintf(fh,".set\tMODEL_SURFACES,%lu\n",offsetof(model_t,surfaces));
+    fprintf(fh,".set\tMODEL_NUMSURFEDGES,%lu\n",offsetof(model_t,numsurfedges));
+    fprintf(fh,".set\tMODEL_SURFEDGES,%lu\n",offsetof(model_t,surfedges));
+    fprintf(fh,".set\tMODEL_NUMCLIPNODES,%lu\n",offsetof(model_t,numclipnodes));
+    fprintf(fh,".set\tMODEL_CLIPNODES,%lu\n",offsetof(model_t,clipnodes));
+    fprintf(fh,".set\tMODEL_NUMMARKSURFACES,%lu\n",offsetof(model_t,nummarksurfaces));
+    fprintf(fh,".set\tMODEL_MARKSURFACES,%lu\n",offsetof(model_t,marksurfaces));
+    fclose(fh);
+    exit(0);
+  }
+  exit(20);
+}
