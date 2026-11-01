@@ -255,12 +255,21 @@ void DeletePointer(struct Window *QuakeWindow)
 void VID_Shutdown(void)
 {     
 	//DeletePointer(QuakeWindow);
+#ifdef MINIGL_SHARED_CLIENT
+	/* RadeonGL: Host_Shutdown reaches this after a failed MiniGLOpen too,
+	 * when the dispatch table is still NULL. A call through it then jumps
+	 * through the CPU vector table (guru 810000FF, AN_BadQuickInt: measured
+	 * in FS-UAE 2026-11-02). A dispatch client has no MGLTerm; the library
+	 * cleans up in MiniGLClose. */
+	if (MiniGLDispatch)
+	{
+		mglClearPointer(); // new minigl - Cowcat 2022
+		mglDeleteContext();
+		MiniGLClose();
+	}
+#else
 	mglClearPointer(); // new minigl - Cowcat 2022
 	mglDeleteContext();
-#ifdef MINIGL_SHARED_CLIENT
-	/* RadeonGL: a dispatch client has no MGLTerm; the library cleans up */
-	MiniGLClose();
-#else
 	MGLTerm();
 #endif
 }

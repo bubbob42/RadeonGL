@@ -1,0 +1,63 @@
+; GLQuakeSmoke -- the GLQuake ABI-5 client starts, loads the paks and stops
+; cleanly at MiniGLOpen when there is no usable minigl.library.
+;   run A: no minigl.library anywhere
+;   run B: Haeuser's PiStorm3D minigl.library 29.1, which finds no V3D here
+; Each run is started in the background by DEV:Test/RunOne and given 60 s.
+; A run that is still alive after that is left alone: Status lists it and
+; Grab keeps the top-left of the screen as DEV:Test/run<X>.ppm (a requester
+; or guru would show there), and the script stops.
+; Needs dist/Quake (gmake glquake glquake-data), dist/Quake/LibsPiStorm3D/
+; minigl.library for run B, DEV:Test/RunOne and DEV:Test/Grab.
+; First run (2026-11-02, foreground, no -noudp -nolan): run A never returned
+; within 240 s and wrote nothing. NET_Init runs before VID_Init, so the
+; network drivers are switched off here.
+; LIMIT 200
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/runA.done DEV:Test/runB.done DEV:Test/runA.log DEV:Test/runB.log
+
+Echo "=== run A: no minigl.library ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunOne A
+Wait 15
+If NOT EXISTS DEV:Test/runA.done
+  Wait 15
+EndIf
+If NOT EXISTS DEV:Test/runA.done
+  Wait 15
+EndIf
+If NOT EXISTS DEV:Test/runA.done
+  Wait 15
+EndIf
+If EXISTS DEV:Test/runA.done
+  Type DEV:Test/runA.log >>DEV:Test/auto.log
+  Echo "=== run B: PiStorm3D minigl.library ===" >>DEV:Test/auto.log
+  Version DEV:Quake/LibsPiStorm3D/minigl.library FILE >>DEV:Test/auto.log
+  Run >NIL: Execute DEV:Test/RunOne B
+  Wait 15
+  If NOT EXISTS DEV:Test/runB.done
+    Wait 15
+  EndIf
+  If NOT EXISTS DEV:Test/runB.done
+    Wait 15
+  EndIf
+  If NOT EXISTS DEV:Test/runB.done
+    Wait 15
+  EndIf
+  If EXISTS DEV:Test/runB.done
+    Type DEV:Test/runB.log >>DEV:Test/auto.log
+    Avail FLUSH >NIL:
+  Else
+    Echo "run B still alive after 60 s" >>DEV:Test/auto.log
+    Status >>DEV:Test/auto.log
+    DEV:Test/Grab 0 0 640 480 TO DEV:Test/runB.ppm
+  EndIf
+Else
+  Echo "run A still alive after 60 s" >>DEV:Test/auto.log
+  Status >>DEV:Test/auto.log
+  DEV:Test/Grab 0 0 640 480 TO DEV:Test/runA.ppm
+EndIf
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

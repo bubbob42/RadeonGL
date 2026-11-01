@@ -45,7 +45,7 @@ published source failed in three places. The changes:
 
 | Where | Change |
 |---|---|
-| `gl_vidamiga.c` | Under `MINIGL_SHARED_CLIENT`: `MiniGLOpen()` replaces `MGLInit()`, and `MiniGLClose()` replaces `MGLTerm()`. Same messages as the shipped binary. |
+| `gl_vidamiga.c` | Under `MINIGL_SHARED_CLIENT`: `MiniGLOpen()` replaces `MGLInit()`, and `MiniGLClose()` replaces `MGLTerm()`. Same messages as the shipped binary. `VID_Shutdown` touches the dispatch table only when it exists: `Host_Shutdown` runs it after a failed `MiniGLOpen` too, and a call through the NULL table jumps into the CPU vector table (guru `810000FF`, measured in FS-UAE). |
 | `gl_rsurf.c` | Under `MINIGL_SHARED_CLIENT`: an empty `D()` replaces `#include "../MiniGLV3D/backend/hw/v3d_debug.h"`, a MiniGLV3D internal that is not in the client SDK. |
 | `minigl_client_compat.h` (new, forced in by `-include`) | `miniglext.c`, `gl_warp.c`, `gl_mirror.c` and `gl_wiredraw.c` call MiniGLV3D's internal `GLVertex3fv(ctx, v)`-style functions and pass its global `mini_CurrentContext`. These map one-to-one onto the public calls, which fetch the current context themselves. Declares `strlcpy`/`strlcat`. |
 | `minigl_client_compat.c` (new) | Inert stand-ins for two MiniGLV3D debug symbols (`g_mglv3d_last_render_wait_result`, `mglv3d_log`). `strlcpy`/`strlcat`: upstream had them from clib2, which libnix lacks. |

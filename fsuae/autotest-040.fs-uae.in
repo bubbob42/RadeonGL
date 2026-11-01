@@ -1,0 +1,63 @@
+[fs-uae]
+# One template for every test machine. The Makefile fills it in per machine:
+
+
+
+#   autotest(-nofpu|-a1200)  the same, booting the autotest disk, serial 1238
+amiga_model = A1200/020
+kickstart_file = @KICKSTART_FILE@
+
+# The 68030/68040 machines have an MMU for MuForce/MuGuardianAngel; the
+# 68000 machine has none, and MuForce refuses to start there.
+cpu = 68040
+fpu = 68040
+# no MMU on this machine
+
+# The emulated serial port as a TCP socket: the DBG() trace and MuForce
+# hits are read with `telnet 127.0.0.1 1234` (one client at a time).
+serial_port = tcp://127.0.0.1:1240
+
+hard_drive_0 = @PROJECT_PATH@/fsuae/local/autotest-System-040.hdf
+hard_drive_0_label = System
+
+hard_drive_1 = @PROJECT_DIST@
+hard_drive_1_label = DEV
+
+chip_memory = 2048
+fast_memory = 8192
+
+accelerator = 0
+accelerator_memory = 0
+
+graphics_card = uaegfx-z3
+graphics_card_memory = 32
+
+# An autotest runs silent: 0 for an autotest, 100 for a machine somebody
+# launched (the Makefile keys on the -autotest suffix, as for the serial port).
+volume = 0
+
+floppy_drive_0_sounds = off
+floppy_drive_1_sounds = off
+floppy_drive_2_sounds = off
+floppy_drive_3_sounds = off
+
+window_width = 960
+window_height = 720
+fullscreen = 0
+
+automatic_input_grab = 1
+cursor = 1
+initial_input_grab = 1
+mouse_integration = 0
+joystick_port_1 = nothing
+bsdsocket_library = 1
+
+title = @PROJECT_NAME@ autotest 68040 + RTG
+
+# the JIT compiler and its FPU, the CPU as fast as the host runs it, no
+# MMU (the JIT needs that); Zorro III fast RAM
+jit_compiler = 1
+uae_compfpu = true
+uae_mmu_model = 0
+uae_cpu_speed = max
+zorro_iii_memory = 131072

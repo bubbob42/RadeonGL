@@ -643,6 +643,41 @@ push: all
 glquake glquake-data clean-glquake:
 	$(MAKE) -f glquake/Makefile.radeongl $@
 
+# --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
+# A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a
+# COPY of the system disk whose User-Startup runs DEV:Test/AutoRun; see
+# docs/testing.md for the disk and the rules. Grab (test/amiga/grab.c, from
+# Herald) keeps a screen region as a PPM when a test hangs.
+AUTOTEST_TEMPLATE := fsuae/autotest-040.fs-uae.in
+AUTOTEST_CONFIG   := fsuae/local/$(PROJECT_NAME)-autotest-040.fs-uae
+P96_SDK ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
+P96_INC := $(P96_SDK)/Include
+
+$(AUTOTEST_CONFIG): $(AUTOTEST_TEMPLATE)
+	mkdir -p fsuae/local
+	sed \
+		-e 's|@KICKSTART_FILE@|$(KICKSTART_FILE)|g' \
+		-e 's|@PROJECT_PATH@|$(CURDIR)|g' \
+		-e 's|@PROJECT_DIST@|$(PROJECT_DIST)|g' \
+		-e 's|@PROJECT_NAME@|$(PROJECT_NAME)|g' \
+		$< > $@
+
+build/test/grab.o: test/amiga/grab.c
+	@mkdir -p build/test
+	$(GCC_CC) $(GCC_CFLAGS) -noixemul -I$(P96_INC) -c $< -o $@
+
+dist/Test/Grab: build/test/grab.o
+	@mkdir -p dist/Test
+	$(GCC_CC) -noixemul $< -o $@ -lamiga
+
+.PHONY: autotest
+autotest: $(AUTOTEST_CONFIG) dist/Test/Grab
+	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in test/auto>"; exit 2; }
+	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see docs/testing.md"; exit 2; }
+	@mkdir -p dist/Test
+	@cp test/auto/RunOne dist/Test/RunOne
+	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
+
 # --- Tools -------------------------------------------------------------------
 # The archiver is the REAL Amiga LhA (Thomas Richter's 40.x) run through vamos.
 # The host `lha` is Lhasa, an extractor only, and cannot create an archive.

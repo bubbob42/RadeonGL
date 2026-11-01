@@ -1,0 +1,19 @@
+.KEY which/A
+.BRA {
+.KET }
+; RunOne -- one GLQuake start for GLQuakeSmoke, in its own process so the
+; main script can watch it. A = no minigl.library, B = the PiStorm3D one
+; added to LIBS: for this run only (removed again afterwards; nothing is
+; installed). GLQuake's own output goes to its own log: two processes
+; appending to one file would collide ("object in use").
+FailAt 1000
+CD DEV:Quake
+If "{which}" EQ "B"
+  Assign LIBS: DEV:Quake/LibsPiStorm3D ADD
+EndIf
+GLQuake -stdout -nosound -nocdaudio -noudp -nolan >DEV:Test/run{which}.log
+Echo "run {which} rc=$RC" >>DEV:Test/run{which}.log
+If "{which}" EQ "B"
+  Assign LIBS: DEV:Quake/LibsPiStorm3D REMOVE
+EndIf
+Echo >DEV:Test/run{which}.done done
