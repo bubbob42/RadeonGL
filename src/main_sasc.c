@@ -3,7 +3,7 @@
 #include <proto/dos.h>
 
 #include "debug.h"
-#include "starter_rev.h"
+#include "RadeonGL_rev.h"
 
 /* AmigaDOS $VER cookie: the "Version" command finds this string in the binary
  * and reports the build. REVISION/VERSTAG come from the bumprev-managed

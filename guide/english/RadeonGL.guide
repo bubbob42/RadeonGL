@@ -1,9 +1,9 @@
-@database "starter.guide"
-@$VER: starter.guide 1.0 (14.7.2026)
+@database "RadeonGL.guide"
+@$VER: RadeonGL.guide 1.0 (14.7.2026)
 @author You
 @wordwrap
 
-@node Main "starter Help"
+@node Main "RadeonGL Help"
 
 @{b}starter@{ub} -- online help.
 
