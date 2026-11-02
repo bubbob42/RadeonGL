@@ -80,6 +80,7 @@ struct Card
     ULONG color_bytes, depth_bytes;
     ULONG heap_size;
     ULONG compat;               /* P96IDA_COMPATIBLEFORMATS of the GL screen's mode */
+    ULONG board;                /* its P96 board number */
     ULONG heap_delta;           /* where the heap starts in its bitmap (fixed at the open) */
 
     /* the chip (from the first lock) */

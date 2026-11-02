@@ -46,6 +46,11 @@ Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== LockBench_sasc ===" >>DEV:Test/auto.log
 DEV:Probe/C/LockBench_sasc LOG=DEV:Test/probe-lockbench-sasc.log >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== BmFit ===" >>DEV:Test/auto.log
+DEV:Probe/C/BmFit >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+DEV:Probe/C/BmFit_sasc >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== CxBreak (a name that does not run) ===" >>DEV:Test/auto.log
 DEV:Probe/C/CxBreak NoSuchCommodity >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log

@@ -229,23 +229,41 @@ static BOOL AllocData(struct Card *k, ULONG i, ULONG bytes)
     return (BOOL) (k->b[i].bm != NULL);
 }
 
-/* The heap as a 32-bit bitmap 2048 pixels wide (8 KB a row): MEASURED on the
- * A4000D, P96 leaves a bitmap 4096 rows high off the board but places 2048
- * rows, so 32 bits a pixel holds twice what the 16-bit screen's format does
- * in the same shape. Only where the GL screen's mode can hold B8G8R8A8
- * beside itself without reconfiguring the aperture. */
+/* The heap as a 32-bit bitmap 2048 pixels wide (8 KB a row), a friend of
+ * the Workbench screen's bitmap. MEASURED (BmFit, A4000D and uaegfx): P96
+ * puts a bitmap on the board at allocation only when its friend is there;
+ * without a friend every bitmap starts in fast RAM (8 MB as well), and a
+ * 32-bit friend of the 32-bit Workbench goes on the board up to 16 MB in
+ * any shape tried. A friend of the 16-bit GL screen stayed off at 16 MB.
+ * Only where the Workbench is B8G8R8A8 on the GL screen's board, and the
+ * GL screen's mode holds that format beside itself without reconfiguring
+ * the aperture. */
 static BOOL AllocHeap32(struct Card *k, ULONG bytes)
 {
     struct CardBm *b;
+    struct Screen *wb;
+    struct BitMap *friend;
+    LONG id;
 
     b = &k->b[CARD_HEAP];
     b->bm = NULL;
     if (!(k->compat & RGBFF_B8G8R8A8))
         return FALSE;
-    b->bytes = bytes;
-    b->bpp = 4;
-    b->p96 = 1;
-    b->bm = p96AllocBitMap(2048, (bytes + 8191) / 8192, 32, BMF_MINPLANES, NULL, RGBFB_B8G8R8A8);
+    wb = LockPubScreen(NULL);
+    if (wb == NULL)
+        return FALSE;
+    friend = wb->RastPort.BitMap;
+    id = GetVPModeID(&wb->ViewPort);
+    if (id != INVALID_ID && p96GetModeIDAttr((ULONG) id, P96IDA_ISP96)
+        && p96GetModeIDAttr((ULONG) id, P96IDA_BOARDNUMBER) == k->board
+        && p96GetBitMapAttr(friend, P96BMA_RGBFORMAT) == RGBFB_B8G8R8A8)
+    {
+        b->bytes = bytes;
+        b->bpp = 4;
+        b->p96 = 1;
+        b->bm = p96AllocBitMap(2048, (bytes + 8191) / 8192, 32, BMF_MINPLANES, friend, RGBFB_NONE);
+    }
+    UnlockPubScreen(NULL, wb);
     return (BOOL) (b->bm != NULL);
 }
 
@@ -798,6 +816,7 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
     /* the GL screen and its input window */
     fmt = p96GetModeIDAttr(id, P96IDA_RGBFORMAT);
     k->compat = p96GetModeIDAttr(id, P96IDA_COMPATIBLEFORMATS);
+    k->board = p96GetModeIDAttr(id, P96IDA_BOARDNUMBER);
     t[0].ti_Tag = P96SA_DisplayID;  t[0].ti_Data = id;
     t[1].ti_Tag = P96SA_Width;      t[1].ti_Data = w;
     t[2].ti_Tag = P96SA_Height;     t[2].ti_Data = h;
