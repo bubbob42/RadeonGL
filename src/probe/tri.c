@@ -27,7 +27,10 @@
  * Eight pixels are read back through the aperture and compared with what
  * the host's reference rasteriser draws for the same stream (test_sim).
  *
- *   Tri LOG/K,WAIT/N,NOSHOW/S
+ *   Tri LOG/K,WAIT/N,NOSHOW/S,PPM/K
+ *
+ * PPM= writes the drawn buffer, read back through the aperture, as a PPM
+ * file (remote screenshots of the RTG Workbench do not work).
  */
 
 #include <exec/types.h>
@@ -61,13 +64,14 @@
 
 static const char ver[] = "$VER: Tri 0.1 (02.11.2026)";
 
-#define TEMPLATE "LOG/K,WAIT/N,NOSHOW/S"
+#define TEMPLATE "LOG/K,WAIT/N,NOSHOW/S,PPM/K"
 
 struct Args
 {
     STRPTR log;
     LONG *wait;
     LONG noshow;
+    STRPTR ppm;
 };
 
 #define RING_DW       4096UL
@@ -100,6 +104,7 @@ struct Ctx
     ULONG bpr;              /* bytes per row of the block (pitch of the colour buffer) */
     ULONG color_row;        /* the colour buffer's first row in the bitmap */
     ULONG got[TRI_NPIXELS]; /* the pixels read back, 0xRRGGBB */
+    UBYTE *rgb;             /* the whole buffer read back (PPM=), or NULL */
     BOOL drawn;             /* the fence passed */
 };
 
@@ -385,6 +390,18 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
         v = col[TriScene_Pixels[i].y * (c->bpr / 4) + TriScene_Pixels[i].x];
         c->got[i] = (((v >> 8) & 0xffUL) << 16) | (((v >> 16) & 0xffUL) << 8) | (v >> 24);
     }
+    if (c->rgb != NULL)
+    {
+        /* the whole buffer while the block is still locked (256 KB of
+         * aperture reads, about 60 ms) */
+        for (i = 0; i < TRI_W * TRI_H; i++)
+        {
+            v = col[(i / TRI_W) * (c->bpr / 4) + (i % TRI_W)];
+            c->rgb[i * 3] = (UBYTE)(v >> 8);
+            c->rgb[i * 3 + 1] = (UBYTE)(v >> 16);
+            c->rgb[i * 3 + 2] = (UBYTE)(v >> 24);
+        }
+    }
 
 stop:
     e = R2Cp_Stop(&c->hw, &c->saved, TIMEOUT_US, &reset);
@@ -405,6 +422,26 @@ unlock:
 }
 
 /* --- showing it ---------------------------------------------------------------- */
+
+static void WritePpm(struct Ctx *c, CONST_STRPTR path)
+{
+    BPTR f;
+    char hdr[20];
+    LONG ok;
+
+    f = Open(path, MODE_NEWFILE);
+    if (f == 0)
+    {
+        Log_Printf("PPM: cannot write %s\n", path);
+        return;
+    }
+    /* "P6\n256 256\n255\n" for TRI_W = TRI_H = 256 */
+    CopyMem("P6\n256 256\n255\n", hdr, 15);
+    ok = (Write(f, hdr, 15) == 15
+          && Write(f, c->rgb, TRI_W * TRI_H * 3) == (LONG)(TRI_W * TRI_H * 3));
+    Close(f);
+    Log_Printf("PPM: %s %s\n", path, ok ? (CONST_STRPTR)"written" : (CONST_STRPTR)"FAILED");
+}
 
 static void Show(struct Ctx *c, LONG seconds)
 {
@@ -471,6 +508,7 @@ int main(void)
     args.log = NULL;
     args.wait = NULL;
     args.noshow = 0;
+    args.ppm = NULL;
     rda = ReadArgs(TEMPLATE, (LONG *)&args, NULL);
     if (rda == NULL)
     {
@@ -541,6 +579,8 @@ int main(void)
         goto out;
     }
     c.bpr = p96GetBitMapAttr(c.scratch.bm, P96BMA_BYTESPERROW);
+    if (args.ppm != NULL)
+        c.rgb = (UBYTE *)AllocVec(TRI_W * TRI_H * 3, MEMF_ANY);
 
     RenderScene(&c, buf);
     HwWrite(&c, R_PP_TFACTOR_0, tf_orig);
@@ -570,6 +610,8 @@ int main(void)
     Log_Printf("%lu of %lu pixels as the reference rasteriser draws them\n",
                (ULONG)TRI_NPIXELS - bad, (ULONG)TRI_NPIXELS);
     rc = (bad == 0) ? RETURN_OK : RETURN_WARN;
+    if (c.rgb != NULL)
+        WritePpm(&c, args.ppm);
     if (!args.noshow)
         Show(&c, (args.wait && *args.wait > 0) ? *args.wait : 20);
 
@@ -577,6 +619,8 @@ out:
     Scratch_Free(&c.scratch, &card);
     if (buf != NULL)
         FreeVec(buf);
+    if (c.rgb != NULL)
+        FreeVec(c.rgb);
     if (opened)
         PciCard_Close(&card);
     Clock_Close();

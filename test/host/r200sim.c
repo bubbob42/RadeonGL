@@ -460,6 +460,20 @@ static float Edge(const struct V *a, const struct V *b, float x, float y)
 }
 
 /* A window-space triangle. */
+/* The top-left fill rule in window coordinates (y down): a pixel centre
+ * exactly on an edge belongs to the triangle only when the edge is a left
+ * edge (the inside lies to its right) or a top edge (horizontal, the
+ * inside below). Decided from the gradient of the edge's normalised
+ * weight, so the winding does not matter. MEASURED on the A4000D (Tri,
+ * 2026-11-02): centres on a right edge are not drawn. */
+static int TopLeft(const struct V *a, const struct V *b, float area)
+{
+    float gx = -(b->y - a->y) / area;   /* d(weight)/dx: > 0 = inside to the right */
+    float gy = (b->x - a->x) / area;    /* d(weight)/dy: > 0 = inside below */
+
+    return gx > 0 || (gx == 0 && gy > 0);
+}
+
 static void Raster(struct Sim *s, const struct V *v0, const struct V *v1, const struct V *v2,
                    const struct V *provoke)
 {
@@ -494,6 +508,9 @@ static void Raster(struct Sim *s, const struct V *v0, const struct V *v1, const 
             w2 = Edge(v0, v1, px, py) / area;
             if (w0 < 0 || w1 < 0 || w2 < 0)
                 continue;
+            if ((w0 == 0 && !TopLeft(v1, v2, area)) || (w1 == 0 && !TopLeft(v2, v0, area))
+                || (w2 == 0 && !TopLeft(v0, v1, area)))
+                continue;               /* exactly on a right or bottom edge */
             z = w0 * v0->z + w1 * v1->z + w2 * v2->z;
             iw = w0 * v0->w + w1 * v1->w + w2 * v2->w;
             for (ch = 0; ch < 4; ch++)
