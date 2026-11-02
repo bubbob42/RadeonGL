@@ -488,6 +488,30 @@ static void test_textures(void)
         Core_BindTexture(&core, GL_TEXTURE_2D, 6);
     }
 
+    /* Regression (2026-11-02, found reviewing the epochs): a texture drawn
+     * in a later frame without its registers being emitted again is still
+     * in use -- the use is stamped at the draw, not at the emit */
+    {
+        ULONG w0;
+        UBYTE row[16 * 2];
+        memset(row, 0x11, sizeof(row));
+        Core_ActiveTexture(&core, GL_TEXTURE0_ARB);
+        Core_BindTexture(&core, GL_TEXTURE_2D, 6);
+        Core_Enable(&core, GL_TEXTURE_2D, 1);
+        Core_Begin(&core, GL_TRIANGLES);
+        Core_Vertex3f(&core, 0, 0, 0); Core_Vertex3f(&core, 1, 0, 0); Core_Vertex3f(&core, 0, 1, 0);
+        Core_End(&core);
+        Core_GpuIdle(&core);                    /* frame over */
+        Core_Begin(&core, GL_TRIANGLES);        /* the same texture, nothing re-emitted */
+        Core_Vertex3f(&core, 0, 0, 0); Core_Vertex3f(&core, 1, 0, 0); Core_Vertex3f(&core, 0, 1, 0);
+        Core_End(&core);
+        w0 = idle_waits;
+        Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 16, 1, MGL_UNSIGNED_SHORT_4_4_4_4,
+                           GL_UNSIGNED_BYTE, row);
+        CHECK_INT(idle_waits - w0, 1);
+        Core_Enable(&core, GL_TEXTURE_2D, 0);
+    }
+
     /* luminance: four texels a dword */
     for (i = 0; i < 16; i++)
         l8[i] = (UBYTE) (0x10 * i);
@@ -518,7 +542,7 @@ static void test_textures(void)
     CHECK_INT(core.vtx_dw, 8);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
     CHECK_INT(Checked(&st), R2CE_OK);
-    CHECK_INT(st.draws, 1);
+    CHECK_INT(st.draws, 3);         /* the two hazard-test triangles and the polygon */
 }
 
 /* --- State encoding -------------------------------------------------------------- */

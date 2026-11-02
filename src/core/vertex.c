@@ -173,6 +173,7 @@ void Core_Begin(struct Core *c, ULONG mode)
     units = Core_UnitsOn(c);
     Core_Validate(c);
     Hw_VertexFormat(c, units);
+    Core_MarkTextures(c, units);
     c->units_on = units;
     c->vtx_dw = 4 + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);
     c->prim = mode;

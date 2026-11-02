@@ -12,6 +12,10 @@ LONG  Core_Floor(double f);
 /* [0, 1] -> 0..255, rounded, clamped */
 ULONG Core_Unit255(float f);
 
+/* Every texture the next draw reads is in use this epoch (a draw may
+ * reuse a texture whose registers were emitted frames ago). */
+void  Core_MarkTextures(struct Core *c, ULONG units);
+
 /* Wait for the GPU if texture t was drawn in the current epoch. */
 void  Core_TexHazard(struct Core *c, struct CoreTex *t);
 

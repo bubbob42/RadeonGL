@@ -163,6 +163,8 @@ void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y)
     t.multi = 0;
     t.offset = c->target.color_gpu;
     R2E_Texture(cs, 0, &t);
+    /* (the back buffer is no texture object: the next frame's first draw
+     * into it is ordered after this copy by the ring) */
 
     /* the screen as the colour target, the rectangle as the scissor */
     R2E_Reg(cs, R_RE_AUX_SCISSOR_CNTL, 0);

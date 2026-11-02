@@ -110,6 +110,15 @@ void Core_GpuIdle(struct Core *c)
     c->epoch++;
 }
 
+void Core_MarkTextures(struct Core *c, ULONG units)
+{
+    ULONG u;
+
+    for (u = 0; u < CORE_UNITS; u++)
+        if (units & (1UL << u))
+            Core_Texture(c, u)->use_epoch = c->epoch;
+}
+
 /* The GPU may still read texture t (drawn in this epoch): wait until it
  * has finished, which makes every texture safe (a new epoch). */
 void Core_TexHazard(struct Core *c, struct CoreTex *t)
