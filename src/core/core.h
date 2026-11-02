@@ -312,6 +312,8 @@ void Core_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, const
 /* --- Textures (texture.c) ------------------------------------------------------- */
 
 void Core_BindTexture(struct Core *c, ULONG target, ULONG name);
+void Core_GenTextures(struct Core *c, LONG n, ULONG *names);
+ULONG Core_IsTexture(struct Core *c, ULONG name);
 void Core_DeleteTextures(struct Core *c, LONG n, const ULONG *names);
 void Core_TexParameteri(struct Core *c, ULONG target, ULONG pname, LONG param);
 void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,

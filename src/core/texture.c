@@ -110,6 +110,39 @@ void Core_BindTexture(struct Core *c, ULONG target, ULONG name)
     DIRTY_UNIT(c, u);
 }
 
+void Core_GenTextures(struct Core *c, LONG n, ULONG *names)
+{
+    LONG i;
+    ULONG k;
+
+    if (n < 0)
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
+    k = 1;
+    for (i = 0; i < n; i++)
+    {
+        /* the lowest free names; the object is made now, so the name
+         * stays taken until glDeleteTextures */
+        while (k < CORE_MAX_TEX && c->tex[k] != NULL)
+            k++;
+        if (k >= CORE_MAX_TEX || Tex_Get(c, k) == NULL)
+        {
+            Core_Error(c, GL_OUT_OF_MEMORY);
+            for (; i < n; i++)
+                names[i] = 0;
+            return;
+        }
+        names[i] = k;
+    }
+}
+
+ULONG Core_IsTexture(struct Core *c, ULONG name)
+{
+    return (name != 0 && name < CORE_MAX_TEX && c->tex[name] != NULL) ? 1UL : 0UL;
+}
+
 static void Release(struct Core *c, struct CoreTex *t)
 {
     if (t->gpu != 0)

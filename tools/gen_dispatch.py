@@ -16,9 +16,15 @@ then one function pointer per slot, positional) and writes:
            header, so a hook whose signature drifts from the SDK fails to
            compile instead of corrupting the stack.
 
+With --direct UNIMPL (the real library): a hooked slot's table entry IS
+`Hook_<Name>` (no wrapper, no counting -- one call less per GL call), and
+every other slot is a stub that calls `UNIMPL(slot index)` and returns 0
+of its type. No slot is ever NULL (guru 810000FF).
+
 Usage:
   gen_dispatch.py HEADER OUT_BASENAME --prefix Cen_ --count Cen_Hit
                   --hooks NAME[,NAME...] [--flags EXPR] [--context EXPR]
+                  [--direct UNIMPL] [--hooks-file FILE]
 """
 
 import argparse
@@ -96,10 +102,17 @@ def main():
     ap.add_argument("--flags", default="MINIGL_BACKEND_FLAG_STUB")
     ap.add_argument("--context", default="&Cen_CurrentContext")
     ap.add_argument("--include", action="append", default=[])
+    ap.add_argument("--direct", default="")
+    ap.add_argument("--hooks-file", default="")
     a = ap.parse_args()
 
     slots = read_table(a.header)
     hooks = set(h for h in a.hooks.split(",") if h)
+    if a.hooks_file:
+        for line in open(a.hooks_file):
+            line = line.split("#")[0].strip()
+            if line:
+                hooks.add(line)
     names = [s[1] for s in slots]
     missing = sorted(hooks - set(names))
     if missing:
@@ -127,12 +140,16 @@ def main():
     for inc in a.include:
         c.append('#include "%s"' % inc)
     c.append('#include "%s.h"\n' % a.out.split("/")[-1])
+    if a.direct:
+        c.append("void %s(ULONG slot);\n" % a.direct)
     for i, (ret, name, params) in enumerate(slots):
         plist = split_params(params) if params and params != "void" else []
         pnames = [param_name(p) for p in plist]
+        if a.direct and name in hooks:
+            continue                    # the table points at the hook itself
         c.append("static %s %s%s(%s)" % (ret, a.prefix, name, params if params else "void"))
         c.append("{")
-        c.append("    %s(%d);" % (a.count, i))
+        c.append("    %s(%d);" % (a.direct if a.direct else a.count, i))
         if name in hooks:
             call = "Hook_%s(%s)" % (name, ", ".join(pnames))
             c.append("    %s%s;" % ("" if ret == "void" else "return ", call))
@@ -149,7 +166,8 @@ def main():
     c.append("    0,")
     c.append("    %s," % a.context)
     for i, (ret, name, params) in enumerate(slots):
-        c.append("    %s%s%s" % (a.prefix, name, "," if i + 1 < len(slots) else ""))
+        entry = ("Hook_" if (a.direct and name in hooks) else a.prefix) + name
+        c.append("    %s%s" % (entry, "," if i + 1 < len(slots) else ""))
     c.append("};\n")
     c.append("const char *const %sSlotName[DISPATCH_SLOTS] =\n{" % a.prefix)
     for i, (ret, name, params) in enumerate(slots):

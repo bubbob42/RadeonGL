@@ -9,371 +9,1103 @@
 #ifndef CORE_GLCONST_H
 #define CORE_GLCONST_H
 
+#ifndef GL_BASE
 #define GL_BASE                                  0x7000UL
+#endif
+#ifndef GL_NO_ERROR
 #define GL_NO_ERROR                              0x0000UL
+#endif
+#ifndef GL_ALPHA
 #define GL_ALPHA                                 0x1906UL
+#endif
+#ifndef GL_ALPHA8
 #define GL_ALPHA8                                0x803cUL
+#endif
+#ifndef GL_ALPHA_BITS
 #define GL_ALPHA_BITS                            0x0d55UL
+#endif
+#ifndef GL_ALPHA_SCALE
 #define GL_ALPHA_SCALE                           0x0d1cUL
+#endif
+#ifndef GL_ALPHA_TEST
 #define GL_ALPHA_TEST                            0x0bc0UL
+#endif
+#ifndef GL_ALPHA_TEST_FUNC
 #define GL_ALPHA_TEST_FUNC                       0x0bc1UL
+#endif
+#ifndef GL_ALPHA_TEST_REF
 #define GL_ALPHA_TEST_REF                        0x0bc2UL
+#endif
+#ifndef GL_ALWAYS
 #define GL_ALWAYS                                0x0207UL
+#endif
+#ifndef GL_AUX_BUFFERS
 #define GL_AUX_BUFFERS                           0x0c00UL
+#endif
+#ifndef GL_BACK
 #define GL_BACK                                  0x0405UL
+#endif
+#ifndef GL_BACK_LEFT
 #define GL_BACK_LEFT                             0x0402UL
+#endif
+#ifndef GL_BACK_RIGHT
 #define GL_BACK_RIGHT                            0x0403UL
+#endif
+#ifndef GL_BLEND
 #define GL_BLEND                                 0x0be2UL
+#endif
+#ifndef GL_BLEND_DST
 #define GL_BLEND_DST                             0x0be0UL
+#endif
+#ifndef GL_BLEND_DST_ALPHA
 #define GL_BLEND_DST_ALPHA                       0x80caUL
+#endif
+#ifndef GL_BLEND_DST_RGB
 #define GL_BLEND_DST_RGB                         0x80c8UL
+#endif
+#ifndef GL_BLEND_SRC
 #define GL_BLEND_SRC                             0x0be1UL
+#endif
+#ifndef GL_BLEND_SRC_ALPHA
 #define GL_BLEND_SRC_ALPHA                       0x80cbUL
+#endif
+#ifndef GL_BLEND_SRC_RGB
 #define GL_BLEND_SRC_RGB                         0x80c9UL
+#endif
+#ifndef GL_BLUE
 #define GL_BLUE                                  0x1905UL
+#endif
+#ifndef GL_BLUE_BITS
 #define GL_BLUE_BITS                             0x0d54UL
+#endif
+#ifndef GL_BYTE
 #define GL_BYTE                                  0x1400UL
+#endif
+#ifndef GL_C3F_V3F
 #define GL_C3F_V3F                               0x2a24UL
+#endif
+#ifndef GL_C4UB_V2F
 #define GL_C4UB_V2F                              0x2a22UL
+#endif
+#ifndef GL_C4UB_V3F
 #define GL_C4UB_V3F                              0x2a23UL
+#endif
+#ifndef GL_CCW
 #define GL_CCW                                   0x0901UL
+#endif
+#ifndef GL_COLOR_ARRAY
 #define GL_COLOR_ARRAY                           0x8076UL
+#endif
+#ifndef GL_COLOR_ARRAY_POINTER
 #define GL_COLOR_ARRAY_POINTER                   0x8090UL
+#endif
+#ifndef GL_COLOR_ARRAY_SIZE
 #define GL_COLOR_ARRAY_SIZE                      0x8081UL
+#endif
+#ifndef GL_COLOR_ARRAY_STRIDE
 #define GL_COLOR_ARRAY_STRIDE                    0x8083UL
+#endif
+#ifndef GL_COLOR_ARRAY_TYPE
 #define GL_COLOR_ARRAY_TYPE                      0x8082UL
+#endif
+#ifndef GL_COLOR_CLEAR_VALUE
 #define GL_COLOR_CLEAR_VALUE                     0x0c22UL
+#endif
+#ifndef GL_COLOR_INDEX
 #define GL_COLOR_INDEX                           0x1900UL
+#endif
+#ifndef GL_CULL_FACE
 #define GL_CULL_FACE                             0x0b44UL
+#endif
+#ifndef GL_CULL_FACE_MODE
 #define GL_CULL_FACE_MODE                        0x0b45UL
+#endif
+#ifndef GL_CURRENT_COLOR
 #define GL_CURRENT_COLOR                         0x0b00UL
+#endif
+#ifndef GL_CURRENT_INDEX
 #define GL_CURRENT_INDEX                         0x0b01UL
+#endif
+#ifndef GL_CURRENT_TEXTURE_COORDS
 #define GL_CURRENT_TEXTURE_COORDS                0x0b03UL
+#endif
+#ifndef GL_CW
 #define GL_CW                                    0x0900UL
+#endif
+#ifndef GL_DECAL
 #define GL_DECAL                                 0x2101UL
+#endif
+#ifndef GL_DEPTH_BITS
 #define GL_DEPTH_BITS                            0x0d56UL
+#endif
+#ifndef GL_DEPTH_CLEAR_VALUE
 #define GL_DEPTH_CLEAR_VALUE                     0x0b73UL
+#endif
+#ifndef GL_DEPTH_COMPONENT
 #define GL_DEPTH_COMPONENT                       0x1902UL
+#endif
+#ifndef GL_DEPTH_FUNC
 #define GL_DEPTH_FUNC                            0x0b74UL
+#endif
+#ifndef GL_DEPTH_RANGE
 #define GL_DEPTH_RANGE                           0x0b70UL
+#endif
+#ifndef GL_DEPTH_SCALE
 #define GL_DEPTH_SCALE                           0x0d1eUL
+#endif
+#ifndef GL_DEPTH_TEST
 #define GL_DEPTH_TEST                            0x0b71UL
+#endif
+#ifndef GL_DEPTH_WRITEMASK
 #define GL_DEPTH_WRITEMASK                       0x0b72UL
+#endif
+#ifndef GL_DITHER
 #define GL_DITHER                                0x0bd0UL
+#endif
+#ifndef GL_DONT_CARE
 #define GL_DONT_CARE                             0x1100UL
+#endif
+#ifndef GL_DOUBLE
 #define GL_DOUBLE                                0x140aUL
+#endif
+#ifndef GL_DOUBLEBUFFER
 #define GL_DOUBLEBUFFER                          0x0c32UL
+#endif
+#ifndef GL_DRAW_BUFFER
 #define GL_DRAW_BUFFER                           0x0c01UL
+#endif
+#ifndef GL_DST_ALPHA
 #define GL_DST_ALPHA                             0x0304UL
+#endif
+#ifndef GL_DST_COLOR
 #define GL_DST_COLOR                             0x0306UL
+#endif
+#ifndef GL_EDGE_FLAG
 #define GL_EDGE_FLAG                             0x0b43UL
+#endif
+#ifndef GL_EDGE_FLAG_ARRAY
 #define GL_EDGE_FLAG_ARRAY                       0x8079UL
+#endif
+#ifndef GL_EDGE_FLAG_ARRAY_POINTER
 #define GL_EDGE_FLAG_ARRAY_POINTER               0x8093UL
+#endif
+#ifndef GL_EDGE_FLAG_ARRAY_STRIDE
 #define GL_EDGE_FLAG_ARRAY_STRIDE                0x808cUL
+#endif
+#ifndef GL_EQUAL
 #define GL_EQUAL                                 0x0202UL
+#endif
+#ifndef GL_EXTENSIONS
 #define GL_EXTENSIONS                            0x1f03UL
+#endif
+#ifndef GL_FASTEST
 #define GL_FASTEST                               0x1101UL
+#endif
+#ifndef GL_FLAT
 #define GL_FLAT                                  0x1d00UL
+#endif
+#ifndef GL_FLOAT
 #define GL_FLOAT                                 0x1406UL
+#endif
+#ifndef GL_FOG
 #define GL_FOG                                   0x0b60UL
+#endif
+#ifndef GL_FOG_COLOR
 #define GL_FOG_COLOR                             0x0b66UL
+#endif
+#ifndef GL_FOG_DENSITY
 #define GL_FOG_DENSITY                           0x0b62UL
+#endif
+#ifndef GL_FOG_END
 #define GL_FOG_END                               0x0b64UL
+#endif
+#ifndef GL_FOG_HINT
 #define GL_FOG_HINT                              0x0c54UL
+#endif
+#ifndef GL_FOG_INDEX
 #define GL_FOG_INDEX                             0x0b61UL
+#endif
+#ifndef GL_FOG_MODE
 #define GL_FOG_MODE                              0x0b65UL
+#endif
+#ifndef GL_FOG_START
 #define GL_FOG_START                             0x0b63UL
+#endif
+#ifndef GL_FRONT_AND_BACK
 #define GL_FRONT_AND_BACK                        0x0408UL
+#endif
+#ifndef GL_FRONT
 #define GL_FRONT                                 0x0404UL
+#endif
+#ifndef GL_FRONT_FACE
 #define GL_FRONT_FACE                            0x0b46UL
+#endif
+#ifndef GL_FRONT_LEFT
 #define GL_FRONT_LEFT                            0x0400UL
+#endif
+#ifndef GL_FRONT_RIGHT
 #define GL_FRONT_RIGHT                           0x0401UL
+#endif
+#ifndef GL_GEQUAL
 #define GL_GEQUAL                                0x0206UL
+#endif
+#ifndef GL_GREATER
 #define GL_GREATER                               0x0204UL
+#endif
+#ifndef GL_GREEN
 #define GL_GREEN                                 0x1904UL
+#endif
+#ifndef GL_GREEN_BITS
 #define GL_GREEN_BITS                            0x0d53UL
+#endif
+#ifndef GL_INDEX_ARRAY
 #define GL_INDEX_ARRAY                           0x8077UL
+#endif
+#ifndef GL_INDEX_ARRAY_POINTER
 #define GL_INDEX_ARRAY_POINTER                   0x8091UL
+#endif
+#ifndef GL_INDEX_ARRAY_STRIDE
 #define GL_INDEX_ARRAY_STRIDE                    0x8086UL
+#endif
+#ifndef GL_INDEX_ARRAY_TYPE
 #define GL_INDEX_ARRAY_TYPE                      0x8085UL
+#endif
+#ifndef GL_INDEX_BITS
 #define GL_INDEX_BITS                            0x0d51UL
+#endif
+#ifndef GL_INDEX_CLEAR_VALUE
 #define GL_INDEX_CLEAR_VALUE                     0x0c20UL
+#endif
+#ifndef GL_INDEX_MODE
 #define GL_INDEX_MODE                            0x0c30UL
+#endif
+#ifndef GL_INT
 #define GL_INT                                   0x1404UL
+#endif
+#ifndef GL_INTENSITY
 #define GL_INTENSITY                             0x8049UL
+#endif
+#ifndef GL_INTENSITY8
 #define GL_INTENSITY8                            0x804bUL
+#endif
+#ifndef GL_LEFT
 #define GL_LEFT                                  0x0406UL
+#endif
+#ifndef GL_LEQUAL
 #define GL_LEQUAL                                0x0203UL
+#endif
+#ifndef GL_LESS
 #define GL_LESS                                  0x0201UL
+#endif
+#ifndef GL_LINEAR
 #define GL_LINEAR                                0x2601UL
+#endif
+#ifndef GL_LINEAR_MIPMAP_LINEAR
 #define GL_LINEAR_MIPMAP_LINEAR                  0x2703UL
+#endif
+#ifndef GL_LINEAR_MIPMAP_NEAREST
 #define GL_LINEAR_MIPMAP_NEAREST                 0x2701UL
+#endif
+#ifndef GL_LINES
 #define GL_LINES                                 0x0001UL
+#endif
+#ifndef GL_LINE_LOOP
 #define GL_LINE_LOOP                             0x0002UL
+#endif
+#ifndef GL_LINE_STRIP
 #define GL_LINE_STRIP                            0x0003UL
+#endif
+#ifndef GL_LUMINANCE
 #define GL_LUMINANCE                             0x1909UL
+#endif
+#ifndef GL_LUMINANCE8
 #define GL_LUMINANCE8                            0x8040UL
+#endif
+#ifndef GL_LUMINANCE8_ALPHA8
 #define GL_LUMINANCE8_ALPHA8                     0x8045UL
+#endif
+#ifndef GL_LUMINANCE_ALPHA
 #define GL_LUMINANCE_ALPHA                       0x190aUL
+#endif
+#ifndef GL_MATRIX_MODE
 #define GL_MATRIX_MODE                           0x0ba0UL
+#endif
+#ifndef GL_MAX_TEXTURE_SIZE
 #define GL_MAX_TEXTURE_SIZE                      0x0d33UL
+#endif
+#ifndef GL_MAX_VIEWPORT_DIMS
 #define GL_MAX_VIEWPORT_DIMS                     0x0d3aUL
+#endif
+#ifndef GL_MODELVIEW
 #define GL_MODELVIEW                             0x1700UL
+#endif
+#ifndef GL_MODELVIEW_MATRIX
 #define GL_MODELVIEW_MATRIX                      0x0ba6UL
+#endif
+#ifndef GL_MODELVIEW_STACK_DEPTH
 #define GL_MODELVIEW_STACK_DEPTH                 0x0ba3UL
+#endif
+#ifndef GL_ADD
 #define GL_ADD                                   0x0104UL
+#endif
+#ifndef GL_MODULATE
 #define GL_MODULATE                              0x2100UL
+#endif
+#ifndef GL_NEVER
 #define GL_NEVER                                 0x0200UL
+#endif
+#ifndef GL_NEAREST
 #define GL_NEAREST                               0x2600UL
+#endif
+#ifndef GL_NEAREST_MIPMAP_NEAREST
 #define GL_NEAREST_MIPMAP_NEAREST                0x2700UL
+#endif
+#ifndef GL_NEAREST_MIPMAP_LINEAR
 #define GL_NEAREST_MIPMAP_LINEAR                 0x2702UL
+#endif
+#ifndef GL_NICEST
 #define GL_NICEST                                0x1102UL
+#endif
+#ifndef GL_NONE
 #define GL_NONE                                  0x0000UL
+#endif
+#ifndef GL_NOTEQUAL
 #define GL_NOTEQUAL                              0x0205UL
+#endif
+#ifndef GL_ONE
 #define GL_ONE                                   0x0001UL
+#endif
+#ifndef GL_ONE_MINUS_DST_ALPHA
 #define GL_ONE_MINUS_DST_ALPHA                   0x0305UL
+#endif
+#ifndef GL_ONE_MINUS_DST_COLOR
 #define GL_ONE_MINUS_DST_COLOR                   0x0307UL
+#endif
+#ifndef GL_ONE_MINUS_SRC_ALPHA
 #define GL_ONE_MINUS_SRC_ALPHA                   0x0303UL
+#endif
+#ifndef GL_ONE_MINUS_SRC_COLOR
 #define GL_ONE_MINUS_SRC_COLOR                   0x0301UL
+#endif
+#ifndef GL_PACK_ALIGNMENT
 #define GL_PACK_ALIGNMENT                        0x0d05UL
+#endif
+#ifndef GL_PACK_LSB_FIRST
 #define GL_PACK_LSB_FIRST                        0x0d01UL
+#endif
+#ifndef GL_PACK_ROW_LENGTH
 #define GL_PACK_ROW_LENGTH                       0x0d02UL
+#endif
+#ifndef GL_PACK_SKIP_PIXELS
 #define GL_PACK_SKIP_PIXELS                      0x0d04UL
+#endif
+#ifndef GL_PACK_SKIP_ROWS
 #define GL_PACK_SKIP_ROWS                        0x0d03UL
+#endif
+#ifndef GL_PACK_SWAP_BYTES
 #define GL_PACK_SWAP_BYTES                       0x0d00UL
+#endif
+#ifndef GL_PERSPECTIVE_CORRECTION_HINT
 #define GL_PERSPECTIVE_CORRECTION_HINT           0x0c50UL
+#endif
+#ifndef GL_POINT_SMOOTH_HINT
 #define GL_POINT_SMOOTH_HINT                     0x0c51UL
+#endif
+#ifndef GL_LINE_SMOOTH_HINT
 #define GL_LINE_SMOOTH_HINT                      0x0c52UL
+#endif
+#ifndef GL_POLYGON_SMOOTH_HINT
 #define GL_POLYGON_SMOOTH_HINT                   0x0c53UL
+#endif
+#ifndef GL_POINTS
 #define GL_POINTS                                0x0000UL
+#endif
+#ifndef GL_POLYGON_MODE
 #define GL_POLYGON_MODE                          0x0b40UL
+#endif
+#ifndef GL_POLYGON_OFFSET
 #define GL_POLYGON_OFFSET                        0x7001UL
+#endif
+#ifndef GL_POLYGON_OFFSET_FACTOR
 #define GL_POLYGON_OFFSET_FACTOR                 0x8038UL
+#endif
+#ifndef GL_POLYGON_OFFSET_FILL
 #define GL_POLYGON_OFFSET_FILL                   0x8037UL
+#endif
+#ifndef GL_POLYGON_OFFSET_LINE
 #define GL_POLYGON_OFFSET_LINE                   0x2a02UL
+#endif
+#ifndef GL_POLYGON_OFFSET_POINT
 #define GL_POLYGON_OFFSET_POINT                  0x2a01UL
+#endif
+#ifndef GL_POLYGON_OFFSET_UNITS
 #define GL_POLYGON_OFFSET_UNITS                  0x2a00UL
+#endif
+#ifndef GL_POLYGON
 #define GL_POLYGON                               0x0009UL
+#endif
+#ifndef GL_PROJECTION
 #define GL_PROJECTION                            0x1701UL
+#endif
+#ifndef GL_PROJECTION_MATRIX
 #define GL_PROJECTION_MATRIX                     0x0ba7UL
+#endif
+#ifndef GL_PROJECTION_STACK_DEPTH
 #define GL_PROJECTION_STACK_DEPTH                0x0ba4UL
+#endif
+#ifndef GL_QUADS
 #define GL_QUADS                                 0x0007UL
+#endif
+#ifndef GL_QUAD_STRIP
 #define GL_QUAD_STRIP                            0x0008UL
+#endif
+#ifndef GL_READ_BUFFER
 #define GL_READ_BUFFER                           0x0c02UL
+#endif
+#ifndef GL_RED
 #define GL_RED                                   0x1903UL
+#endif
+#ifndef GL_RED_BITS
 #define GL_RED_BITS                              0x0d52UL
+#endif
+#ifndef GL_RENDERER
 #define GL_RENDERER                              0x1f01UL
+#endif
+#ifndef GL_REPLACE
 #define GL_REPLACE                               0x1e01UL
+#endif
+#ifndef GL_REPEAT
 #define GL_REPEAT                                0x2901UL
+#endif
+#ifndef GL_RGB
 #define GL_RGB                                   0x1907UL
+#endif
+#ifndef GL_RGB5
 #define GL_RGB5                                  0x8050UL
+#endif
+#ifndef GL_RGB5_A1
 #define GL_RGB5_A1                               0x8057UL
+#endif
+#ifndef GL_RGB8
 #define GL_RGB8                                  0x8051UL
+#endif
+#ifndef GL_RGBA
 #define GL_RGBA                                  0x1908UL
+#endif
+#ifndef GL_RGBA8
 #define GL_RGBA8                                 0x8058UL
+#endif
+#ifndef GL_RGBA_MODE
 #define GL_RGBA_MODE                             0x0c31UL
+#endif
+#ifndef GL_RIGHT
 #define GL_RIGHT                                 0x0407UL
+#endif
+#ifndef GL_SCISSOR_BOX
 #define GL_SCISSOR_BOX                           0x0c10UL
+#endif
+#ifndef GL_SCISSOR_TEST
 #define GL_SCISSOR_TEST                          0x0c11UL
+#endif
+#ifndef GL_SHADE_MODEL
 #define GL_SHADE_MODEL                           0x0b54UL
+#endif
+#ifndef GL_SHORT
 #define GL_SHORT                                 0x1402UL
+#endif
+#ifndef GL_SMOOTH
 #define GL_SMOOTH                                0x1d01UL
+#endif
+#ifndef GL_SRC_ALPHA
 #define GL_SRC_ALPHA                             0x0302UL
+#endif
+#ifndef GL_SRC_ALPHA_SATURATE
 #define GL_SRC_ALPHA_SATURATE                    0x0308UL
+#endif
+#ifndef GL_SRC_COLOR
 #define GL_SRC_COLOR                             0x0300UL
+#endif
+#ifndef GL_STEREO
 #define GL_STEREO                                0x0c33UL
+#endif
+#ifndef GL_T2F_C3F_V3F
 #define GL_T2F_C3F_V3F                           0x2a2aUL
+#endif
+#ifndef GL_T2F_C4UB_V3F
 #define GL_T2F_C4UB_V3F                          0x2a29UL
+#endif
+#ifndef GL_T2F_V3F
 #define GL_T2F_V3F                               0x2a27UL
+#endif
+#ifndef GL_TABLE_TOO_LARGE
 #define GL_TABLE_TOO_LARGE                       0x8031UL
+#endif
+#ifndef GL_TEXTURE_2D
 #define GL_TEXTURE_2D                            0x0de1UL
+#endif
+#ifndef GL_TEXTURE_2D_BINDING
 #define GL_TEXTURE_2D_BINDING                    0x8069UL
+#endif
+#ifndef GL_TEXTURE_COORD_ARRAY
 #define GL_TEXTURE_COORD_ARRAY                   0x8078UL
+#endif
+#ifndef GL_TEXTURE_COORD_ARRAY_SIZE
 #define GL_TEXTURE_COORD_ARRAY_SIZE              0x8088UL
+#endif
+#ifndef GL_TEXTURE_COORD_ARRAY_STRIDE
 #define GL_TEXTURE_COORD_ARRAY_STRIDE            0x808aUL
+#endif
+#ifndef GL_TEXTURE_COORD_ARRAY_TYPE
 #define GL_TEXTURE_COORD_ARRAY_TYPE              0x8089UL
+#endif
+#ifndef GL_TEXTURE_DOOR_ARRAY_POINTER
 #define GL_TEXTURE_DOOR_ARRAY_POINTER            0x8092UL
+#endif
+#ifndef GL_TEXTURE_ENV
 #define GL_TEXTURE_ENV                           0x2300UL
+#endif
+#ifndef GL_TEXTURE_ENV_COLOR
 #define GL_TEXTURE_ENV_COLOR                     0x2201UL
+#endif
+#ifndef GL_TEXTURE_ENV_MODE
 #define GL_TEXTURE_ENV_MODE                      0x2200UL
+#endif
+#ifndef GL_TEXTURE_MAG_FILTER
 #define GL_TEXTURE_MAG_FILTER                    0x2800UL
+#endif
+#ifndef GL_TEXTURE_MIN_FILTER
 #define GL_TEXTURE_MIN_FILTER                    0x2801UL
+#endif
+#ifndef GL_TEXTURE_PRIORITY
 #define GL_TEXTURE_PRIORITY                      0x8066UL
+#endif
+#ifndef GL_TEXTURE_WRAP_S
 #define GL_TEXTURE_WRAP_S                        0x2802UL
+#endif
+#ifndef GL_TEXTURE_WRAP_T
 #define GL_TEXTURE_WRAP_T                        0x2803UL
+#endif
+#ifndef GL_TEXTURE_GEN_S
 #define GL_TEXTURE_GEN_S                         0x0c60UL
+#endif
+#ifndef GL_TEXTURE_GEN_T
 #define GL_TEXTURE_GEN_T                         0x0c61UL
+#endif
+#ifndef GL_TRIANGLES
 #define GL_TRIANGLES                             0x0004UL
+#endif
+#ifndef GL_TRIANGLE_FAN
 #define GL_TRIANGLE_FAN                          0x0006UL
+#endif
+#ifndef GL_TRIANGLE_STRIP
 #define GL_TRIANGLE_STRIP                        0x0005UL
+#endif
+#ifndef GL_UNPACK_ALIGNMENT
 #define GL_UNPACK_ALIGNMENT                      0x0cf5UL
+#endif
+#ifndef GL_UNPACK_LSB_FIRST
 #define GL_UNPACK_LSB_FIRST                      0x0cf1UL
+#endif
+#ifndef GL_UNPACK_ROW_LENGTH
 #define GL_UNPACK_ROW_LENGTH                     0x0cf2UL
+#endif
+#ifndef GL_UNPACK_SKIP_PIXELS
 #define GL_UNPACK_SKIP_PIXELS                    0x0cf4UL
+#endif
+#ifndef GL_UNPACK_SKIP_ROWS
 #define GL_UNPACK_SKIP_ROWS                      0x0cf3UL
+#endif
+#ifndef GL_UNPACK_SWAP_BYTES
 #define GL_UNPACK_SWAP_BYTES                     0x0cf0UL
+#endif
+#ifndef GL_UNSIGNED_BYTE
 #define GL_UNSIGNED_BYTE                         0x1401UL
+#endif
+#ifndef GL_UNSIGNED_INT
 #define GL_UNSIGNED_INT                          0x1405UL
+#endif
+#ifndef GL_UNSIGNED_SHORT
 #define GL_UNSIGNED_SHORT                        0x1403UL
+#endif
+#ifndef GL_V2F
 #define GL_V2F                                   0x2a20UL
+#endif
+#ifndef GL_V3F
 #define GL_V3F                                   0x2a21UL
+#endif
+#ifndef GL_VENDOR
 #define GL_VENDOR                                0x1f00UL
+#endif
+#ifndef GL_VERSION
 #define GL_VERSION                               0x1f02UL
+#endif
+#ifndef GL_VERTEX_ARRAY
 #define GL_VERTEX_ARRAY                          0x8074UL
+#endif
+#ifndef GL_VERTEX_ARRAY_POINTER
 #define GL_VERTEX_ARRAY_POINTER                  0x808eUL
+#endif
+#ifndef GL_VERTEX_ARRAY_SIZE
 #define GL_VERTEX_ARRAY_SIZE                     0x807aUL
+#endif
+#ifndef GL_VERTEX_ARRAY_STRIDE
 #define GL_VERTEX_ARRAY_STRIDE                   0x807cUL
+#endif
+#ifndef GL_VERTEX_ARRAY_TYPE
 #define GL_VERTEX_ARRAY_TYPE                     0x807bUL
+#endif
+#ifndef GL_VIEWPORT
 #define GL_VIEWPORT                              0x0ba2UL
+#endif
+#ifndef GL_ZERO
 #define GL_ZERO                                  0x0000UL
+#endif
+#ifndef GL_POINT_SMOOTH
 #define GL_POINT_SMOOTH                          0x0b10UL
+#endif
+#ifndef GL_CLAMP
 #define GL_CLAMP                                 0x2900UL
+#endif
+#ifndef GL_EXP
 #define GL_EXP                                   0x0800UL
+#endif
+#ifndef GL_EXP2
 #define GL_EXP2                                  0x0801UL
+#endif
+#ifndef GL_TEXTURE_GEN_MODE
 #define GL_TEXTURE_GEN_MODE                      0x2500UL
+#endif
+#ifndef GL_SPHERE_MAP
 #define GL_SPHERE_MAP                            0x2402UL
+#endif
+#ifndef GL_T
 #define GL_T                                     0x2001UL
+#endif
+#ifndef GL_S
 #define GL_S                                     0x2000UL
+#endif
+#ifndef GL_FILL
 #define GL_FILL                                  0x1b02UL
+#endif
+#ifndef GL_TEXTURE0_ARB
 #define GL_TEXTURE0_ARB                          0x84c0UL
+#endif
+#ifndef GL_TEXTURE1_ARB
 #define GL_TEXTURE1_ARB                          0x84c1UL
+#endif
+#ifndef GL_TEXTURE2_ARB
 #define GL_TEXTURE2_ARB                          0x84c2UL
+#endif
+#ifndef GL_TEXTURE3_ARB
 #define GL_TEXTURE3_ARB                          0x84c3UL
+#endif
+#ifndef GL_TEXTURE0
 #define GL_TEXTURE0                              0x84c0UL
+#endif
+#ifndef GL_TEXTURE1
 #define GL_TEXTURE1                              0x84c1UL
+#endif
+#ifndef GL_TEXTURE2
 #define GL_TEXTURE2                              0x84c2UL
+#endif
+#ifndef GL_TEXTURE3
 #define GL_TEXTURE3                              0x84c3UL
+#endif
+#ifndef GL_MAX_TEXTURE_UNITS_ARB
 #define GL_MAX_TEXTURE_UNITS_ARB                 0x84e2UL
+#endif
+#ifndef MGL_LOCK_AUTOMATIC
 #define MGL_LOCK_AUTOMATIC                       0x7010UL
+#endif
+#ifndef MGL_LOCK_MANUAL
 #define MGL_LOCK_MANUAL                          0x7011UL
+#endif
+#ifndef MGL_LOCK_SMART
 #define MGL_LOCK_SMART                           0x7012UL
+#endif
+#ifndef MGL_PERSPECTIVE_MAPPING
 #define MGL_PERSPECTIVE_MAPPING                  0x7015UL
+#endif
+#ifndef MGL_W_ONE_HINT
 #define MGL_W_ONE_HINT                           0x7016UL
+#endif
+#ifndef MGL_Z_OFFSET
 #define MGL_Z_OFFSET                             0x7017UL
+#endif
+#ifndef GL_COLOR_TABLE
 #define GL_COLOR_TABLE                           0x80d0UL
+#endif
+#ifndef MGL_UBYTE_BGRA
 #define MGL_UBYTE_BGRA                           0x7018UL
+#endif
+#ifndef MGL_UBYTE_ARGB
 #define MGL_UBYTE_ARGB                           0x7019UL
+#endif
+#ifndef MGL_UNSIGNED_SHORT_5_6_5
 #define MGL_UNSIGNED_SHORT_5_6_5                 0x701aUL
+#endif
+#ifndef MGL_UNSIGNED_SHORT_4_4_4_4
 #define MGL_UNSIGNED_SHORT_4_4_4_4               0x701bUL
+#endif
+#ifndef MGL_FIXPOINTTRANS_HINT
 #define MGL_FIXPOINTTRANS_HINT                   0x701cUL
+#endif
+#ifndef MGL_ARRAY_TRANSFORMATIONS
 #define MGL_ARRAY_TRANSFORMATIONS                0x701dUL
+#endif
+#ifndef GL_COLOR_WRITEMASK
 #define GL_COLOR_WRITEMASK                       0x0c23UL
+#endif
+#ifndef GL_LINE_WIDTH
 #define GL_LINE_WIDTH                            0x0b21UL
+#endif
+#ifndef GL_EYE_LINEAR
 #define GL_EYE_LINEAR                            0x2400UL
+#endif
+#ifndef GL_OBJECT_LINEAR
 #define GL_OBJECT_LINEAR                         0x2401UL
+#endif
+#ifndef GL_OBJECT_PLANE
 #define GL_OBJECT_PLANE                          0x2501UL
+#endif
+#ifndef GL_EYE_PLANE
 #define GL_EYE_PLANE                             0x2502UL
+#endif
+#ifndef GL_TEXTURE
 #define GL_TEXTURE                               0x1702UL
+#endif
+#ifndef GL_TEXTURE_MATRIX
 #define GL_TEXTURE_MATRIX                        0x0ba8UL
+#endif
+#ifndef GL_TEXTURE_STACK_DEPTH
 #define GL_TEXTURE_STACK_DEPTH                   0x0ba5UL
+#endif
+#ifndef GL_POINT_SIZE
 #define GL_POINT_SIZE                            0x0b11UL
+#endif
+#ifndef GL_LINE_SMOOTH
 #define GL_LINE_SMOOTH                           0x0b20UL
+#endif
+#ifndef GL_LINE_STIPPLE
 #define GL_LINE_STIPPLE                          0x0b24UL
+#endif
+#ifndef GL_POLYGON_SMOOTH
 #define GL_POLYGON_SMOOTH                        0x0b41UL
+#endif
+#ifndef GL_POLYGON_STIPPLE
 #define GL_POLYGON_STIPPLE                       0x0b42UL
+#endif
+#ifndef GL_COLOR_MATERIAL_FACE
 #define GL_COLOR_MATERIAL_FACE                   0x0b55UL
+#endif
+#ifndef GL_COLOR_MATERIAL_PARAMETER
 #define GL_COLOR_MATERIAL_PARAMETER              0x0b56UL
+#endif
+#ifndef GL_COLOR_MATERIAL
 #define GL_COLOR_MATERIAL                        0x0b57UL
+#endif
+#ifndef GL_NORMALIZE
 #define GL_NORMALIZE                             0x0ba1UL
+#endif
+#ifndef GL_STENCIL_TEST
 #define GL_STENCIL_TEST                          0x0b90UL
+#endif
+#ifndef GL_LOGIC_OP
 #define GL_LOGIC_OP                              0x0bf1UL
+#endif
+#ifndef GL_INDEX_LOGIC_OP
 #define GL_INDEX_LOGIC_OP                        0x0bf1UL
+#endif
+#ifndef GL_COLOR_LOGIC_OP
 #define GL_COLOR_LOGIC_OP                        0x0bf2UL
+#endif
+#ifndef GL_TEXTURE_GEN_R
 #define GL_TEXTURE_GEN_R                         0x0c62UL
+#endif
+#ifndef GL_TEXTURE_GEN_Q
 #define GL_TEXTURE_GEN_Q                         0x0c63UL
+#endif
+#ifndef GL_AUTO_NORMAL
 #define GL_AUTO_NORMAL                           0x0d80UL
+#endif
+#ifndef GL_TEXTURE_1D
 #define GL_TEXTURE_1D                            0x0de0UL
+#endif
+#ifndef GL_CLIP_PLANE0
 #define GL_CLIP_PLANE0                           0x3000UL
+#endif
+#ifndef GL_CLIP_PLANE1
 #define GL_CLIP_PLANE1                           0x3001UL
+#endif
+#ifndef GL_CLIP_PLANE2
 #define GL_CLIP_PLANE2                           0x3002UL
+#endif
+#ifndef GL_CLIP_PLANE3
 #define GL_CLIP_PLANE3                           0x3003UL
+#endif
+#ifndef GL_CLIP_PLANE4
 #define GL_CLIP_PLANE4                           0x3004UL
+#endif
+#ifndef GL_CLIP_PLANE5
 #define GL_CLIP_PLANE5                           0x3005UL
+#endif
+#ifndef GL_MAP1_COLOR_4
 #define GL_MAP1_COLOR_4                          0x0d90UL
+#endif
+#ifndef GL_MAP1_INDEX
 #define GL_MAP1_INDEX                            0x0d91UL
+#endif
+#ifndef GL_MAP1_NORMAL
 #define GL_MAP1_NORMAL                           0x0d92UL
+#endif
+#ifndef GL_MAP1_TEXTURE_COORD_1
 #define GL_MAP1_TEXTURE_COORD_1                  0x0d93UL
+#endif
+#ifndef GL_MAP1_TEXTURE_COORD_2
 #define GL_MAP1_TEXTURE_COORD_2                  0x0d94UL
+#endif
+#ifndef GL_MAP1_TEXTURE_COORD_3
 #define GL_MAP1_TEXTURE_COORD_3                  0x0d95UL
+#endif
+#ifndef GL_MAP1_TEXTURE_COORD_4
 #define GL_MAP1_TEXTURE_COORD_4                  0x0d96UL
+#endif
+#ifndef GL_MAP1_VERTEX_3
 #define GL_MAP1_VERTEX_3                         0x0d97UL
+#endif
+#ifndef GL_MAP1_VERTEX_4
 #define GL_MAP1_VERTEX_4                         0x0d98UL
+#endif
+#ifndef GL_MAP2_COLOR_4
 #define GL_MAP2_COLOR_4                          0x0db0UL
+#endif
+#ifndef GL_MAP2_INDEX
 #define GL_MAP2_INDEX                            0x0db1UL
+#endif
+#ifndef GL_MAP2_NORMAL
 #define GL_MAP2_NORMAL                           0x0db2UL
+#endif
+#ifndef GL_MAP2_TEXTURE_COORD_1
 #define GL_MAP2_TEXTURE_COORD_1                  0x0db3UL
+#endif
+#ifndef GL_MAP2_TEXTURE_COORD_2
 #define GL_MAP2_TEXTURE_COORD_2                  0x0db4UL
+#endif
+#ifndef GL_MAP2_TEXTURE_COORD_3
 #define GL_MAP2_TEXTURE_COORD_3                  0x0db5UL
+#endif
+#ifndef GL_MAP2_TEXTURE_COORD_4
 #define GL_MAP2_TEXTURE_COORD_4                  0x0db6UL
+#endif
+#ifndef GL_MAP2_VERTEX_3
 #define GL_MAP2_VERTEX_3                         0x0db7UL
+#endif
+#ifndef GL_MAP2_VERTEX_4
 #define GL_MAP2_VERTEX_4                         0x0db8UL
+#endif
+#ifndef GL_COLOR_BUFFER_BIT
 #define GL_COLOR_BUFFER_BIT                      0x00004000UL
+#endif
+#ifndef GL_DEPTH_BUFFER_BIT
 #define GL_DEPTH_BUFFER_BIT                      0x00000100UL
+#endif
+#ifndef GL_TRUE
 #define GL_TRUE                                  1UL
+#endif
+#ifndef GL_FALSE
 #define GL_FALSE                                 0UL
+#endif
+#ifndef MGL_BUTTON_LEFT
 #define MGL_BUTTON_LEFT                          0x00000001UL
+#endif
+#ifndef MGL_BUTTON_RIGHT
 #define MGL_BUTTON_RIGHT                         0x00000002UL
+#endif
+#ifndef MGL_BUTTON_MID
 #define MGL_BUTTON_MID                           0x00000004UL
+#endif
+#ifndef MGL_SM_BESTMODE
 #define MGL_SM_BESTMODE                          0xffffffffUL
+#endif
+#ifndef MGL_SM_WINDOWMODE
 #define MGL_SM_WINDOWMODE                        0x00000000UL
+#endif
+#ifndef GLROT_001
 #define GLROT_001                                0x800UL
+#endif
+#ifndef GLROT_010
 #define GLROT_010                                0x1000UL
+#endif
+#ifndef GLROT_100
 #define GLROT_100                                0x2000UL
+#endif
+#ifndef GLROT_011
 #define GLROT_011                                0x4000UL
+#endif
+#ifndef GLROT_101
 #define GLROT_101                                0x8000UL
+#endif
+#ifndef GLROT_110
 #define GLROT_110                                0x10000UL
+#endif
+#ifndef GLROT_111
 #define GLROT_111                                0x20000UL
+#endif
+#ifndef GL_SHARED_TEXTURE_PALETTE_EXT
 #define GL_SHARED_TEXTURE_PALETTE_EXT            0x81fbUL
+#endif
+#ifndef GL_FUNC_ADD
 #define GL_FUNC_ADD                              0x8006UL
+#endif
+#ifndef GL_MIN
 #define GL_MIN                                   0x8007UL
+#endif
+#ifndef GL_MAX
 #define GL_MAX                                   0x8008UL
+#endif
+#ifndef GL_BLEND_EQUATION
 #define GL_BLEND_EQUATION                        0x8009UL
+#endif
+#ifndef GL_FUNC_SUBTRACT
 #define GL_FUNC_SUBTRACT                         0x800aUL
+#endif
+#ifndef GL_FUNC_REVERSE_SUBTRACT
 #define GL_FUNC_REVERSE_SUBTRACT                 0x800bUL
+#endif
+#ifndef MGL_ZBUFFER_32F
 #define MGL_ZBUFFER_32F                          32UL
+#endif
+#ifndef MGL_ZBUFFER_16
 #define MGL_ZBUFFER_16                           16UL
+#endif
+#ifndef GL_CURRENT_NORMAL
 #define GL_CURRENT_NORMAL                        0x0b02UL
+#endif
+#ifndef GL_COMPILE
 #define GL_COMPILE                               0x1300UL
+#endif
+#ifndef GL_COMPILE_AND_EXECUTE
 #define GL_COMPILE_AND_EXECUTE                   0x1301UL
+#endif
+#ifndef GL_LIST_BASE
 #define GL_LIST_BASE                             0x0b32UL
+#endif
+#ifndef GL_LIST_INDEX
 #define GL_LIST_INDEX                            0x0b33UL
+#endif
+#ifndef GL_LIST_MODE
 #define GL_LIST_MODE                             0x0b30UL
+#endif
+#ifndef GL_LIGHTING
 #define GL_LIGHTING                              0x0b50UL
+#endif
+#ifndef GL_LIGHT_MODEL_LOCAL_VIEWER
 #define GL_LIGHT_MODEL_LOCAL_VIEWER              0x0b51UL
+#endif
+#ifndef GL_LIGHT_MODEL_TWO_SIDE
 #define GL_LIGHT_MODEL_TWO_SIDE                  0x0b52UL
+#endif
+#ifndef GL_LIGHT_MODEL_AMBIENT
 #define GL_LIGHT_MODEL_AMBIENT                   0x0b53UL
+#endif
+#ifndef GL_LIGHT0
 #define GL_LIGHT0                                0x4000UL
+#endif
+#ifndef GL_LIGHT1
 #define GL_LIGHT1                                0x4001UL
+#endif
+#ifndef GL_LIGHT2
 #define GL_LIGHT2                                0x4002UL
+#endif
+#ifndef GL_LIGHT3
 #define GL_LIGHT3                                0x4003UL
+#endif
+#ifndef GL_LIGHT4
 #define GL_LIGHT4                                0x4004UL
+#endif
+#ifndef GL_LIGHT5
 #define GL_LIGHT5                                0x4005UL
+#endif
+#ifndef GL_LIGHT6
 #define GL_LIGHT6                                0x4006UL
+#endif
+#ifndef GL_LIGHT7
 #define GL_LIGHT7                                0x4007UL
+#endif
+#ifndef GL_AMBIENT
 #define GL_AMBIENT                               0x1200UL
+#endif
+#ifndef GL_DIFFUSE
 #define GL_DIFFUSE                               0x1201UL
+#endif
+#ifndef GL_SPECULAR
 #define GL_SPECULAR                              0x1202UL
+#endif
+#ifndef GL_POSITION
 #define GL_POSITION                              0x1203UL
+#endif
+#ifndef GL_SPOT_DIRECTION
 #define GL_SPOT_DIRECTION                        0x1204UL
+#endif
+#ifndef GL_SPOT_EXPONENT
 #define GL_SPOT_EXPONENT                         0x1205UL
+#endif
+#ifndef GL_SPOT_CUTOFF
 #define GL_SPOT_CUTOFF                           0x1206UL
+#endif
+#ifndef GL_CONSTANT_ATTENUATION
 #define GL_CONSTANT_ATTENUATION                  0x1207UL
+#endif
+#ifndef GL_LINEAR_ATTENUATION
 #define GL_LINEAR_ATTENUATION                    0x1208UL
+#endif
+#ifndef GL_QUADRATIC_ATTENUATION
 #define GL_QUADRATIC_ATTENUATION                 0x1209UL
+#endif
+#ifndef GL_EMISSION
 #define GL_EMISSION                              0x1600UL
+#endif
+#ifndef GL_SHININESS
 #define GL_SHININESS                             0x1601UL
+#endif
+#ifndef GL_AMBIENT_AND_DIFFUSE
 #define GL_AMBIENT_AND_DIFFUSE                   0x1602UL
+#endif
+#ifndef GL_INVALID_ENUM
 #define GL_INVALID_ENUM                          0x0500UL
+#endif
+#ifndef GL_INVALID_VALUE
 #define GL_INVALID_VALUE                         0x0501UL
+#endif
+#ifndef GL_INVALID_OPERATION
 #define GL_INVALID_OPERATION                     0x0502UL
+#endif
+#ifndef GL_STACK_OVERFLOW
 #define GL_STACK_OVERFLOW                        0x0503UL
+#endif
+#ifndef GL_STACK_UNDERFLOW
 #define GL_STACK_UNDERFLOW                       0x0504UL
+#endif
+#ifndef GL_OUT_OF_MEMORY
 #define GL_OUT_OF_MEMORY                         0x0505UL
+#endif
+#ifndef GL_POINT
 #define GL_POINT                                 0x1b00UL
+#endif
+#ifndef GL_LINE
 #define GL_LINE                                  0x1b01UL
+#endif
+#ifndef GL_NORMAL_ARRAY
 #define GL_NORMAL_ARRAY                          0x8075UL
+#endif
+#ifndef GL_NORMAL_ARRAY_TYPE
 #define GL_NORMAL_ARRAY_TYPE                     0x807eUL
+#endif
+#ifndef GL_NORMAL_ARRAY_STRIDE
 #define GL_NORMAL_ARRAY_STRIDE                   0x807fUL
+#endif
+#ifndef GL_NORMAL_ARRAY_POINTER
 #define GL_NORMAL_ARRAY_POINTER                  0x808fUL
+#endif
 
 #endif /* CORE_GLCONST_H */

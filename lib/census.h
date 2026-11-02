@@ -30,10 +30,7 @@ extern GLcontext Cen_CurrentContext;
 /* Counts one call of a dispatch slot. */
 void Cen_Hit(ULONG slot);
 
-/* Library shell hooks. Cen_Init: once, from LibInit, after the bases are
- * open. Cen_ClientGone: from LibClose -- a context the closing task still
- * owns (it died or forgot mglDeleteContext) is freed without file I/O. */
-void Cen_Init(void);
-void Cen_ClientGone(struct Task *task);
+/* The shell's hooks (Back_Init, Back_ClientGone, Back_IdString). */
+#include "backend.h"
 
 #endif /* RADEONGL_CENSUS_H */

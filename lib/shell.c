@@ -28,7 +28,7 @@
 #include <proto/exec.h>
 #include <libraries/minigl_dispatch.h>
 
-#include "census.h"
+#include "backend.h"
 
 #define LIBNAME  "minigl.library"
 #define VERSION  29
@@ -48,8 +48,6 @@ LONG LibNoExec(void)
 }
 
 static const char LibName[] = LIBNAME;
-static const char LibId[] =
-    "$VER: minigl.library 29.1 (02.11.2026) RadeonGL census (draws nothing), dispatch ABI 5\r\n";
 
 /* The bases the NDK inline headers use. */
 struct ExecBase *SysBase = NULL;
@@ -94,7 +92,7 @@ static struct MiniGLBase *LibInit(
     base->lib.lib_Flags = LIBF_SUMUSED | LIBF_CHANGED;
     base->lib.lib_Version = VERSION;
     base->lib.lib_Revision = REVISION;
-    base->lib.lib_IdString = (char *)LibId;
+    base->lib.lib_IdString = (char *)Back_IdString;
     base->segList = seglist;
     InitSemaphore(&base->lock);
 
@@ -107,7 +105,7 @@ static struct MiniGLBase *LibInit(
         FreeBase(base);
         return NULL;
     }
-    Cen_Init();
+    Back_Init();
     return base;
 }
 
@@ -122,7 +120,7 @@ static struct MiniGLBase *LibOpen(register struct MiniGLBase *base __asm("a6"))
 
 static BPTR LibClose(register struct MiniGLBase *base __asm("a6"))
 {
-    Cen_ClientGone(FindTask(NULL));
+    Back_ClientGone(FindTask(NULL));
     if (base->lib.lib_OpenCnt)
         base->lib.lib_OpenCnt--;
     if (base->lib.lib_OpenCnt == 0 && (base->lib.lib_Flags & LIBF_DELEXP))
@@ -185,6 +183,6 @@ const struct Resident ROMTag =
     NT_LIBRARY,
     0,
     (char *)LibName,
-    (char *)LibId,
+    (char *)Back_IdString,
     (APTR)&InitTable
 };

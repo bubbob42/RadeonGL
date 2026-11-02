@@ -226,7 +226,10 @@ static const char *const cen_MatrixNames[] =
     "GLULookAt", "GLUPerspective"
 };
 
-void Cen_Init(void)
+const char Back_IdString[] =
+    "$VER: minigl.library 29.1 (02.11.2026) RadeonGL census (draws nothing), dispatch ABI 5\r\n";
+
+void Back_Init(void)
 {
     ULONG i;
     ULONG k;
@@ -1044,7 +1047,7 @@ GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height
 /* LibClose: no writes here (exec calls it under Forbid). Close() and
  * CloseWindow() break the Forbid for a moment, which exec allows; the
  * CSV lines already flushed stay valid. */
-void Cen_ClientGone(struct Task *task)
+void Back_ClientGone(struct Task *task)
 {
     struct CenContext *c;
 

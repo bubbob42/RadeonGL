@@ -1,0 +1,33 @@
+; GLQuakeNull -- milestone 2: GLQuake's timedemos against the RadeonGL
+; minigl.library with the null card (docs/core.md, lib/nullcard.c). The
+; real core, emitter and ring writer run; every packet the GPU would read
+; goes through the packet checker. Each demo runs in the background
+; (DEV:Test/RunNull) with up to 10 minutes; one that does not finish is
+; reported with Status and a screen grab, and the script moves on.
+; Per demo: DEV:Test/null-<demo>.log = GLQuake's text + the library's
+; summary (frames, dwords, draws, checker errors, unimplemented slots).
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 2100
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/null-#?
+Echo "=== demo1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNull demo1
+Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
+Type DEV:Test/null-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo1-lib.log >>DEV:Test/auto.log
+Echo "=== demo2 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNull demo2
+Execute DEV:Test/WaitDone DEV:Test/null-demo2.done
+Type DEV:Test/null-demo2.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo2-lib.log >>DEV:Test/auto.log
+Echo "=== demo3 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNull demo3
+Execute DEV:Test/WaitDone DEV:Test/null-demo3.done
+Type DEV:Test/null-demo3.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo3-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

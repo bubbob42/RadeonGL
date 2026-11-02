@@ -140,7 +140,7 @@ GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config13 launch-fsuae13 run-fsuae13 info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run release-stage release-drawer release-archive release-lha release-adf release-aminet release-verify release-dist
 
-all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes census-lib r200-objs
+all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes census-lib r200-objs rgl-lib
 
 # release: advance the revision, then rebuild both profiles so the new $VER is
 # embedded. This is the ONLY target that bumps -- run it by hand when cutting a
@@ -732,7 +732,7 @@ build/lib/census_dispatch.c build/lib/census_dispatch.h: $(MGL_DISPATCH) tools/g
 	$(PYTHON) -I tools/gen_dispatch.py $(MGL_DISPATCH) build/lib/census_dispatch \
 	    --prefix Cen_ --count Cen_Hit --include census.h --hooks $(CENSUS_HOOKS)
 
-build/lib/%.o: lib/%.c lib/census.h build/lib/census_dispatch.h
+build/lib/%.o: lib/%.c lib/census.h lib/backend.h build/lib/census_dispatch.h
 	@mkdir -p build/lib
 	$(GCC_CC) $(LIB_CFLAGS) -c $< -o $@
 
@@ -814,6 +814,53 @@ build/core-sasc/%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS) | $(VAMOSRC)
 	@mkdir -p build/core-sasc
 	$(VAMOS_SC) sc $(SC_OPTS) CPU=68020 OPTIMIZE NOLINK IDIR=include: IDIR=proj:src/r200/ IDIR=proj:src/core/ OBJNAME=proj:$@ proj:$<
 
+# --- minigl.library, RadeonGL back end (docs/core.md, lib/rgl.c) -------------
+# Milestone 2: the real core, emitter and ring writer behind the dispatch
+# table, with the null card (lib/nullcard.c) in place of a Radeon: every
+# packet the GPU would read goes through the checker; nothing is drawn.
+# The implemented slots are the Hook_ functions defined in lib/rgl.c (read
+# out of the source, so list and code cannot drift); every other slot is a
+# stub that records GL_INVALID_OPERATION and the slot name for the log.
+# -m68060 -m68881 together (without -m68881 GCC 6.5 falls back to soft float).
+RGL_LIB    := dist/Libs/RadeonGL/minigl.library
+RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c | sort -u | paste -sd, -}
+RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
+              -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
+              -m68060 -m68881 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl -Isrc/core -Isrc/r200
+RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/runtime.o \
+              build/rgl/rgl_dispatch.o \
+              $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_MODULES))) \
+              $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES)))
+
+build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c Makefile
+	@mkdir -p build/rgl
+	$(PYTHON) -I tools/gen_dispatch.py $(MGL_DISPATCH) build/rgl/rgl_dispatch \
+	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' \
+	    --include rgl.h --hooks $(RGL_HOOKS)
+
+build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS)
+	@mkdir -p build/rgl
+	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
+
+build/rgl/rgl_dispatch.o: build/rgl/rgl_dispatch.c lib/rgl.h
+	$(GCC_CC) $(RGL_CFLAGS) -Wno-unused-parameter -c $< -o $@
+
+build/rgl/core_%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS)
+	@mkdir -p build/rgl
+	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
+
+build/rgl/r2_%.o: src/r200/%.c $(R200_HDRS)
+	@mkdir -p build/rgl
+	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
+
+$(RGL_LIB): $(RGL_OBJS)
+	@mkdir -p $(dir $@)
+	$(GCC_CC) -nostdlib -nostartfiles -nodefaultlibs -noixemul -m68060 -m68881 -o $@ $(RGL_OBJS) -lgcc
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
+.PHONY: rgl-lib
+rgl-lib: $(RGL_LIB)
+
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a
 # COPY of the system disk whose User-Startup runs DEV:Test/AutoRun; see
@@ -846,7 +893,7 @@ autotest: $(AUTOTEST_CONFIG) dist/Test/Grab
 	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in test/auto>"; exit 2; }
 	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see docs/testing.md"; exit 2; }
 	@mkdir -p dist/Test
-	@cp test/auto/RunOne test/auto/RunCensus test/auto/WaitDone dist/Test/
+	@cp test/auto/RunOne test/auto/RunCensus test/auto/RunNull test/auto/WaitDone dist/Test/
 	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
 
 # --- Tools -------------------------------------------------------------------
