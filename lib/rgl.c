@@ -11,6 +11,11 @@
  * dwords, draws, packet-checker errors with the first one decoded, and
  * every dispatch slot called that is not implemented yet.
  *
+ * Frame dump: with RadeonGLDump=N the null card records frame N (the core
+ * re-emits its whole state at that frame's start, so the recording stands
+ * alone) and writes it with the texture heap to RadeonGLDumpFile (default
+ * PROGDIR:radeongl-frame.r2d). test/host/r200view renders it on the host.
+ *
  * Built WITHOUT -msasregparm: clients call the table with GCC's stack
  * convention. -m68060 -m68881 together (docs/core.md).
  */
@@ -43,6 +48,8 @@ const char Back_IdString[] =
 #define HEAP_GPU    0x02000000UL
 #define RING_DW     65536UL         /* 256 KB */
 #define FENCE_REG   R_SCRATCH_REG2
+#define REC_DW      (512UL * 1024)  /* a recorded frame: 2 MB of packets at most */
+#define DUMP_MAGIC  0x5232444dUL    /* 'R2DM' */
 
 struct Rgl
 {
@@ -59,6 +66,9 @@ struct Rgl
     ULONG last_dwords;
     ULONG unimpl[(DISPATCH_SLOTS + 31) / 32];
     char log[160];
+    ULONG dump_frame;           /* 0: no dump */
+    ULONG dump_written;         /* dwords of packets written, 0 = none */
+    char dump_path[160];
 };
 
 GLcontext Rgl_CurrentContext = 0;
@@ -177,6 +187,13 @@ static void WriteLog(struct Rgl *r)
         Put(f, ", value "); PutX(f, r->card.first.value); Put(f, "\n");
     }
     Put(f, "GL error pending: "); PutX(f, r->core.error); Put(f, "\n");
+    if (r->dump_written != 0)
+    {
+        Put(f, "frame dumped to "); Put(f, r->dump_path); Put(f, ": ");
+        PutU(f, r->dump_written); Put(f, " dwords of packets, ");
+        PutU(f, Heap_Top(&r->core)); Put(f, " bytes of texture heap, ");
+        PutU(f, r->card.rec_lost); Put(f, " packets lost\n");
+    }
     Put(f, "slots called but not implemented:");
     for (i = 0; i < DISPATCH_SLOTS; i++)
         if ((r->unimpl[i / 32] | unimpl_early[i / 32]) & (1UL << (i % 32)))
@@ -190,8 +207,46 @@ static void WriteLog(struct Rgl *r)
 
 /* --- Context ------------------------------------------------------------------------- */
 
+/* The recorded frame and the texture heap, as big-endian dwords:
+ * magic, version, stream swap, texel swap, width, height, colour GPU,
+ * pitch, format, depth GPU, pitch, heap GPU, heap bytes, packet dwords,
+ * frame number; the packets; the heap. */
+static void WriteDump(struct Rgl *r)
+{
+    BPTR f;
+    ULONG h[15];
+    ULONG top;
+
+    f = Open((STRPTR) r->dump_path, MODE_NEWFILE);
+    if (f == 0)
+        return;
+    top = Heap_Top(&r->core);
+    h[0] = DUMP_MAGIC;
+    h[1] = 1;
+    h[2] = r->ring.cs.swap;
+    h[3] = r->core.tex_swap;
+    h[4] = r->core.target.width;
+    h[5] = r->core.target.height;
+    h[6] = r->core.target.color_gpu;
+    h[7] = r->core.target.color_pitch;
+    h[8] = r->core.target.color_format;
+    h[9] = r->core.target.depth_gpu;
+    h[10] = r->core.target.depth_pitch;
+    h[11] = r->core.heap.gpu;
+    h[12] = top;
+    h[13] = r->card.rec_n;
+    h[14] = r->frame;
+    Write(f, h, sizeof(h));
+    Write(f, r->card.rec, (LONG) (r->card.rec_n * 4));
+    Write(f, r->heap_mem, (LONG) top);
+    Close(f);
+    r->dump_written = r->card.rec_n;
+}
+
 static void FreeRgl(struct Rgl *r)
 {
+    if (r->card.rec != NULL)
+        FreeVec(r->card.rec);
     Core_Free(&r->core);
     if (r->win != NULL)
     {
@@ -245,6 +300,13 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     if (n <= 0)
         for (i = 0; i < sizeof("PROGDIR:radeongl.log"); i++)
             r->log[i] = "PROGDIR:radeongl.log"[i];
+    n = GetVar((STRPTR) "RadeonGLDump", (STRPTR) r->dump_path, sizeof(r->dump_path), 0);
+    for (i = 0; n > 0 && i < (ULONG) n && r->dump_path[i] >= '0' && r->dump_path[i] <= '9'; i++)
+        r->dump_frame = r->dump_frame * 10 + (ULONG) (r->dump_path[i] - '0');
+    n = GetVar((STRPTR) "RadeonGLDumpFile", (STRPTR) r->dump_path, sizeof(r->dump_path), 0);
+    if (n <= 0)
+        for (i = 0; i < sizeof("PROGDIR:radeongl-frame.r2d"); i++)
+            r->dump_path[i] = "PROGDIR:radeongl-frame.r2d"[i];
 
     /* rows a multiple of 32 bytes: the present reads the back buffer as a
      * texture (R200 TXPITCH, Mesa); 16 pixels at 16 bits */
@@ -352,6 +414,25 @@ void Hook_MGLSwitchDisplay(GLcontext context)
     if (dw > r->frame_dw_max)
         r->frame_dw_max = dw;
     r->last_dwords = r->card.dwords;
+    if (r->dump_frame != 0)
+    {
+        if (r->frame + 1 == r->dump_frame && r->card.rec == NULL)
+        {
+            /* record the next frame, from a full state */
+            r->card.rec = (ULONG *) AllocVec(REC_DW * 4, MEMF_ANY);
+            r->card.rec_max = REC_DW;
+            r->card.rec_n = 0;
+            r->core.dirty |= D_INIT;
+            r->core.hw_units = 0xffffffffUL;
+        }
+        else if (r->frame == r->dump_frame && r->card.rec != NULL)
+        {
+            WriteDump(r);
+            FreeVec(r->card.rec);
+            r->card.rec = NULL;
+            r->dump_frame = 0;
+        }
+    }
     r->frame++;
 }
 

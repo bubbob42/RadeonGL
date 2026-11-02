@@ -212,6 +212,59 @@ static void test_present(void)
     CHECK_HEX(Sim_Pixel(&sim, SCREEN_GPU, 640, R_COLOR_FORMAT_ARGB8888, 10, 10), 0);   /* outside: untouched */
 }
 
+static void PutBE(FILE *f, ULONG v)
+{
+    fputc((int) (v >> 24), f);
+    fputc((int) ((v >> 16) & 255), f);
+    fputc((int) ((v >> 8) & 255), f);
+    fputc((int) (v & 255), f);
+}
+
+/* The dump the library writes (lib/rgl.c WriteDump), from a host scene,
+ * through the viewer's loader: the same picture must come out. */
+static void test_dump(void)
+{
+    FILE *f;
+    ULONG i;
+    ULONG n;
+    ULONG top;
+    static struct Sim view;
+    unsigned char hdr[32];
+    unsigned char px[3];
+    long off;
+
+    test_clear_and_triangle();
+    n = (ULONG) (cs.ptr - stream);
+    top = Heap_Top(&core);
+    f = fopen("build/host/sim-test.r2d", "wb");
+    CHECK(f != NULL);
+    if (f == NULL)
+        return;
+    PutBE(f, 0x5232444dUL); PutBE(f, 1); PutBE(f, cs.swap); PutBE(f, core.tex_swap);
+    PutBE(f, W_); PutBE(f, H_); PutBE(f, COLOR_GPU); PutBE(f, W_); PutBE(f, R_COLOR_FORMAT_RGB565);
+    PutBE(f, DEPTH_GPU); PutBE(f, W_); PutBE(f, TEX_GPU); PutBE(f, top); PutBE(f, n); PutBE(f, 1);
+    for (i = 0; i < n; i++)
+        PutBE(f, stream[i]);
+    for (i = 0; i < top / 4; i++)
+        PutBE(f, vram[TEX_GPU / 4 + i]);
+    fclose(f);
+    CHECK_INT(Sim_RenderDump("build/host/sim-test.r2d", "build/host/sim-dump.ppm", &view), 0);
+    CHECK_INT(view.unsupported, 0);
+    /* the pixel at GL (160, 100): row H - 1 - 100 */
+    f = fopen("build/host/sim-dump.ppm", "rb");
+    CHECK(f != NULL);
+    if (f == NULL)
+        return;
+    CHECK(fread(hdr, 1, 15, f) == 15);      /* "P6\n320 240\n255\n" */
+    off = 15 + 3L * ((H_ - 1 - 100) * W_ + 160);
+    fseek(f, off, SEEK_SET);
+    CHECK(fread(px, 1, 3, f) == 3);
+    fclose(f);
+    CHECK_INT(px[0], 255);
+    CHECK_INT(px[1], 0);
+    CHECK_INT(px[2], 0);
+}
+
 int main(void)
 {
     vram = (ULONG *) calloc(1, VRAM_SIZE);
@@ -220,6 +273,7 @@ int main(void)
     test_depth_and_cull();
     test_textures();
     test_present();
+    test_dump();
     Core_Free(&core);
     free(vram);
     return tk_done("test_sim");

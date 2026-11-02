@@ -87,6 +87,18 @@ void Heap_Free(struct Core *c, ULONG offset)
     }
 }
 
+ULONG Heap_Top(const struct Core *c)
+{
+    struct CoreHeapBlock *b;
+    ULONG top;
+
+    top = 0;
+    for (b = c->heap.blocks; b != NULL; b = b->next)
+        if (b->offset + b->size > top)
+            top = b->offset + b->size;
+    return top;
+}
+
 void Heap_FreeAll(struct Core *c)
 {
     struct CoreHeapBlock *b;

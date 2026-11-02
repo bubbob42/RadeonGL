@@ -38,6 +38,11 @@ struct NullCard
     struct R2ChkCfg cfg;
     struct R2ChkState st;
     struct R2Hw hw;
+    /* recording (the frame dump): every packet read is appended here */
+    ULONG *rec;
+    ULONG  rec_n;
+    ULONG  rec_max;
+    ULONG  rec_lost;        /* packets that did not fit */
 };
 
 void NullCard_Init(struct NullCard *n, ULONG *ring, ULONG size, ULONG swap,

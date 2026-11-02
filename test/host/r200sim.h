@@ -55,4 +55,8 @@ ULONG Sim_Pixel(const struct Sim *s, ULONG gpu, ULONG pitch_px, ULONG format,
 int Sim_WritePPM(const struct Sim *s, const char *path, ULONG gpu, ULONG pitch_px,
                  ULONG format, ULONG w, ULONG h);
 
+/* Render a frame dump (lib/rgl.c WriteDump, RadeonGLDump=N) to a PPM.
+ * Returns 0, or -1 with a message on stderr. */
+int Sim_RenderDump(const char *dump, const char *ppm, struct Sim *s);
+
 #endif

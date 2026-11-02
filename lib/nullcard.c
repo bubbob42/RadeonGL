@@ -51,6 +51,14 @@ static ULONG Step(struct NullCard *n)
         for (i = 0; i <= R2_PKT_COUNT(h); i++)
             if (R2_PKT0_REG(h) + 4 * i == n->fence_reg)
                 n->fence_val = Val(n, n->rptr + 1 + i);
+    if (n->rec != NULL)
+    {
+        if (n->rec_n + len <= n->rec_max)
+            for (i = 0; i < len; i++)
+                n->rec[n->rec_n++] = n->ring[n->rptr + i];
+        else
+            n->rec_lost++;
+    }
     n->rptr = (n->rptr + len) & (n->size - 1);
     n->packets++;
     n->dwords += len;

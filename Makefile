@@ -788,8 +788,13 @@ build/host/test_core: build/host/test_core.o build/host/simcp.o $(HOST_CORE_OBJS
 build/host/test_sim: build/host/test_sim.o build/host/r200sim.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
+# r200view DUMP.r2d OUT.ppm: a GLQuake frame dumped by the library
+# (RadeonGLDump=N) rendered on the Mac.
+build/host/r200view: build/host/r200view.o build/host/r200sim.o
+	$(HOSTCC) $^ -o $@
+
 .PHONY: test
-test: build/host/test_r200 build/host/test_core build/host/test_sim
+test: build/host/test_r200 build/host/test_core build/host/test_sim build/host/r200view
 	./build/host/test_r200
 	./build/host/test_core
 	./build/host/test_sim

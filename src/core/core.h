@@ -359,5 +359,6 @@ LONG  Heap_Init(struct CoreHeap *h, ULONG gpu, ULONG *cpu, ULONG size);
 ULONG Heap_Alloc(struct Core *c, ULONG size, ULONG align);   /* byte offset, or ~0 */
 void  Heap_Free(struct Core *c, ULONG offset);
 void  Heap_FreeAll(struct Core *c);
+ULONG Heap_Top(const struct Core *c);  /* end of the highest allocation, bytes */
 
 #endif /* CORE_CORE_H */

@@ -3,6 +3,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "r200sim.h"
 #include "r2pm4.h"
@@ -792,4 +793,77 @@ int Sim_WritePPM(const struct Sim *s, const char *path, ULONG gpu, ULONG pitch_p
         }
     fclose(f);
     return 0;
+}
+
+static ULONG BE(const unsigned char *p)
+{
+    return ((ULONG) p[0] << 24) | ((ULONG) p[1] << 16) | ((ULONG) p[2] << 8) | p[3];
+}
+
+int Sim_RenderDump(const char *dump, const char *ppm, struct Sim *s)
+{
+    FILE *f;
+    long len;
+    unsigned char *b;
+    ULONG h[15];
+    ULONG i;
+    ULONG vsize;
+    ULONG *vram;
+    ULONG *stream;
+    ULONG end;
+
+    f = fopen(dump, "rb");
+    if (f == NULL)
+    {
+        fprintf(stderr, "r200view: cannot open %s\n", dump);
+        return -1;
+    }
+    fseek(f, 0, SEEK_END);
+    len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    b = (unsigned char *) malloc((size_t) len);
+    if (b == NULL || fread(b, 1, (size_t) len, f) != (size_t) len || len < 60)
+    {
+        fclose(f);
+        free(b);
+        fprintf(stderr, "r200view: cannot read %s\n", dump);
+        return -1;
+    }
+    fclose(f);
+    for (i = 0; i < 15; i++)
+        h[i] = BE(b + 4 * i);
+    if (h[0] != 0x5232444dUL || h[1] != 1
+        || (unsigned long) len < 60 + 4UL * h[13] + h[12])
+    {
+        free(b);
+        fprintf(stderr, "r200view: %s is no frame dump (version 1)\n", dump);
+        return -1;
+    }
+    /* VRAM from GPU address 0 up to the highest buffer */
+    end = h[11] + h[12];
+    if (h[6] + h[7] * h[5] * 4 > end) end = h[6] + h[7] * h[5] * 4;
+    if (h[9] + h[10] * h[5] * 2 > end) end = h[9] + h[10] * h[5] * 2;
+    vsize = (end + 0xfffUL) & ~0xfffUL;
+    vram = (ULONG *) calloc(1, vsize);
+    stream = (ULONG *) malloc(4 * (size_t) h[13] + 4);
+    if (vram == NULL || stream == NULL)
+    {
+        free(b);
+        free(vram);
+        free(stream);
+        fprintf(stderr, "r200view: out of memory\n");
+        return -1;
+    }
+    for (i = 0; i < h[13]; i++)
+        stream[i] = BE(b + 60 + 4 * i);
+    for (i = 0; i < h[12] / 4; i++)
+        vram[(h[11] / 4) + i] = BE(b + 60 + 4 * h[13] + 4 * i);
+    Sim_Init(s, vram, 0, vsize, h[2], h[3]);
+    Sim_Run(s, stream, h[13]);
+    i = (ULONG) Sim_WritePPM(s, ppm, h[6], h[7], h[8], h[4], h[5]);
+    free(stream);
+    free(vram);
+    free(b);
+    s->vram = NULL;
+    return (int) (LONG) i;
 }

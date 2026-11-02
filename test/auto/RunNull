@@ -5,13 +5,19 @@
 ; card (DEV:Libs/RadeonGL, added to LIBS: for this run only): timedemo
 ; {demo}, then -timedemoquit ends the program so the library writes its
 ; summary to DEV:Test/null-{demo}-lib.log. GLQuake's own text goes to
-; DEV:Test/null-{demo}.log, a done marker when it is over.
+; DEV:Test/null-{demo}.log, a done marker when it is over. Frame 400 is
+; dumped to DEV:Test/null-{demo}-f400.r2d (on the Mac:
+; build/host/r200view dist/Test/null-{demo}-f400.r2d out.ppm).
 FailAt 1000
 CD DEV:Quake
 SetEnv RadeonGLLog DEV:Test/null-{demo}-lib.log
+SetEnv RadeonGLDump 400
+SetEnv RadeonGLDumpFile DEV:Test/null-{demo}-f400.r2d
 Assign LIBS: DEV:Libs/RadeonGL ADD
 GLQuake -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/null-{demo}.log
 Echo "null {demo} rc=$RC" >>DEV:Test/null-{demo}.log
 Assign LIBS: DEV:Libs/RadeonGL REMOVE
 UnSetEnv RadeonGLLog
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
 Echo >DEV:Test/null-{demo}.done done
