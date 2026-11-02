@@ -247,6 +247,7 @@ struct Core
     /* statistics for tests and the census */
     ULONG stat_prims, stat_verts, stat_splits, stat_state_emits, stat_idle_waits;
     ULONG stat_lock_uploads, stat_lock_draws, stat_stream_wraps;
+    ULONG stat_stream_bytes;    /* written into the stream (vertices + indices): bus bytes */
 };
 
 #define CORE_NO_PRIM 0xffffffffUL

@@ -966,6 +966,7 @@ static void test_locked(void)
     Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
     CHECK_INT(core.stat_lock_uploads, 1);
     CHECK_INT(core.stat_lock_draws, 2);
+    CHECK_INT(core.stat_stream_bytes, 8 * 4 * 4 + 2 * 3 * 4);  /* 8 vertices, 2 x 6 indices */
     /* a current colour without a colour array is in the packed vertices:
      * a new one writes them again, the same one does not */
     Core_Color4ub(&core, 1, 2, 3, 4);

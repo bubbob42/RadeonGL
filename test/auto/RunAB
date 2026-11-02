@@ -1,0 +1,18 @@
+.KEY demo/A,tag/A,locked/A
+.BRA {
+.KET }
+; RunAB -- RunNull for an A/B timing: timedemo {demo} with the checker on,
+; no frame dump, locked arrays on ({locked} = 1) or the immediate way
+; ({locked} = 0, RadeonGLLocked). Output: DEV:Test/ab-{tag}.log (GLQuake's
+; text) + ab-{tag}-lib.log (the library's summary), a done marker.
+FailAt 1000
+CD DEV:Quake
+SetEnv RadeonGLLog DEV:Test/ab-{tag}-lib.log
+SetEnv RadeonGLLocked {locked}
+Assign LIBS: DEV:Libs/RadeonGL ADD
+GLQuake -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/ab-{tag}.log
+Echo "ab {tag} rc=$RC" >>DEV:Test/ab-{tag}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+UnSetEnv RadeonGLLog
+UnSetEnv RadeonGLLocked
+Echo >DEV:Test/ab-{tag}.done done

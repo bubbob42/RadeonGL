@@ -69,6 +69,7 @@ struct Rgl
     ULONG last_dwords;
     ULONG unimpl[(DISPATCH_SLOTS + 31) / 32];
     char log[160];
+    ULONG no_lock;              /* RadeonGLLocked=0: locked arrays the immediate way */
     const char *err_where;      /* the hook that raised the first GL error */
     ULONG err_arg;              /* its enum argument */
     ULONG dump_frame;           /* 0: no dump */
@@ -189,6 +190,8 @@ static void WriteLog(struct Rgl *r)
     Put(f, "locked draws: "); PutU(f, r->core.stat_lock_draws); Put(f, "\n");
     Put(f, "locked uploads: "); PutU(f, r->core.stat_lock_uploads); Put(f, "\n");
     Put(f, "stream wraps: "); PutU(f, r->core.stat_stream_wraps); Put(f, "\n");
+    Put(f, "stream bytes: "); PutU(f, r->core.stat_stream_bytes);
+    Put(f, r->no_lock ? " (locked arrays OFF: RadeonGLLocked=0)\n" : "\n");
     Put(f, "ring wraps: "); PutU(f, r->ring.stats.wraps); Put(f, "\n");
     Put(f, "texture heap used: "); PutU(f, r->core.heap.used); Put(f, " of ");
     PutU(f, r->heap_size); Put(f, "\n");
@@ -376,6 +379,13 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     {
         FreeRgl(r);
         return NULL;
+    }
+    /* RadeonGLLocked=0: locked arrays go the immediate way (A/B timing; a
+     * way back if indexed draws misbehave on the card) */
+    if (GetVar((STRPTR) "RadeonGLLocked", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
+    {
+        r->no_lock = 1;
+        r->core.stream_size = 0;
     }
 
     /* the client takes its input from this window (mglGetInputWindowHandle) */

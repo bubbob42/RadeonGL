@@ -1,0 +1,45 @@
+; GLQuakeLockAB -- locked arrays from VRAM against the immediate way,
+; timed: the same demo alternately with RadeonGLLocked=1 and 0 (RunAB),
+; checker on, so host-load drift hits both sides alike. Emulated fps
+; compare builds only; the bus figures (dwords, stream bytes) are what
+; carries to the machine.
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 2400
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/ab-#?
+Echo "=== d3-imm-1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunAB demo3 d3-imm-1 0
+Execute DEV:Test/WaitDone DEV:Test/ab-d3-imm-1.done
+Type DEV:Test/ab-d3-imm-1.log >>DEV:Test/auto.log
+Type DEV:Test/ab-d3-imm-1-lib.log >>DEV:Test/auto.log
+Echo "=== d3-lock-1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunAB demo3 d3-lock-1 1
+Execute DEV:Test/WaitDone DEV:Test/ab-d3-lock-1.done
+Type DEV:Test/ab-d3-lock-1.log >>DEV:Test/auto.log
+Type DEV:Test/ab-d3-lock-1-lib.log >>DEV:Test/auto.log
+Echo "=== d3-imm-2 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunAB demo3 d3-imm-2 0
+Execute DEV:Test/WaitDone DEV:Test/ab-d3-imm-2.done
+Type DEV:Test/ab-d3-imm-2.log >>DEV:Test/auto.log
+Type DEV:Test/ab-d3-imm-2-lib.log >>DEV:Test/auto.log
+Echo "=== d3-lock-2 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunAB demo3 d3-lock-2 1
+Execute DEV:Test/WaitDone DEV:Test/ab-d3-lock-2.done
+Type DEV:Test/ab-d3-lock-2.log >>DEV:Test/auto.log
+Type DEV:Test/ab-d3-lock-2-lib.log >>DEV:Test/auto.log
+Echo "=== d2-imm ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunAB demo2 d2-imm 0
+Execute DEV:Test/WaitDone DEV:Test/ab-d2-imm.done
+Type DEV:Test/ab-d2-imm.log >>DEV:Test/auto.log
+Type DEV:Test/ab-d2-imm-lib.log >>DEV:Test/auto.log
+Echo "=== d2-lock ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunAB demo2 d2-lock 1
+Execute DEV:Test/WaitDone DEV:Test/ab-d2-lock.done
+Type DEV:Test/ab-d2-lock.log >>DEV:Test/auto.log
+Type DEV:Test/ab-d2-lock-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

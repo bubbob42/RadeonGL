@@ -337,6 +337,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
             c->lk_st[k][1] = c->cur_st[k][1];
         }
         c->stat_lock_uploads++;
+        c->stat_stream_bytes += lcount * vd * 4;
     }
     /* indices rebased to the lock, two to a dword, the first in the low
      * half as the GPU reads it (Mesa EMIT_TWO_ELTS) */
@@ -361,6 +362,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     R2E_DrawIndexed(c->cs, Vtx_HwPrim(mode) | R_VF_COLOR_ORDER_RGBA | R_VF_TCL_OUTPUT_VTX_ENABLE,
                     n, c->heap.gpu + off, lcount);
     c->stat_lock_draws++;
+    c->stat_stream_bytes += ((n + 1) / 2) * 4;
     return 1;
 }
 
