@@ -962,8 +962,9 @@ RGL_LIB    := dist/Libs/RadeonGL/minigl.library
 RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c | sort -u | paste -sd, -}
 RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
               -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
-              -fno-strict-aliasing -m68060 -m68881 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl -Isrc/core -Isrc/r200
-RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/runtime.o \
+              -fno-strict-aliasing -m68060 -m68881 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl -Isrc/core -Isrc/r200 \
+              -I$(P96_INC)
+RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_MODULES))) \
               $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES)))
@@ -974,7 +975,7 @@ build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dis
 	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' \
 	    --include rgl.h --hooks $(RGL_HOOKS)
 
-build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS)
+build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS)
 	@mkdir -p build/rgl
 	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
 
@@ -996,6 +997,35 @@ $(RGL_LIB): $(RGL_OBJS)
 
 .PHONY: rgl-lib
 rgl-lib: $(RGL_LIB)
+
+# --- GLSmoke: a small MiniGL client for the first runs on the card ----------
+# (glsmoke/glsmoke.c, docs/design-card-backend.md step 5). GCC only: it links
+# the MiniGL SDK's import library, as GLQuake does. dist/GLSmoke holds the
+# program, the library in Libs/, and an IconX script that adds Libs/ to LIBS:
+# for the run (Avail FLUSH first: a resident minigl.library would be reused).
+GLSMOKE := dist/GLSmoke/GLSmoke
+
+$(GLSMOKE): glsmoke/glsmoke.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
+.PHONY: glsmoke
+glsmoke: $(GLSMOKE) $(RGL_LIB)
+	@mkdir -p dist/GLSmoke/Libs
+	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke
+	@printf 'echo "GLSmoke: 300 frames through minigl.library (RadeonGL), then the frame rate."\n' >> dist/GLSmoke/RunGLSmoke
+	@printf 'Avail >NIL: FLUSH\n' >> dist/GLSmoke/RunGLSmoke
+	@printf 'Assign LIBS: DEV:GLSmoke/Libs ADD\n' >> dist/GLSmoke/RunGLSmoke
+	@printf 'SetEnv RadeonGLLog DEV:GLSmoke/glsmoke-lib.log\n' >> dist/GLSmoke/RunGLSmoke
+	@printf 'DEV:GLSmoke/GLSmoke\n' >> dist/GLSmoke/RunGLSmoke
+	@printf 'Assign LIBS: DEV:GLSmoke/Libs REMOVE\n' >> dist/GLSmoke/RunGLSmoke
+	@printf 'UnSetEnv RadeonGLLog\n' >> dist/GLSmoke/RunGLSmoke
+	@printf 'echo "Done. The library log is DEV:GLSmoke/glsmoke-lib.log"\n' >> dist/GLSmoke/RunGLSmoke
+	@cp icons/run.info dist/GLSmoke/RunGLSmoke.info
+	@echo "glsmoke: staged DEV:GLSmoke (GLSmoke, Libs/minigl.library, RunGLSmoke)"
 
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a

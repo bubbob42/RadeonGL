@@ -1,0 +1,25 @@
+; GLSmokeNull -- GLSmoke through the RadeonGL minigl.library where there is
+; no Radeon: the null card (uaegfx in FS-UAE). The client must open the
+; library, draw its 300 frames checker-clean (the library's log, which
+; must say "RadeonGL null card" and "checker errors: 0"), and end.
+; Needs: gmake glsmoke.
+; LIMIT 300
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLLog DEV:Test/glsmoke-lib.log
+Echo "=== GLSmoke ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLSmoke >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== GLSmoke NOSUB FRAMES=100 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLSmoke NOSUB FRAMES=100 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+UnSetEnv RadeonGLLog
+Echo "=== the library's log (the second run) ===" >>DEV:Test/auto.log
+Type DEV:Test/glsmoke-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

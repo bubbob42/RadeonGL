@@ -1,7 +1,13 @@
 /*
  * rgl.c -- the RadeonGL back end of minigl.library: the dispatch hooks
- * (SDK types in, the core's types out), the context, and for milestone 2
- * the null card (nullcard.h) in place of a Radeon.
+ * (SDK types in, the core's types out), the context, and what runs it:
+ * the Radeon (card.h: an R200 on the board P96 offers) or, without one,
+ * the null card (nullcard.h), which checks every packet and draws nothing.
+ *
+ * RadeonGLCard=null forces the null card on a machine with a Radeon;
+ * RadeonGLCard=radeon refuses rather than fall back. A Radeon that is found
+ * but cannot be used refuses the context, with the reason in the log and a
+ * requester.
  *
  * One context at a time, owned by the task that made it (concept 7.1).
  * The hooks ignore their context argument: there is only `rgl`.
@@ -11,10 +17,11 @@
  * dwords, draws, packet-checker errors with the first one decoded, and
  * every dispatch slot called that is not implemented yet.
  *
- * RadeonGLCheck=0 makes the null card consume the ring without the
- * packet checker, so a timedemo times the emitter alone.
+ * RadeonGLCheck=0 switches the packet checker off: the null card consumes
+ * the ring unchecked (a timedemo times the emitter alone), the Radeon runs
+ * each flush unchecked.
  *
- * Frame dump: with RadeonGLDump=N the null card records frame N (the core
+ * Frame dump (null card only): with RadeonGLDump=N the null card records frame N (the core
  * re-emits its whole state at that frame's start, so the recording stands
  * alone) and writes it with the texture heap to RadeonGLDumpFile (default
  * PROGDIR:radeongl-frame.r2d). test/host/r200view renders it on the host.
@@ -40,9 +47,10 @@
 #include "r2check.h"
 #include "r200reg.h"
 #include "nullcard.h"
+#include "card.h"
 
 const char Back_IdString[] =
-    "$VER: minigl.library 29.1 (02.11.2026) RadeonGL null card (checks, draws nothing), dispatch ABI 5\r\n";
+    "$VER: minigl.library 29.1 (02.11.2026) RadeonGL (R200 through P96; null card without one), dispatch ABI 5\r\n";
 
 /* The fake GPU address map of the null card. */
 #define RING_GPU    0x00100000UL
@@ -57,6 +65,8 @@ const char Back_IdString[] =
 struct Rgl
 {
     struct Core core;
+    ULONG real;                 /* the Radeon (rad), else the null card */
+    struct Card rad;
     struct R2Ring ring;
     struct NullCard card;
     ULONG *ring_mem;
@@ -79,6 +89,7 @@ struct Rgl
 
 GLcontext Rgl_CurrentContext = 0;
 static struct Rgl *rgl = NULL;
+static ULONG choose_depth = 16;     /* mglChoosePixelDepth */
 static ULONG unimpl_early[(DISPATCH_SLOTS + 31) / 32];
 
 /* --- Memory and the core's environment ------------------------------------------ */
@@ -98,7 +109,23 @@ static void EnvFree(APTR env, APTR mem, ULONG size)
 
 static LONG EnvIdle(APTR env)
 {
-    return R2Ring_Idle(&((struct Rgl *) env)->ring);
+    struct Rgl *r;
+
+    r = (struct Rgl *) env;
+    if (r->real)
+        return Card_WaitIdle(&r->rad);
+    return R2Ring_Idle(&r->ring);
+}
+
+/* The Radeon's heap is reached only inside a lock (card.h). */
+static ULONG *EnvVramBegin(APTR env)
+{
+    return Card_VramBegin(&((struct Rgl *) env)->rad);
+}
+
+static void EnvVramEnd(APTR env)
+{
+    Card_VramEnd(&((struct Rgl *) env)->rad);
 }
 
 /* The checker reads the indices of every indexed draw from the heap
@@ -168,15 +195,113 @@ static void PutX(BPTR f, ULONG v)
     Put(f, b);
 }
 
+static void PutSlots(struct Rgl *r, BPTR f)
+{
+    ULONG i;
+
+    Put(f, "slots called but not implemented:");
+    for (i = 0; i < DISPATCH_SLOTS; i++)
+        if ((r->unimpl[i / 32] | unimpl_early[i / 32]) & (1UL << (i % 32)))
+        {
+            Put(f, " ");
+            Put(f, Rgl_SlotName[i]);
+        }
+    Put(f, "\n");
+}
+
+static void WriteCardLog(struct Rgl *r, BPTR f)
+{
+    struct Card *k;
+    const char *name;
+
+    k = &r->rad;
+    Put(f, "RadeonGL on the Radeon (PCI "); PutX(f, k->pci_id); Put(f, ")\n");
+    Put(f, "screen: "); PutU(f, k->width); Put(f, " x "); PutU(f, k->height);
+    Put(f, k->bpp == 2 ? ", 16 bit (R5G6B5PC)\n" : ", 32 bit (B8G8R8A8)\n");
+    Put(f, "frames: "); PutU(f, r->frame); Put(f, "\n");
+    Put(f, "flushes: "); PutU(f, k->flushes); Put(f, ", presents: "); PutU(f, k->presents);
+    Put(f, ", without the screen on the board: "); PutU(f, k->noscreen); Put(f, "\n");
+    Put(f, "frames dropped: "); PutU(f, k->dropped); Put(f, " (bitmaps moved "); PutU(f, k->moved);
+    Put(f, ", off the board "); PutU(f, k->offboard); Put(f, ")\n");
+    Put(f, "dwords: "); PutU(f, k->dwords); Put(f, "\n");
+    Put(f, "lock per flush: mean "); PutU(f, k->flushes ? k->lock_us_sum / k->flushes : 0);
+    Put(f, " us, max "); PutU(f, k->lock_us_max); Put(f, " us; fence wait max ");
+    PutU(f, k->fence_us_max); Put(f, " us\n");
+    Put(f, "heap locks for texture uploads: "); PutU(f, k->vram_locks);
+    Put(f, ", uploads lost (heap out of reach): "); PutU(f, r->core.stat_vram_lost); Put(f, "\n");
+    Put(f, "CP resets: "); PutU(f, k->cp_resets); Put(f, "\n");
+    Put(f, "idle waits (flushes for texture hazards and stream wraps): ");
+    PutU(f, r->core.stat_idle_waits); Put(f, "\n");
+    Put(f, "locked draws: "); PutU(f, r->core.stat_lock_draws); Put(f, ", uploads: ");
+    PutU(f, r->core.stat_lock_uploads); Put(f, ", stream bytes: ");
+    PutU(f, r->core.stat_stream_bytes); Put(f, "\n");
+    Put(f, "texture heap used: "); PutU(f, r->core.heap.used); Put(f, " of ");
+    PutU(f, k->heap_size); Put(f, "\n");
+    Put(f, "checker: "); Put(f, k->check ? "on" : "OFF (RadeonGLCheck=0)"); Put(f, "\n");
+    if (k->lost != 0)
+    {
+        Put(f, "CONTEXT LOST: ");
+        Put(f, k->lost == CARD_LOST_CHECKER ? "the checker refused a packet"
+             : k->lost == CARD_LOST_FENCE ? "a fence timed out" : "the CP would not start or stop");
+        Put(f, "\n");
+        if (k->lost == CARD_LOST_CHECKER)
+        {
+            Put(f, "  "); Put(f, R2Chk_ErrorName(k->err_code));
+            Put(f, " at dword "); PutU(f, k->err.at);
+            Put(f, ", what "); PutX(f, k->err.what);
+            name = R2Chk_RegName(k->err.what);
+            if (name != NULL)
+            {
+                Put(f, " ("); Put(f, name); Put(f, ")");
+            }
+            Put(f, ", value "); PutX(f, k->err.value); Put(f, "\n");
+        }
+    }
+    Put(f, "GL error pending: "); PutX(f, r->core.error); Put(f, "\n");
+    if (r->err_where != NULL)
+    {
+        Put(f, "first GL error raised by "); Put(f, r->err_where);
+        Put(f, ", argument "); PutX(f, r->err_arg); Put(f, "\n");
+    }
+    PutSlots(r, f);
+}
+
+/* A context refused on a Radeon: why, in the log and a requester. */
+static void Refused(struct Rgl *r, const char *why)
+{
+    struct EasyStruct es;
+    BPTR f;
+
+    f = Open((STRPTR) r->log, MODE_NEWFILE);
+    if (f != 0)
+    {
+        Put(f, "RadeonGL: the Radeon cannot be used: ");
+        Put(f, why);
+        Put(f, "\n");
+        Close(f);
+    }
+    es.es_StructSize = sizeof(es);
+    es.es_Flags = 0;
+    es.es_Title = (UBYTE *) "RadeonGL";
+    es.es_TextFormat = (UBYTE *) "The Radeon cannot be used:\n%s";
+    es.es_GadgetFormat = (UBYTE *) "OK";
+    EasyRequest(NULL, &es, NULL, (ULONG) why);
+}
+
 static void WriteLog(struct Rgl *r)
 {
     BPTR f;
-    ULONG i;
     const char *name;
 
     f = Open((STRPTR) r->log, MODE_NEWFILE);
     if (f == 0)
         return;
+    if (r->real)
+    {
+        WriteCardLog(r, f);
+        Close(f);
+        return;
+    }
     Put(f, "RadeonGL null card\n");
     Put(f, "frames: "); PutU(f, r->frame); Put(f, "\n");
     Put(f, "packets: "); PutU(f, r->card.packets); Put(f, "\n");
@@ -224,14 +349,7 @@ static void WriteLog(struct Rgl *r)
         PutU(f, Heap_Top(&r->core)); Put(f, " bytes of texture heap, ");
         PutU(f, r->card.rec_lost); Put(f, " packets lost\n");
     }
-    Put(f, "slots called but not implemented:");
-    for (i = 0; i < DISPATCH_SLOTS; i++)
-        if ((r->unimpl[i / 32] | unimpl_early[i / 32]) & (1UL << (i % 32)))
-        {
-            Put(f, " ");
-            Put(f, Rgl_SlotName[i]);
-        }
-    Put(f, "\n");
+    PutSlots(r, f);
     Close(f);
 }
 
@@ -278,6 +396,8 @@ static void FreeRgl(struct Rgl *r)
     if (r->card.rec != NULL)
         FreeVec(r->card.rec);
     Core_Free(&r->core);
+    if (r->real)
+        Card_Close(&r->rad);
     if (r->win != NULL)
     {
         ModifyIDCMP(r->win, 0);
@@ -294,14 +414,88 @@ void Back_Init(void)
 {
 }
 
+/* The null card's ring and heap in fast RAM, and its checker. FALSE when
+ * there is no memory for them. */
+static BOOL NullCardOpen(struct Rgl *r, ULONG w, ULONG h, ULONG check, struct CoreTarget *t)
+{
+    struct R2ChkCfg cfg;
+    ULONG pitch;
+    ULONG i;
+
+    r->ring_mem = (ULONG *) AllocVec(RING_DW * 4, MEMF_ANY | MEMF_CLEAR);
+    /* the texture heap: as much of 32 MB as there is */
+    for (r->heap_size = 32UL << 20; r->heap_size >= (4UL << 20); r->heap_size >>= 1)
+    {
+        r->heap_mem = (ULONG *) AllocVec(r->heap_size, MEMF_ANY);
+        if (r->heap_mem != NULL)
+            break;
+    }
+    if (r->ring_mem == NULL || r->heap_mem == NULL)
+        return FALSE;
+
+    /* rows a multiple of 32 bytes: the present reads the back buffer as a
+     * texture (R200 TXPITCH, Mesa); 16 pixels at 16 bits */
+    pitch = (w + 15) & ~15UL;
+    for (i = 0; i < sizeof(cfg); i++)
+        ((UBYTE *) &cfg)[i] = 0;
+    cfg.range[0].gpu = COLOR_GPU; cfg.range[0].size = pitch * h * 2; cfg.range[0].kinds = R2K_COLOR;
+    cfg.range[1].gpu = DEPTH_GPU; cfg.range[1].size = pitch * h * 2; cfg.range[1].kinds = R2K_DEPTH;
+    cfg.range[2].gpu = HEAP_GPU;  cfg.range[2].size = r->heap_size;
+    cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;      /* textures, the stream */
+    cfg.nranges = 3;
+    cfg.peek = HeapPeek;
+    cfg.peek_ctx = r;
+    cfg.fence_reg = FENCE_REG;
+    NullCard_Init(&r->card, r->ring_mem, RING_DW, 1, FENCE_REG, &cfg);
+    r->card.no_check = check ? 0 : 1;
+    if (R2Ring_Init(&r->ring, r->ring_mem, RING_GPU, RING_DW, &r->card.hw, 1, FENCE_REG,
+                    1000000) != R2_OK)
+        return FALSE;
+    r->ring.kick = 2048;        /* hand work to the "GPU" every 8 KB */
+
+    t->width = w;
+    t->height = h;
+    t->color_gpu = COLOR_GPU;
+    t->color_pitch = pitch;
+    t->color_format = R_COLOR_FORMAT_RGB565;
+    t->depth_gpu = DEPTH_GPU;
+    t->depth_pitch = pitch;
+    return TRUE;
+}
+
+/* The null card's window: the client takes its input from it. */
+static void NullCardWindow(struct Rgl *r)
+{
+    struct Screen *scr;
+
+    scr = LockPubScreen(NULL);
+    if (scr == NULL)
+        return;
+    r->win = OpenWindowTags(NULL,
+        WA_PubScreen, (ULONG) scr,
+        WA_Left, 20,
+        WA_Top, 20,
+        WA_InnerWidth, 320UL,
+        WA_InnerHeight, 120UL,
+        WA_Title, (ULONG) "RadeonGL null card -- checks, draws nothing",
+        WA_DragBar, TRUE,
+        WA_DepthGadget, TRUE,
+        WA_Activate, TRUE,
+        WA_RMBTrap, TRUE,
+        WA_NoCareRefresh, TRUE,
+        TAG_DONE);
+    UnlockPubScreen(NULL, scr);
+}
+
 void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
 {
     struct Rgl *r;
-    struct R2ChkCfg cfg;
     struct CoreTarget t;
     struct CoreEnv env;
-    struct Screen *scr;
-    ULONG pitch;
+    char why[96];
+    char which[12];
+    ULONG check;
+    ULONG res;
     LONG n;
     ULONG i;
     char flag[8];
@@ -314,71 +508,63 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     if (r == NULL)
         return NULL;
     r->owner = FindTask(NULL);
-    r->ring_mem = (ULONG *) AllocVec(RING_DW * 4, MEMF_ANY | MEMF_CLEAR);
-    /* the texture heap: as much of 32 MB as there is */
-    for (r->heap_size = 32UL << 20; r->heap_size >= (4UL << 20); r->heap_size >>= 1)
-    {
-        r->heap_mem = (ULONG *) AllocVec(r->heap_size, MEMF_ANY);
-        if (r->heap_mem != NULL)
-            break;
-    }
-    if (r->ring_mem == NULL || r->heap_mem == NULL)
-    {
-        FreeRgl(r);
-        return NULL;
-    }
     n = GetVar((STRPTR) "RadeonGLLog", (STRPTR) r->log, sizeof(r->log), 0);
     if (n <= 0)
         for (i = 0; i < sizeof("PROGDIR:radeongl.log"); i++)
             r->log[i] = "PROGDIR:radeongl.log"[i];
-    n = GetVar((STRPTR) "RadeonGLDump", (STRPTR) r->dump_path, sizeof(r->dump_path), 0);
-    for (i = 0; n > 0 && i < (ULONG) n && r->dump_path[i] >= '0' && r->dump_path[i] <= '9'; i++)
-        r->dump_frame = r->dump_frame * 10 + (ULONG) (r->dump_path[i] - '0');
-    n = GetVar((STRPTR) "RadeonGLDumpFile", (STRPTR) r->dump_path, sizeof(r->dump_path), 0);
-    if (n <= 0)
-        for (i = 0; i < sizeof("PROGDIR:radeongl-frame.r2d"); i++)
-            r->dump_path[i] = "PROGDIR:radeongl-frame.r2d"[i];
-
-    /* rows a multiple of 32 bytes: the present reads the back buffer as a
-     * texture (R200 TXPITCH, Mesa); 16 pixels at 16 bits */
-    pitch = ((ULONG) w + 15) & ~15UL;
-    for (i = 0; i < sizeof(cfg); i++)
-        ((UBYTE *) &cfg)[i] = 0;
-    cfg.range[0].gpu = COLOR_GPU; cfg.range[0].size = pitch * (ULONG) h * 2; cfg.range[0].kinds = R2K_COLOR;
-    cfg.range[1].gpu = DEPTH_GPU; cfg.range[1].size = pitch * (ULONG) h * 2; cfg.range[1].kinds = R2K_DEPTH;
-    cfg.range[2].gpu = HEAP_GPU;  cfg.range[2].size = r->heap_size;
-    cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;      /* textures, the stream */
-    cfg.nranges = 3;
-    cfg.peek = HeapPeek;
-    cfg.peek_ctx = r;
-    cfg.fence_reg = FENCE_REG;
-    NullCard_Init(&r->card, r->ring_mem, RING_DW, 1, FENCE_REG, &cfg);
+    check = 1;
     if (GetVar((STRPTR) "RadeonGLCheck", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
-        r->card.no_check = 1;
-    if (R2Ring_Init(&r->ring, r->ring_mem, RING_GPU, RING_DW, &r->card.hw, 1, FENCE_REG,
-                    1000000) != R2_OK)
-    {
-        FreeRgl(r);
-        return NULL;
-    }
-    r->ring.kick = 2048;        /* hand work to the "GPU" every 8 KB */
+        check = 0;
 
-    t.width = (ULONG) w;
-    t.height = (ULONG) h;
-    t.color_gpu = COLOR_GPU;
-    t.color_pitch = pitch;
-    t.color_format = R_COLOR_FORMAT_RGB565;
-    t.depth_gpu = DEPTH_GPU;
-    t.depth_pitch = pitch;
+    /* the Radeon, unless told otherwise; the null card without one */
+    which[0] = 0;
+    (void) GetVar((STRPTR) "RadeonGLCard", (STRPTR) which, sizeof(which), 0);
+    res = CARD_NOT_RADEON;
+    if (which[0] != 'n' && which[0] != 'N')
+    {
+        res = Card_Open(&r->rad, (ULONG) w, (ULONG) h, choose_depth, check, why, sizeof(why));
+        if (res == CARD_FAILED
+            || (res == CARD_NOT_RADEON && (which[0] == 'r' || which[0] == 'R')))
+        {
+            Refused(r, res == CARD_FAILED ? why : "there is no R200 Radeon on a P96 board");
+            FreeRgl(r);
+            return NULL;
+        }
+    }
+    r->real = (res == CARD_OK) ? 1 : 0;
+    if (r->real)
+        Card_Target(&r->rad, &t);
+    else
+    {
+        if (!NullCardOpen(r, (ULONG) w, (ULONG) h, check, &t))
+        {
+            FreeRgl(r);
+            return NULL;
+        }
+        n = GetVar((STRPTR) "RadeonGLDump", (STRPTR) r->dump_path, sizeof(r->dump_path), 0);
+        for (i = 0; n > 0 && i < (ULONG) n && r->dump_path[i] >= '0' && r->dump_path[i] <= '9'; i++)
+            r->dump_frame = r->dump_frame * 10 + (ULONG) (r->dump_path[i] - '0');
+        n = GetVar((STRPTR) "RadeonGLDumpFile", (STRPTR) r->dump_path, sizeof(r->dump_path), 0);
+        if (n <= 0)
+            for (i = 0; i < sizeof("PROGDIR:radeongl-frame.r2d"); i++)
+                r->dump_path[i] = "PROGDIR:radeongl-frame.r2d"[i];
+    }
+
     env.alloc = EnvAlloc;
     env.free = EnvFree;
     env.wait_idle = EnvIdle;
     env.env = r;
-    if (Core_Init(&r->core, &r->ring.cs, &env, &t, HEAP_GPU, r->heap_mem, r->heap_size)
-        != GL_NO_ERROR)
+    if (Core_Init(&r->core, r->real ? &r->rad.cs : &r->ring.cs, &env, &t,
+                  r->real ? r->rad.heap_gpu : HEAP_GPU, r->real ? NULL : r->heap_mem,
+                  r->real ? r->rad.heap_size : r->heap_size) != GL_NO_ERROR)
     {
         FreeRgl(r);
         return NULL;
+    }
+    if (r->real)
+    {
+        Card_Attach(&r->rad, &r->core);
+        Core_SetVram(&r->core, EnvVramBegin, EnvVramEnd, r->rad.staging);
     }
     /* RadeonGLLocked=0: locked arrays go the immediate way (A/B timing; a
      * way back if indexed draws misbehave on the card) */
@@ -387,26 +573,8 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         r->no_lock = 1;
         r->core.stream_size = 0;
     }
-
-    /* the client takes its input from this window (mglGetInputWindowHandle) */
-    scr = LockPubScreen(NULL);
-    if (scr != NULL)
-    {
-        r->win = OpenWindowTags(NULL,
-            WA_PubScreen, (ULONG) scr,
-            WA_Left, 20,
-            WA_Top, 20,
-            WA_InnerWidth, 320UL,
-            WA_InnerHeight, 120UL,
-            WA_Title, (ULONG) "RadeonGL null card -- checks, draws nothing",
-            WA_DragBar, TRUE,
-            WA_DepthGadget, TRUE,
-            WA_Activate, TRUE,
-            WA_RMBTrap, TRUE,
-            WA_NoCareRefresh, TRUE,
-            TAG_DONE);
-        UnlockPubScreen(NULL, scr);
-    }
+    if (!r->real)
+        NullCardWindow(r);
     rgl = r;
     return (void *) r;
 }
@@ -419,7 +587,8 @@ void Hook_MGLDeleteContext(GLcontext context)
     r = rgl;
     if (r == NULL)
         return;
-    R2Ring_Idle(&r->ring);
+    if (!r->real)
+        R2Ring_Idle(&r->ring);
     WriteLog(r);
     rgl = NULL;
     Rgl_CurrentContext = 0;
@@ -449,8 +618,15 @@ void Hook_MGLSwitchDisplay(GLcontext context)
     r = rgl;
     if (r == NULL)
         return;
-    /* end of frame: a fence, hand it over, wait (the null card is instant;
-     * the Radeon will present here) */
+    if (r->real)
+    {
+        /* end of frame: one flush shows it, then every texture is free */
+        (void) Card_Flush(&r->rad, TRUE);
+        Core_GpuIdle(&r->core);
+        r->frame++;
+        return;
+    }
+    /* end of frame: a fence, hand it over, wait (the null card is instant) */
     if (R2Ring_Fence(&r->ring, &seq) == R2_OK && R2Ring_WaitFence(&r->ring, seq) == R2_OK)
         Core_GpuIdle(&r->core);     /* every texture is free to rewrite */
     dw = r->card.dwords - r->last_dwords;
@@ -493,7 +669,9 @@ void Hook_MGLUnlockDisplay(GLcontext context)
 void *Hook_MGLGetWindowHandle(GLcontext context)
 {
     (void) context;
-    return (rgl != NULL) ? (void *) rgl->win : NULL;
+    if (rgl == NULL)
+        return NULL;
+    return rgl->real ? (void *) rgl->rad.win : (void *) rgl->win;
 }
 
 void *Hook_MGLGetInputWindowHandle(GLcontext context)
@@ -562,7 +740,7 @@ void Hook_MGLSetPointer(GLcontext context)
 void Hook_mglChooseGuardBand(GLboolean flag) { (void) flag; }
 void Hook_mglChooseMtexBufferSize(int size) { (void) size; }
 void Hook_mglChooseNumberOfBuffers(int number) { (void) number; }
-void Hook_mglChoosePixelDepth(int depth) { (void) depth; }
+void Hook_mglChoosePixelDepth(int depth) { choose_depth = (depth > 16) ? 32UL : 16UL; }
 void Hook_mglChooseTextureBufferSize(int size) { (void) size; }
 void Hook_mglChooseVertexBufferSize(int size) { (void) size; }
 void Hook_mglChooseWindowMode(GLboolean flag) { (void) flag; }

@@ -1,0 +1,152 @@
+/*
+ * card.h -- the Radeon behind minigl.library (docs/design-card-backend.md).
+ *
+ * The rules (Picasso96, 2026-11-02; measured by the probes):
+ *  - the card comes through Picasso96: the GL screen's board, a locked
+ *    bitmap's p96GetBitMapAttr bases, P96's chip name and the chip's own
+ *    PCI mirror say it is an R200-family Radeon;
+ *  - every register access, every write into video RAM and every GPU run
+ *    happens inside a lock of a bitmap on the board; nothing of ours runs
+ *    on the chip while P96 may use it;
+ *  - video RAM is friend bitmaps of the GL screen (never displayable), their
+ *    addresses taken anew at every lock: P96 may move an unlocked bitmap.
+ *
+ * The flush (Card_Flush): the core builds the frame in a fast-RAM command
+ * buffer (and the locked-array stream in a fast-RAM staging buffer). At the
+ * end of a frame, or when the buffer fills, ONE lock of the target, the
+ * ring, the heap and the screen covers: the move check, the present, the
+ * packet checker, CP start, the stream and command copies, a fence and its
+ * bounded wait, CP stop. A frame whose bitmaps moved since it was built is
+ * dropped and the core rebased.
+ *
+ * Texture uploads lock the heap briefly (Card_VramBegin/End): the GPU is
+ * idle outside flushes, so the core's texture hazards wait by flushing
+ * (Card_WaitIdle).
+ *
+ * Nothing here prints: while a lock is held no console may be written, and
+ * the library's log is written at context deletion.
+ */
+
+#ifndef RADEONGL_CARD_H
+#define RADEONGL_CARD_H
+
+#include <exec/types.h>
+#include <intuition/intuition.h>
+#include <graphics/gfx.h>
+
+#include "core.h"
+#include "r2cs.h"
+#include "r2ring.h"
+#include "r2cp.h"
+#include "r2check.h"
+
+#define CARD_TARGET  0          /* colour, then Z16 */
+#define CARD_RING    1
+#define CARD_HEAP    2
+#define CARD_SCREEN  3          /* the GL screen's own bitmap (not ours to free) */
+#define CARD_NBM     4
+
+#define CARD_RING_DW  65536UL   /* 256 KB */
+#define CARD_CMD_DW   65536UL   /* the fast-RAM command buffer, 256 KB */
+#define CARD_RESERVE  2048UL    /* of it kept for the present and the fence */
+#define CARD_ROW      4096UL    /* bytes a row of the data bitmaps */
+
+/* Card_Open results */
+#define CARD_OK          0
+#define CARD_NOT_RADEON  1      /* no Radeon on the board P96 offers: use the null card */
+#define CARD_FAILED      2      /* a Radeon, but it cannot be used: why[] says */
+
+struct CardBm
+{
+    struct BitMap *bm;
+    ULONG bytes;                /* asked for (data bitmaps) */
+    LONG lock;
+    UBYTE *mem;                 /* inside a lock */
+    ULONG bpr;
+    ULONG gpu;                  /* GPU address of mem, inside a lock */
+};
+
+struct Card
+{
+    struct Screen *scr;
+    struct Window *win;
+    struct CardBm b[CARD_NBM];
+    ULONG width, height;
+    ULONG bpp;                  /* bytes a pixel of the screen (2 or 4) */
+    ULONG color_format;         /* R_COLOR_FORMAT_RGB565 or _ARGB8888 */
+    ULONG pitch;                /* the target's pitch in pixels */
+    ULONG color_bytes, depth_bytes;
+    ULONG heap_size;
+    ULONG heap_delta;           /* where the heap starts in its bitmap (fixed at the open) */
+
+    /* the chip (from the first lock) */
+    APTR mmio;
+    APTR membase;
+    ULONG mmio_swap;
+    ULONG fb_start;             /* MC_FB_LOCATION: GPU address of video RAM */
+    ULONG ap_size;              /* CONFIG_APER_SIZE */
+    ULONG pci_id;               /* the chip's PCI mirror: device << 16 | vendor */
+
+    /* the addresses the current commands were built with */
+    ULONG color_gpu, depth_gpu, heap_gpu;
+
+    struct R2Hw hw;
+    struct R2CpSaved saved;
+    struct R2Ring ring;
+    struct MsgPort *tport;
+    struct timerequest *treq;
+    ULONG clock_base;
+
+    struct Core *core;
+    struct R2Cs cs;             /* the core writes here: the command buffer */
+    ULONG *cmd;
+    ULONG *staging;             /* the locked-array stream, CORE_STREAM_BYTES */
+    ULONG copied;               /* stream bytes already in video RAM */
+    ULONG gen;                  /* the core's stream_gen they belong to */
+    ULONG in_flush;
+    ULONG vram_lock;            /* Card_VramBegin holds the heap */
+
+    ULONG check;                /* run the packet checker before the CP */
+    struct R2ChkCfg cfg;
+    struct R2ChkState chk;
+    struct R2ChkError err;
+    LONG err_code;
+
+    LONG lost;                  /* 0, or why the context was lost (CARD_LOST_*) */
+
+    /* for the log */
+    ULONG flushes, presents, dropped, moved, offboard, noscreen;
+    ULONG dwords, fence_us_max, lock_us_max, lock_us_sum, vram_locks, cp_resets;
+};
+
+#define CARD_LOST_CHECKER  1    /* the checker refused a packet */
+#define CARD_LOST_FENCE    2    /* a fence timed out */
+#define CARD_LOST_CP       3    /* the CP would not start or stop */
+
+/* Open the GL screen (w x h, depth 16 or 32 asked) on a Radeon and set
+ * everything up. CARD_OK, CARD_NOT_RADEON (nothing kept), or CARD_FAILED
+ * with why[] (nothing kept). check: run the packet checker. */
+ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char *why,
+                ULONG whylen);
+
+/* For Core_Init: the target and the heap (heap_cpu is NULL: the core
+ * reaches the heap only through Card_VramBegin). */
+void Card_Target(const struct Card *k, struct CoreTarget *t);
+
+/* After Core_Init: the hooks and the staging buffer. */
+void Card_Attach(struct Card *k, struct Core *c);
+
+/* Run what the core built; with present, show the back buffer on the
+ * screen. R2_OK, or the error that lost the context (k->lost set). */
+LONG Card_Flush(struct Card *k, BOOL present);
+
+/* The core's hooks (env as the core passes it is the library's; it hands
+ * over the card). */
+LONG Card_WaitIdle(struct Card *k);
+ULONG *Card_VramBegin(struct Card *k);
+void Card_VramEnd(struct Card *k);
+
+/* Free everything. No file I/O (LibClose may call it under Forbid). */
+void Card_Close(struct Card *k);
+
+#endif /* RADEONGL_CARD_H */

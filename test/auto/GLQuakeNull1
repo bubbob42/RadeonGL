@@ -1,0 +1,19 @@
+; GLQuakeNull1 -- GLQuakeNull's demo1 alone: the quick regression check that
+; the library still picks the null card where there is no Radeon (uaegfx in
+; FS-UAE) and that GLQuake runs checker-clean through it. The log's first
+; line must say "RadeonGL null card".
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/null-#?
+Echo "=== demo1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNull demo1
+Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
+Type DEV:Test/null-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo1-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
