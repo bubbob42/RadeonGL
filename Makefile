@@ -643,6 +643,11 @@ push: all
 glquake glquake-data clean-glquake:
 	$(MAKE) -f glquake/Makefile.radeongl $@
 
+# The GL core's modules (src/core): defined here, before the probe rules
+# that list them as prerequisites (those expand when the Makefile is read).
+CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array
+CORE_HDRS       := $(wildcard src/core/*.h)
+
 # --- Probes: the day-one tools for the real machine (docs/probes.md) --------
 # R200Info reads the Radeon's registers (never writes); BusBench measures
 # MMIO and aperture costs and AllocateDMAMemoryForBoard. Both bypass P96 as
@@ -691,13 +696,40 @@ dist/Probe/C/CPRing: build/probe/cpring.o $(PROBE_OBJS) $(PROBE_R200_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# Tri runs the GL core (float code): every object built as the library is,
+# -m68060 -m68881 (the toolchain's soft-float library is incomplete), and
+# the binary trap-checked for the 060.
+TRI_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm -noixemul -m68060 -m68881 \
+                -fomit-frame-pointer -fno-strict-aliasing -Isdk/openpci/include -I$(P96_INC) \
+                -Isrc/r200 -Isrc/core -Isrc/probe
+TRI_OBJS     := $(addprefix build/probe060/,$(addsuffix .o,$(PROBE_COMMON) tri triscene)) \
+                $(addprefix build/probe060/r200/,$(addsuffix .o,$(PROBE_R200) r2check)) \
+                $(addprefix build/probe060/core/,$(addsuffix .o,$(CORE_MODULES)))
+
+build/probe060/%.o: src/probe/%.c $(PROBE_HDRS) $(wildcard src/core/*.h)
+	@mkdir -p build/probe060
+	$(GCC_CC) $(TRI_CFLAGS) -c $< -o $@
+
+build/probe060/r200/%.o: src/r200/%.c $(PROBE_HDRS)
+	@mkdir -p build/probe060/r200
+	$(GCC_CC) $(TRI_CFLAGS) -c $< -o $@
+
+build/probe060/core/%.o: src/core/%.c $(PROBE_HDRS) $(wildcard src/core/*.h)
+	@mkdir -p build/probe060/core
+	$(GCC_CC) $(TRI_CFLAGS) -c $< -o $@
+
+dist/Probe/C/Tri: $(TRI_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul -m68060 -m68881 $^ -o $@ -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
 # SAS/C builds of the same sources: dist/Probe/C/<Tool>_sasc. The P96
 # headers are copied under build/ so vamos reaches them through proj:
 # (it spins on a symlink out of a volume -- Herald). One vamos at a time:
 # never run these with -j.
 PROBE_SC_OBJS  := $(addprefix build/probe-sasc/,$(addsuffix .o,$(PROBE_COMMON)))
 PROBE_SC_R200_OBJS := $(addprefix build/probe-sasc/r200/,$(addsuffix .o,$(PROBE_R200)))
-PROBE_SC_IDIRS := IDIR=include: IDIR=proj:src/probe/ IDIR=proj:src/r200/ IDIR=proj:sdk/openpci/include/ IDIR=proj:build/p96inc/
+PROBE_SC_IDIRS := IDIR=include: IDIR=proj:src/probe/ IDIR=proj:src/r200/ IDIR=proj:src/core/ IDIR=proj:sdk/openpci/include/ IDIR=proj:build/p96inc/
 
 build/p96inc/.copied:
 	rm -rf build/p96inc
@@ -725,12 +757,20 @@ dist/Probe/C/CPRing_sasc: build/probe-sasc/cpring.o $(PROBE_SC_OBJS) $(PROBE_SC_
 	@mkdir -p dist/Probe/C
 	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
 
+# SAS/C Tri: the core objects of r200-objs (the same SC_OPTS), SAS/C's own
+# software float (scm.lib)
+dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o $(PROBE_SC_OBJS) \
+                       $(PROBE_SC_R200_OBJS) build/probe-sasc/r200/r2check.o \
+                       $(addprefix build/core-sasc/,$(addsuffix .o,$(CORE_MODULES))) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
+
 # The scripts write their report next to themselves (DEV:Probe/<Tool>.log),
 # where the host reads it from the share afterwards. They run the GCC
 # builds; the _sasc builds sit beside them in C/.
 .PHONY: probes
-probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing \
-        dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc
+probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Probe/C/Tri \
+        dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -746,11 +786,18 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing \
 	@printf 'echo "Done. The report is DEV:Probe/CPRing.log"\n' >> dist/Probe/CPRing
 	@cp icons/run.info dist/Probe/R200Info.info
 	@cp icons/run.info dist/Probe/BusBench.info
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/Tri
+	@printf 'echo "Tri: the GL core draws three triangles with the R200 into VRAM and shows them."\n' >> dist/Probe/Tri
+	@printf 'echo "It runs the command processor and the 3D engine for a moment; keep Workbench quiet."\n' >> dist/Probe/Tri
+	@printf 'DEV:Probe/C/Tri LOG=DEV:Probe/Tri.log\n' >> dist/Probe/Tri
+	@printf 'echo "Done. The report is DEV:Probe/Tri.log"\n' >> dist/Probe/Tri
 	@cp icons/run.info dist/Probe/CPRing.info
+	@cp icons/run.info dist/Probe/Tri.info
 	@touch dist/.backdrop
 	@grep -q '^Probe/R200Info$$' dist/.backdrop || printf 'Probe/R200Info\nProbe/BusBench\n' >> dist/.backdrop
 	@grep -q '^Probe/CPRing$$' dist/.backdrop || printf 'Probe/CPRing\n' >> dist/.backdrop
-	@echo "probes: staged DEV:Probe/R200Info + BusBench + CPRing (scripts, icons, C/)"
+	@grep -q '^Probe/Tri$$' dist/.backdrop || printf 'Probe/Tri\n' >> dist/.backdrop
+	@echo "probes: staged DEV:Probe/R200Info + BusBench + CPRing + Tri (scripts, icons, C/)"
 
 # --- minigl.library, census back end (docs/census.md) ------------------------
 # Draws nothing; counts what a dispatch-ABI-5 client asks for. The table is
@@ -801,17 +848,15 @@ build/host/%.o: src/r200/%.c $(R200_HDRS)
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -c $< -o $@
 
-build/host/%.o: test/host/%.c $(R200_HDRS) $(wildcard src/core/*.h) $(wildcard test/host/*.h)
+build/host/%.o: test/host/%.c $(R200_HDRS) $(wildcard src/core/*.h) $(wildcard test/host/*.h) src/probe/triscene.h
 	@mkdir -p build/host
-	$(HOSTCC) $(HOST_TST_CFLAGS) $(HOST_INC) -c $< -o $@
+	$(HOSTCC) $(HOST_TST_CFLAGS) $(HOST_INC) -Isrc/probe -c $< -o $@
 
 build/host/test_r200: build/host/test_r200.o build/host/simcp.o $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
 # The GL core (src/core, decision D2: our own, C89 without OS calls) on the
 # same terms: host-tested down to the packets it emits.
-CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array
-CORE_HDRS       := $(wildcard src/core/*.h)
 HOST_CORE_OBJS  := $(addprefix build/host/core_,$(addsuffix .o,$(CORE_MODULES)))
 HOST_INC        += -Isrc/core
 
@@ -819,12 +864,17 @@ build/host/core_%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS)
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -c $< -o $@
 
+# the Tri probe's scene, rendered on the Mac by test_sim
+build/host/triscene.o: src/probe/triscene.c src/probe/triscene.h $(CORE_HDRS) $(R200_HDRS)
+	@mkdir -p build/host
+	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -Isrc/core -c $< -o $@
+
 build/host/test_core: build/host/test_core.o build/host/simcp.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
 # The reference rasteriser (test/host/r200sim.c, concept 10.3): frames you
 # can look at, build/host/sim-*.ppm.
-build/host/test_sim: build/host/test_sim.o build/host/r200sim.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
+build/host/test_sim: build/host/test_sim.o build/host/r200sim.o build/host/triscene.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
 # r200view DUMP.r2d OUT.ppm: a GLQuake frame dumped by the library
