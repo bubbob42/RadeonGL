@@ -574,6 +574,37 @@ static void Tri(struct Sim *s, struct V a, struct V b, struct V c)
 
 /* --- Draws ------------------------------------------------------------------------- */
 
+/* A point: a square of RE_POINTSIZE / 16 pixels around the vertex,
+ * with the vertex's colour and texture coordinates throughout. */
+static void Point(struct Sim *s, struct V p)
+{
+    ULONG tl = REG(s, R_RE_TOP_LEFT), br = REG(s, R_RE_WIDTH_HEIGHT);
+    float size = (float) (REG(s, R_RE_POINTSIZE) & 0xffff) / 16.0f;
+    float half;
+    LONG x, y, x0, y0, x1, y1;
+
+    if (REG(s, R_SE_VAP_CNTL) & R_VAP_TCL_ENABLE)
+    {
+        if (p.w <= 0 || p.z < -p.w)
+            return;
+    }
+    ToWindow(s, &p);
+    if (size < 1.0f)
+        size = 1.0f;
+    half = size * 0.5f;
+    x0 = (LONG) (p.x - half + 0.5f);
+    y0 = (LONG) (p.y - half + 0.5f);
+    x1 = x0 + (LONG) (size + 0.5f) - 1;
+    y1 = y0 + (LONG) (size + 0.5f) - 1;
+    if (x0 < (LONG) (tl & 0xffff)) x0 = (LONG) (tl & 0xffff);
+    if (y0 < (LONG) (tl >> 16)) y0 = (LONG) (tl >> 16);
+    if (x1 > (LONG) (br & 0xffff)) x1 = (LONG) (br & 0xffff);
+    if (y1 > (LONG) (br >> 16)) y1 = (LONG) (br >> 16);
+    for (y = y0; y <= y1; y++)
+        for (x = x0; x <= x1; x++)
+            Frag(s, x, y, p.z, p.col, p.st);
+}
+
 static void DrawPrim(struct Sim *s, ULONG prim, struct V *v, ULONG n)
 {
     ULONG i;
@@ -624,8 +655,12 @@ static void DrawPrim(struct Sim *s, ULONG prim, struct V *v, ULONG n)
                 Tri(s, v[i], v[i + 2], d);
             }
             break;
+        case R_VF_PRIM_POINTS:
+            for (i = 0; i < n; i++)
+                Point(s, v[i]);
+            break;
         default:
-            s->unsupported++;   /* points and lines: not drawn */
+            s->unsupported++;   /* lines: not drawn */
             break;
     }
 }

@@ -122,7 +122,17 @@ static void test_depth_and_cull(void)
     Core_Color4ub(&core, 255, 255, 0, 255);
     Core_Vertex3f(&core, 220, 20, 9); Core_Vertex3f(&core, 300, 100, 9); Core_Vertex3f(&core, 300, 20, 9);
     Core_End(&core);
+    /* a point of size 5 at (40, 200): a 5 x 5 square */
+    Core_Enable(&core, GL_CULL_FACE, 0);
+    Core_PointSize(&core, 5.0f);
+    Core_Begin(&core, GL_POINTS);
+    Core_Color4ub(&core, 255, 0, 255, 255);
+    Core_Vertex3f(&core, 40.5f, 200.5f, 9);
+    Core_End(&core);
     Render("depth");
+    CHECK_HEX(Px(40, 200), 0xff00ffUL);
+    CHECK_HEX(Px(42, 202), 0xff00ffUL);
+    CHECK_HEX(Px(44, 200), 0x000000UL);
     CHECK_HEX(Px(120, 120), 0x00ff00UL);       /* overlap: the near one */
     CHECK_HEX(Px(180, 180), 0xff0000UL);       /* only the far one */
     CHECK_HEX(Px(290, 40), 0x000000UL);        /* culled */
