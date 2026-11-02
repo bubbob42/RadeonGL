@@ -783,10 +783,16 @@ build/host/core_%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS)
 build/host/test_core: build/host/test_core.o build/host/simcp.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
+# The reference rasteriser (test/host/r200sim.c, concept 10.3): frames you
+# can look at, build/host/sim-*.ppm.
+build/host/test_sim: build/host/test_sim.o build/host/r200sim.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
+	$(HOSTCC) $^ -o $@
+
 .PHONY: test
-test: build/host/test_r200 build/host/test_core
+test: build/host/test_r200 build/host/test_core build/host/test_sim
 	./build/host/test_r200
 	./build/host/test_core
+	./build/host/test_sim
 
 R200_GCC_CFLAGS := $(GCC_WARNINGS) -O2 -std=gnu99 -m68020 -noixemul -fomit-frame-pointer -Isrc/r200
 R200_GCC_OBJS   := $(addprefix build/r200-gcc/,$(addsuffix .o,$(R200_MODULES)))
