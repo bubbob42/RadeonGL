@@ -27,7 +27,9 @@
  * Eight pixels are read back through the aperture and compared with what
  * the host's reference rasteriser draws for the same stream (test_sim).
  *
- *   Tri LOG/K,WAIT/N,NOSHOW/S,PPM/K
+ *   Tri LOG/K,WAIT/N,NOSHOW/S,PPM/K,SCENE/K
+ *
+ * SCENE=TRI (default) is triscene.c, SCENE=TEX the textured texscene.c.
  *
  * PPM= writes the drawn buffer, read back through the aperture, as a PPM
  * file (remote screenshots of the RTG Workbench do not work).
@@ -61,10 +63,11 @@
 #include "r2check.h"
 #include "core.h"
 #include "triscene.h"
+#include "texscene.h"
 
 static const char ver[] = "$VER: Tri 0.1 (02.11.2026)";
 
-#define TEMPLATE "LOG/K,WAIT/N,NOSHOW/S,PPM/K"
+#define TEMPLATE "LOG/K,WAIT/N,NOSHOW/S,PPM/K,SCENE/K"
 
 struct Args
 {
@@ -72,6 +75,7 @@ struct Args
     LONG *wait;
     LONG noshow;
     STRPTR ppm;
+    STRPTR scene;
 };
 
 #define RING_DW       4096UL
@@ -84,6 +88,7 @@ struct Args
 #define FENCE_REG     R_SCRATCH_REG2
 #define TIMEOUT_US    100000UL
 
+#define MAXPIX        32
 #define PAL_FILL      0x80000080UL
 #define CANARY_VALUE  0xA5C3C3A5UL
 #define MMIO_TEST     0x5A3C3C5AUL
@@ -103,7 +108,11 @@ struct Ctx
     ULONG clock_base;
     ULONG bpr;              /* bytes per row of the block (pitch of the colour buffer) */
     ULONG color_row;        /* the colour buffer's first row in the bitmap */
-    ULONG got[TRI_NPIXELS]; /* the pixels read back, 0xRRGGBB */
+    const char *scene;      /* "TRI" or "TEX" */
+    void (*draw)(struct Core *c);
+    struct TriPixel pix[MAXPIX]; /* the scene's check pixels */
+    ULONG npix;
+    ULONG got[MAXPIX];      /* the pixels read back, 0xRRGGBB */
     UBYTE *rgb;             /* the whole buffer read back (PPM=), or NULL */
     BOOL drawn;             /* the fence passed */
 };
@@ -274,7 +283,7 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
         Core_Free(&core);
         goto unlock;
     }
-    TriScene_Draw(&core);
+    c->draw(&core);
     n = (ULONG)(bcs.ptr - buf);
     v = Core_GetError(&core);
     Log_Printf("%lu dwords, stream error %ld, GL error 0x%04lx\n", n, bcs.error, v);
@@ -385,9 +394,9 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     /* the check pixels, through the aperture: ARGB8888 is stored B, G, R, A,
      * so a 68k longword reads 0xBBGGRRAA */
     col = (volatile ULONG *)color_cpu;
-    for (i = 0; i < TRI_NPIXELS; i++)
+    for (i = 0; i < c->npix; i++)
     {
-        v = col[TriScene_Pixels[i].y * (c->bpr / 4) + TriScene_Pixels[i].x];
+        v = col[c->pix[i].y * (c->bpr / 4) + c->pix[i].x];
         c->got[i] = (((v >> 8) & 0xffUL) << 16) | (((v >> 16) & 0xffUL) << 8) | (v >> 24);
     }
     if (c->rgb != NULL)
@@ -460,7 +469,8 @@ static void Show(struct Ctx *c, LONG seconds)
         WA_Top, 40,
         WA_InnerWidth, (ULONG)TRI_W,
         WA_InnerHeight, (ULONG)TRI_H,
-        WA_Title, (ULONG)"Tri: drawn by the R200",
+        WA_Title, (ULONG)(c->draw == TexScene_Draw ? "Tri TEX: drawn by the R200"
+                                                   : "Tri: drawn by the R200"),
         WA_DragBar, TRUE,
         WA_DepthGadget, TRUE,
         WA_CloseGadget, TRUE,
@@ -509,6 +519,7 @@ int main(void)
     args.wait = NULL;
     args.noshow = 0;
     args.ppm = NULL;
+    args.scene = NULL;
     rda = ReadArgs(TEMPLATE, (LONG *)&args, NULL);
     if (rda == NULL)
     {
@@ -530,6 +541,23 @@ int main(void)
     c.hw.read_back = HwReadBack;
     c.hw.clock_us = HwClock;
     c.hw.hw = &c;
+    if (args.scene != NULL && (args.scene[0] == 'T' || args.scene[0] == 't')
+        && (args.scene[1] == 'E' || args.scene[1] == 'e'))
+    {
+        c.scene = "TEX";
+        c.draw = TexScene_Draw;
+        TexScene_Pixels(c.pix);
+        c.npix = TEX_NPIXELS;
+    }
+    else
+    {
+        c.scene = "TRI";
+        c.draw = TriScene_Draw;
+        for (i = 0; i < TRI_NPIXELS; i++)
+            c.pix[i] = TriScene_Pixels[i];
+        c.npix = TRI_NPIXELS;
+    }
+    Log_Printf("scene %s, %lu check pixels\n", (CONST_STRPTR)c.scene, c.npix);
 
     if (!Clock_Open())
     {
@@ -593,22 +621,22 @@ int main(void)
         goto out;
     }
     bad = 0;
-    for (i = 0; i < TRI_NPIXELS; i++)
+    for (i = 0; i < c.npix; i++)
     {
         BOOL ok;
 
-        ok = TriScene_Pixels[i].exact ? (BOOL)(c.got[i] == TriScene_Pixels[i].rgb)
-                                      : (BOOL)(c.got[i] != TriScene_Pixels[i].rgb);
+        ok = c.pix[i].exact ? (BOOL)(c.got[i] == c.pix[i].rgb)
+                            : (BOOL)(c.got[i] != c.pix[i].rgb);
         if (!ok)
             bad++;
         Log_Printf("  (%3lu, %3lu) 0x%06lx %s %s0x%06lx  %s\n",
-                   TriScene_Pixels[i].x, TriScene_Pixels[i].y, c.got[i],
+                   c.pix[i].x, c.pix[i].y, c.got[i],
                    ok ? (CONST_STRPTR)"ok  " : (CONST_STRPTR)"BAD ",
-                   TriScene_Pixels[i].exact ? (CONST_STRPTR)"want " : (CONST_STRPTR)"not ",
-                   TriScene_Pixels[i].rgb, TriScene_Pixels[i].what);
+                   c.pix[i].exact ? (CONST_STRPTR)"want " : (CONST_STRPTR)"not ",
+                   c.pix[i].rgb, c.pix[i].what);
     }
     Log_Printf("%lu of %lu pixels as the reference rasteriser draws them\n",
-               (ULONG)TRI_NPIXELS - bad, (ULONG)TRI_NPIXELS);
+               c.npix - bad, c.npix);
     rc = (bad == 0) ? RETURN_OK : RETURN_WARN;
     if (c.rgb != NULL)
         WritePpm(&c, args.ppm);

@@ -707,7 +707,7 @@ dist/Probe/C/CPRing: build/probe/cpring.o $(PROBE_OBJS) $(PROBE_R200_OBJS)
 TRI_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm -noixemul -m68060 -m68881 \
                 -fomit-frame-pointer -fno-strict-aliasing -Isdk/openpci/include -I$(P96_INC) \
                 -Isrc/r200 -Isrc/core -Isrc/probe
-TRI_OBJS     := $(addprefix build/probe060/,$(addsuffix .o,$(PROBE_COMMON) tri triscene)) \
+TRI_OBJS     := $(addprefix build/probe060/,$(addsuffix .o,$(PROBE_COMMON) tri triscene texscene)) \
                 $(addprefix build/probe060/r200/,$(addsuffix .o,$(PROBE_R200) r2check)) \
                 $(addprefix build/probe060/core/,$(addsuffix .o,$(CORE_MODULES)))
 
@@ -771,7 +771,7 @@ dist/Probe/C/CPRing_sasc: build/probe-sasc/cpring.o $(PROBE_SC_OBJS) $(PROBE_SC_
 
 # SAS/C Tri: the core objects of r200-objs (the same SC_OPTS), SAS/C's own
 # software float (scm.lib)
-dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o $(PROBE_SC_OBJS) \
+dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o build/probe-sasc/texscene.o $(PROBE_SC_OBJS) \
                        $(PROBE_SC_R200_OBJS) build/probe-sasc/r200/r2check.o \
                        $(addprefix build/core-sasc/,$(addsuffix .o,$(CORE_MODULES))) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
@@ -861,7 +861,7 @@ build/host/%.o: src/r200/%.c $(R200_HDRS)
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -c $< -o $@
 
-build/host/%.o: test/host/%.c $(R200_HDRS) $(wildcard src/core/*.h) $(wildcard test/host/*.h) src/probe/triscene.h
+build/host/%.o: test/host/%.c $(R200_HDRS) $(wildcard src/core/*.h) $(wildcard test/host/*.h) src/probe/triscene.h src/probe/texscene.h
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_TST_CFLAGS) $(HOST_INC) -Isrc/probe -c $< -o $@
 
@@ -882,12 +882,16 @@ build/host/triscene.o: src/probe/triscene.c src/probe/triscene.h $(CORE_HDRS) $(
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -Isrc/core -c $< -o $@
 
+build/host/texscene.o: src/probe/texscene.c src/probe/texscene.h src/probe/triscene.h $(CORE_HDRS) $(R200_HDRS)
+	@mkdir -p build/host
+	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -Isrc/core -c $< -o $@
+
 build/host/test_core: build/host/test_core.o build/host/simcp.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
 # The reference rasteriser (test/host/r200sim.c, concept 10.3): frames you
 # can look at, build/host/sim-*.ppm.
-build/host/test_sim: build/host/test_sim.o build/host/r200sim.o build/host/triscene.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
+build/host/test_sim: build/host/test_sim.o build/host/r200sim.o build/host/triscene.o build/host/texscene.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
 # r200view DUMP.r2d OUT.ppm: a GLQuake frame dumped by the library

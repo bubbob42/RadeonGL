@@ -13,6 +13,7 @@
 #include "r200sim.h"
 #include "r2check.h"
 #include "triscene.h"
+#include "texscene.h"
 
 #define W_          320
 #define H_          240
@@ -458,6 +459,78 @@ static void test_tri_scene(void)
     CHECK_INT(bad, 0);
 }
 
+/* The Tri probe's textured scene (src/probe/texscene.c): the 20 check
+ * pixels hold, the stream passes the checker with the probe's ranges.
+ * build/host/sim-tex.ppm is the expected picture. */
+static void test_tex_scene(void)
+{
+    struct CoreTarget t;
+    struct CoreEnv e;
+    struct R2ChkCfg cfg;
+    struct R2ChkError err;
+    static struct R2ChkState st;
+    struct TriPixel pix[TEX_NPIXELS];
+    ULONG i;
+    ULONG px;
+    ULONG bad;
+    LONG ce;
+
+    Core_Free(&core);
+    memset(vram, 0, VRAM_SIZE);
+    R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, 1);
+    t.width = TRI_W;
+    t.height = TRI_H;
+    t.color_gpu = COLOR_GPU;
+    t.color_pitch = TRI_W;
+    t.color_format = R_COLOR_FORMAT_ARGB8888;
+    t.depth_gpu = DEPTH_GPU;
+    t.depth_pitch = TRI_W;
+    e.alloc = HostAlloc;
+    e.free = HostFree;
+    e.wait_idle = HostIdle;
+    e.env = NULL;
+    CHECK_INT(Core_Init(&core, &cs, &e, &t, TEX_GPU, vram + TEX_GPU / 4, 0x10000), GL_NO_ERROR);
+    TexScene_Draw(&core);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(cs.error, R2_OK);
+    CHECK((ULONG) (cs.ptr - stream) < 3000);
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.range[0].gpu = COLOR_GPU; cfg.range[0].size = TRI_W * TRI_H * 4; cfg.range[0].kinds = R2K_COLOR;
+    cfg.range[1].gpu = DEPTH_GPU; cfg.range[1].size = TRI_W * TRI_H * 2; cfg.range[1].kinds = R2K_DEPTH;
+    cfg.range[2].gpu = TEX_GPU;   cfg.range[2].size = 0x10000;
+    cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;
+    cfg.nranges = 3;
+    cfg.fence_reg = R_SCRATCH_REG2;
+    R2Chk_Reset(&st);
+    ce = R2Chk_Run(&cfg, &st, stream, (ULONG) (cs.ptr - stream), 1, 0, &err);
+    if (ce != R2CE_OK)
+        printf("  tex checker: %s at %lu what 0x%lx value 0x%lx\n", R2Chk_ErrorName(ce),
+               (unsigned long) err.at, (unsigned long) err.what, (unsigned long) err.value);
+    CHECK_INT(ce, R2CE_OK);
+    CHECK_INT(st.draws, 5);                     /* the clear, four quads */
+
+    Sim_Init(&sim, vram, 0, VRAM_SIZE, 1, 1);
+    Sim_Run(&sim, stream, (ULONG) (cs.ptr - stream));
+    CHECK_INT(sim.unsupported, 0);
+    Sim_WritePPM(&sim, "build/host/sim-tex.ppm", COLOR_GPU, TRI_W, R_COLOR_FORMAT_ARGB8888,
+                 TRI_W, TRI_H);
+    TexScene_Pixels(pix);
+    bad = 0;
+    for (i = 0; i < TEX_NPIXELS; i++)
+    {
+        px = Sim_Pixel(&sim, COLOR_GPU, TRI_W, R_COLOR_FORMAT_ARGB8888, pix[i].x, pix[i].y);
+        if (pix[i].exact ? (px != pix[i].rgb) : (px == pix[i].rgb))
+        {
+            printf("  tex pixel (%lu, %lu) %s: 0x%06lx, want 0x%06lx\n", (unsigned long) pix[i].x,
+                   (unsigned long) pix[i].y, pix[i].what, (unsigned long) px,
+                   (unsigned long) pix[i].rgb);
+            bad++;
+        }
+    }
+    CHECK_INT(bad, 0);
+}
+
 int main(void)
 {
     vram = (ULONG *) calloc(1, VRAM_SIZE);
@@ -468,6 +541,7 @@ int main(void)
     test_present();
     test_locked_pixels();
     test_tri_scene();
+    test_tex_scene();
     test_dump();
     Core_Free(&core);
     free(vram);
