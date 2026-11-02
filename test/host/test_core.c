@@ -599,6 +599,18 @@ static void test_state(void)
     Core_MatrixMode(&core, GL_PROJECTION);
     Core_PopMatrix(&core);
     CHECK_INT(Core_GetError(&core), GL_STACK_UNDERFLOW);
+    /* Regression (GLQuake in FS-UAE): valid caps without an R200 effect
+     * are accepted and remembered, not refused */
+    Core_Enable(&core, GL_STENCIL_TEST, 1);
+    Core_Enable(&core, MGL_PERSPECTIVE_MAPPING, 0);
+    Core_Enable(&core, GL_LIGHT0 + 3, 1);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(Core_IsEnabled(&core, GL_STENCIL_TEST), 1);
+    CHECK_INT(Core_IsEnabled(&core, MGL_PERSPECTIVE_MAPPING), 0);
+    CHECK_INT(Core_IsEnabled(&core, GL_LIGHT0 + 3), 1);
+    CHECK_INT(Core_IsEnabled(&core, GL_LIGHT0 + 2), 0);
+    Core_Enable(&core, 0x1234, 1);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
 }
 
 /* --- Matrices -------------------------------------------------------------------- */

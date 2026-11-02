@@ -43,7 +43,7 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     Tex_Defaults(c->tex[0], 0);
 
     /* GL's initial state */
-    c->enables = EN_DITHER;
+    c->enables = EN_DITHER | EN_PERSPECTIVE;
     c->blend_src = GL_ONE;
     c->blend_dst = GL_ZERO;
     c->alpha_func = GL_ALWAYS;

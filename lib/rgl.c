@@ -69,6 +69,8 @@ struct Rgl
     ULONG last_dwords;
     ULONG unimpl[(DISPATCH_SLOTS + 31) / 32];
     char log[160];
+    const char *err_where;      /* the hook that raised the first GL error */
+    ULONG err_arg;              /* its enum argument */
     ULONG dump_frame;           /* 0: no dump */
     ULONG dump_written;         /* dwords of packets written, 0 = none */
     char dump_path[160];
@@ -191,6 +193,11 @@ static void WriteLog(struct Rgl *r)
         Put(f, ", value "); PutX(f, r->card.first.value); Put(f, "\n");
     }
     Put(f, "GL error pending: "); PutX(f, r->core.error); Put(f, "\n");
+    if (r->err_where != NULL)
+    {
+        Put(f, "first GL error raised by "); Put(f, r->err_where);
+        Put(f, ", argument "); PutX(f, r->err_arg); Put(f, "\n");
+    }
     if (r->dump_written != 0)
     {
         Put(f, "frame dumped to "); Put(f, r->dump_path); Put(f, ": ");
@@ -538,8 +545,15 @@ void Hook_mglChooseZBufferDepth(int bits) { (void) bits; }
 /* a GL call without a context (before mglCreateContext, after
  * mglDeleteContext) does nothing instead of following NULL */
 #define GUARD if (rgl == NULL) return
+/* after a call that takes an enum: remember who raised the first error */
+#define NOTE(name, arg) \
+    if (rgl->core.error != 0 && rgl->err_where == NULL) \
+    { \
+        rgl->err_where = name; \
+        rgl->err_arg = (ULONG) (arg); \
+    }
 
-void Hook_GLBegin(GLcontext context, GLenum mode) { (void) context; GUARD; Core_Begin(C, mode); }
+void Hook_GLBegin(GLcontext context, GLenum mode) { (void) context; GUARD; Core_Begin(C, mode); NOTE("glBegin", mode); }
 void Hook_GLEnd(GLcontext context) { (void) context; GUARD; Core_End(C); }
 
 void Hook_GLVertex4f(GLcontext context, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
@@ -593,68 +607,78 @@ void Hook_MGLSetState(GLcontext context, GLenum cap, GLboolean state)
 {
     (void) context;
     Core_Enable(C, cap, state);
+    NOTE("glEnable/glDisable", cap);
 }
 
 GLboolean Hook_GLIsEnabled(GLcontext context, GLenum cap) { (void) context; return rgl ? (GLboolean) Core_IsEnabled(C, cap) : GL_FALSE; }
-void Hook_GLActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ActiveTexture(C, unit); }
-void Hook_GLClientActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ClientActiveTexture(C, unit); }
+void Hook_GLActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ActiveTexture(C, unit); NOTE("glActiveTextureARB", unit); }
+void Hook_GLClientActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ClientActiveTexture(C, unit); NOTE("glClientActiveTextureARB", unit); }
 
 void Hook_GLTexEnvi(GLcontext context, GLenum target, GLenum pname, GLint param)
 {
     (void) context; GUARD;
     Core_TexEnvi(C, target, pname, param);
+    NOTE("glTexEnvi", param);
 }
 
 void Hook_GLDrawElements(GLcontext context, GLenum mode, GLsizei count, GLenum type, const GLvoid *indices)
 {
     (void) context; GUARD;
     Core_DrawElements(C, mode, count, type, indices);
+    NOTE("glDrawElements", type);
 }
 
 void Hook_GLDrawArrays(GLcontext context, GLenum mode, GLint first, GLsizei count)
 {
     (void) context; GUARD;
     Core_DrawArrays(C, mode, first, count);
+    NOTE("glDrawArrays", mode);
 }
 
 void Hook_GLLockArrays(GLcontext context, GLuint first, GLsizei count)
 {
     (void) context; GUARD;
     Core_LockArrays(C, (LONG) first, count);
+    NOTE("glLockArrays", count);
 }
 
-void Hook_GLUnlockArrays(GLcontext context) { (void) context; GUARD; Core_UnlockArrays(C); }
-void Hook_GLEnableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 1); }
-void Hook_GLDisableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 0); }
+void Hook_GLUnlockArrays(GLcontext context) { (void) context; GUARD; Core_UnlockArrays(C); NOTE("glUnlockArrays", 0); }
+void Hook_GLEnableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 1); NOTE("glEnableClientState", cap); }
+void Hook_GLDisableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 0); NOTE("glDisableClientState", cap); }
 
 void Hook_GLVertexPointer(GLcontext context, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer)
 {
     (void) context; GUARD;
     Core_VertexPointer(C, size, type, stride, pointer);
+    NOTE("glVertexPointer", type);
 }
 
 void Hook_GLTexCoordPointer(GLcontext context, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer)
 {
     (void) context; GUARD;
     Core_TexCoordPointer(C, size, type, stride, pointer);
+    NOTE("glTexCoordPointer", type);
 }
 
 void Hook_GLColorPointer(GLcontext context, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer)
 {
     (void) context; GUARD;
     Core_ColorPointer(C, size, type, stride, pointer);
+    NOTE("glColorPointer", type);
 }
 
 void Hook_GLRotatefEXT(GLcontext context, GLfloat angle, const GLint xyz)
 {
     (void) context; GUARD;
     Core_RotateAxisDeg(C, angle, xyz);
+    NOTE("glRotatefEXT", xyz);
 }
 
 void Hook_GLRotatefEXTs(GLcontext context, GLfloat sin_an, GLfloat cos_an, const GLint xyz)
 {
     (void) context; GUARD;
     Core_RotateAxis(C, sin_an, cos_an, xyz);
+    NOTE("glRotatefEXTs", xyz);
 }
 
 void Hook_GLRotatef(GLcontext context, GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
@@ -665,9 +689,9 @@ void Hook_GLRotatef(GLcontext context, GLfloat angle, GLfloat x, GLfloat y, GLfl
 
 void Hook_GLTranslatef(GLcontext context, GLfloat x, GLfloat y, GLfloat z) { (void) context; GUARD; Core_Translatef(C, x, y, z); }
 void Hook_GLScalef(GLcontext context, GLfloat x, GLfloat y, GLfloat z) { (void) context; GUARD; Core_Scalef(C, x, y, z); }
-void Hook_GLPushMatrix(GLcontext context) { (void) context; GUARD; Core_PushMatrix(C); }
-void Hook_GLPopMatrix(GLcontext context) { (void) context; GUARD; Core_PopMatrix(C); }
-void Hook_GLMatrixMode(GLcontext context, GLenum mode) { (void) context; GUARD; Core_MatrixMode(C, mode); }
+void Hook_GLPushMatrix(GLcontext context) { (void) context; GUARD; Core_PushMatrix(C); NOTE("glPushMatrix", 0); }
+void Hook_GLPopMatrix(GLcontext context) { (void) context; GUARD; Core_PopMatrix(C); NOTE("glPopMatrix", 0); }
+void Hook_GLMatrixMode(GLcontext context, GLenum mode) { (void) context; GUARD; Core_MatrixMode(C, mode); NOTE("glMatrixMode", mode); }
 void Hook_GLLoadIdentity(GLcontext context) { (void) context; GUARD; Core_LoadIdentity(C); }
 void Hook_GLLoadMatrixf(GLcontext context, const GLfloat *m) { (void) context; GUARD; Core_LoadMatrixf(C, m); }
 void Hook_GLMultMatrixf(GLcontext context, const GLfloat *m) { (void) context; GUARD; Core_MultMatrixf(C, m); }
@@ -677,6 +701,7 @@ void Hook_GLOrtho(GLcontext context, GLdouble left, GLdouble right, GLdouble bot
 {
     (void) context; GUARD;
     Core_Ortho(C, left, right, bottom, top, zNear, zFar);
+    NOTE("glOrtho", 0);
 }
 
 void Hook_GLFrustum(GLcontext context, GLdouble left, GLdouble right, GLdouble bottom, GLdouble top,
@@ -684,27 +709,30 @@ void Hook_GLFrustum(GLcontext context, GLdouble left, GLdouble right, GLdouble b
 {
     (void) context; GUARD;
     Core_Frustum(C, left, right, bottom, top, zNear, zFar);
+    NOTE("glFrustum", 0);
 }
 
-void Hook_GLShadeModel(GLcontext context, GLenum mode) { (void) context; GUARD; Core_ShadeModel(C, mode); }
+void Hook_GLShadeModel(GLcontext context, GLenum mode) { (void) context; GUARD; Core_ShadeModel(C, mode); NOTE("glShadeModel", mode); }
 void Hook_GLDepthMask(GLcontext context, GLboolean flag) { (void) context; GUARD; Core_DepthMask(C, flag); }
-void Hook_GLDepthFunc(GLcontext context, GLenum func) { (void) context; GUARD; Core_DepthFunc(C, func); }
+void Hook_GLDepthFunc(GLcontext context, GLenum func) { (void) context; GUARD; Core_DepthFunc(C, func); NOTE("glDepthFunc", func); }
 void Hook_GLDepthRange(GLcontext context, GLclampd n, GLclampd f) { (void) context; GUARD; Core_DepthRange(C, n, f); }
-void Hook_GLBlendFunc(GLcontext context, GLenum sfactor, GLenum dfactor) { (void) context; GUARD; Core_BlendFunc(C, sfactor, dfactor); }
-void Hook_GLAlphaFunc(GLcontext context, GLenum func, GLclampf ref) { (void) context; GUARD; Core_AlphaFunc(C, func, ref); }
-void Hook_GLCullFace(GLcontext context, GLenum mode) { (void) context; GUARD; Core_CullFace(C, mode); }
-void Hook_GLFrontFace(GLcontext context, GLenum mode) { (void) context; GUARD; Core_FrontFace(C, mode); }
+void Hook_GLBlendFunc(GLcontext context, GLenum sfactor, GLenum dfactor) { (void) context; GUARD; Core_BlendFunc(C, sfactor, dfactor); NOTE("glBlendFunc", sfactor); }
+void Hook_GLAlphaFunc(GLcontext context, GLenum func, GLclampf ref) { (void) context; GUARD; Core_AlphaFunc(C, func, ref); NOTE("glAlphaFunc", func); }
+void Hook_GLCullFace(GLcontext context, GLenum mode) { (void) context; GUARD; Core_CullFace(C, mode); NOTE("glCullFace", mode); }
+void Hook_GLFrontFace(GLcontext context, GLenum mode) { (void) context; GUARD; Core_FrontFace(C, mode); NOTE("glFrontFace", mode); }
 
 void Hook_GLViewport(GLcontext context, GLint x, GLint y, GLsizei width, GLsizei height)
 {
     (void) context; GUARD;
     Core_Viewport(C, x, y, width, height);
+    NOTE("glViewport", width);
 }
 
 void Hook_GLScissor(GLcontext context, GLint x, GLint y, GLsizei width, GLsizei height)
 {
     (void) context; GUARD;
     Core_Scissor(C, x, y, width, height);
+    NOTE("glScissor", width);
 }
 
 void Hook_GLColorMask(GLcontext context, GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha)
@@ -714,9 +742,9 @@ void Hook_GLColorMask(GLcontext context, GLboolean red, GLboolean green, GLboole
 }
 
 void Hook_GLPolygonOffset(GLcontext context, GLfloat factor, GLfloat units) { (void) context; GUARD; Core_PolygonOffset(C, factor, units); }
-void Hook_GLPolygonMode(GLcontext context, GLenum face, GLenum mode) { (void) context; GUARD; Core_PolygonMode(C, face, mode); }
-void Hook_GLPointSize(GLcontext context, GLfloat size) { (void) context; GUARD; Core_PointSize(C, size); }
-void Hook_GLHint(GLcontext context, GLenum target, GLenum mode) { (void) context; GUARD; Core_Hint(C, target, mode); }
+void Hook_GLPolygonMode(GLcontext context, GLenum face, GLenum mode) { (void) context; GUARD; Core_PolygonMode(C, face, mode); NOTE("glPolygonMode", mode); }
+void Hook_GLPointSize(GLcontext context, GLfloat size) { (void) context; GUARD; Core_PointSize(C, size); NOTE("glPointSize", 0); }
+void Hook_GLHint(GLcontext context, GLenum target, GLenum mode) { (void) context; GUARD; Core_Hint(C, target, mode); NOTE("glHint", target); }
 
 void Hook_GLClearColor(GLcontext context, GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha)
 {
@@ -725,7 +753,7 @@ void Hook_GLClearColor(GLcontext context, GLclampf red, GLclampf green, GLclampf
 }
 
 void Hook_GLClearDepth(GLcontext context, GLclampd depth) { (void) context; GUARD; Core_ClearDepth(C, depth); }
-void Hook_GLClear(GLcontext context, GLbitfield mask) { (void) context; GUARD; Core_Clear(C, mask); }
+void Hook_GLClear(GLcontext context, GLbitfield mask) { (void) context; GUARD; Core_Clear(C, mask); NOTE("glClear", mask); }
 
 void Hook_GLTexImage2D(GLcontext context, GLenum target, GLint level, GLint internalformat,
                        GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type,
@@ -733,6 +761,7 @@ void Hook_GLTexImage2D(GLcontext context, GLenum target, GLint level, GLint inte
 {
     (void) context; GUARD;
     Core_TexImage2D(C, target, level, internalformat, width, height, border, format, type, pixels);
+    NOTE("glTexImage2D", internalformat);
 }
 
 void Hook_GLTexSubImage2D(GLcontext context, GLenum target, GLint level, GLint xoffset, GLint yoffset,
@@ -740,35 +769,40 @@ void Hook_GLTexSubImage2D(GLcontext context, GLenum target, GLint level, GLint x
 {
     (void) context; GUARD;
     Core_TexSubImage2D(C, target, level, xoffset, yoffset, width, height, format, type, pixels);
+    NOTE("glTexSubImage2D", format);
 }
 
 void Hook_GLTexParameteri(GLcontext context, GLenum target, GLenum pname, GLint param)
 {
     (void) context; GUARD;
     Core_TexParameteri(C, target, pname, param);
+    NOTE("glTexParameteri", pname);
 }
 
-void Hook_GLBindTexture(GLcontext context, GLenum target, GLuint texture) { (void) context; GUARD; Core_BindTexture(C, target, texture); }
+void Hook_GLBindTexture(GLcontext context, GLenum target, GLuint texture) { (void) context; GUARD; Core_BindTexture(C, target, texture); NOTE("glBindTexture", target); }
 
 void Hook_GLGenTextures(GLcontext context, GLsizei n, GLuint *textures)
 {
     (void) context; GUARD;
     Core_GenTextures(C, n, (ULONG *) textures);
+    NOTE("glGenTextures", n);
 }
 
 void Hook_GLDeleteTextures(GLcontext context, GLsizei n, const GLuint *textures)
 {
     (void) context; GUARD;
     Core_DeleteTextures(C, n, (const ULONG *) textures);
+    NOTE("glDeleteTextures", n);
 }
 
 GLboolean Hook_GLIsTexture(GLcontext context, GLuint texture) { (void) context; return rgl ? (GLboolean) Core_IsTexture(C, texture) : GL_FALSE; }
-void Hook_GLGetFloatv(GLcontext context, GLenum pname, GLfloat *params) { (void) context; GUARD; Core_GetFloatv(C, pname, params); }
+void Hook_GLGetFloatv(GLcontext context, GLenum pname, GLfloat *params) { (void) context; GUARD; Core_GetFloatv(C, pname, params); NOTE("glGetFloatv", pname); }
 
 void Hook_GLGetIntegerv(GLcontext context, GLenum pname, GLint *params)
 {
     (void) context; GUARD;
     Core_GetIntegerv(C, pname, (LONG *) params);
+    NOTE("glGetIntegerv", pname);
 }
 
 void Hook_GLGetBooleanv(GLcontext context, GLenum pname, GLboolean *params)

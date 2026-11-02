@@ -31,7 +31,21 @@ static ULONG Bit(ULONG cap)
         case GL_POLYGON_OFFSET_FILL:    return EN_POLY_OFFSET;
         case MGL_Z_OFFSET:              return EN_ZOFFSET;
         case GL_LIGHTING:               return EN_LIGHTING;
+        case GL_STENCIL_TEST:           return EN_STENCIL;
+        case MGL_PERSPECTIVE_MAPPING:   return EN_PERSPECTIVE;
+        case GL_NORMALIZE:              return EN_NORMALIZE;
+        case GL_COLOR_MATERIAL:         return EN_COLOR_MATERIAL;
+        case GL_LINE_STIPPLE:           return EN_LINE_STIPPLE;
+        case GL_POLYGON_STIPPLE:        return EN_POLY_STIPPLE;
+        case GL_COLOR_LOGIC_OP:         return EN_LOGIC_OP;
+        case GL_TEXTURE_GEN_S:          return EN_TEXGEN_S;
+        case GL_TEXTURE_GEN_T:          return EN_TEXGEN_T;
+        case GL_POINT_SMOOTH:
+        case GL_LINE_SMOOTH:
+        case GL_POLYGON_SMOOTH:         return EN_SMOOTH;
     }
+    if (cap >= GL_LIGHT0 && cap <= GL_LIGHT0 + 7)
+        return EN_LIGHT0 << (cap - GL_LIGHT0);
     return 0;
 }
 
@@ -72,13 +86,6 @@ void Core_Enable(struct Core *c, ULONG cap, ULONG on)
     bit = Bit(cap);
     if (bit == 0)
     {
-        /* GL 1.1 caps without an R200 effect yet are accepted quietly;
-         * anything else is an error */
-        if (cap == GL_NORMALIZE || cap == GL_COLOR_MATERIAL || cap == GL_LINE_SMOOTH
-            || cap == GL_POINT_SMOOTH || cap == GL_POLYGON_SMOOTH
-            || (cap >= GL_LIGHT0 && cap <= GL_LIGHT0 + 7)
-            || cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T)
-            return;
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
@@ -97,11 +104,6 @@ ULONG Core_IsEnabled(struct Core *c, ULONG cap)
     bit = Bit(cap);
     if (bit == 0)
     {
-        if (cap == GL_NORMALIZE || cap == GL_COLOR_MATERIAL || cap == GL_LINE_SMOOTH
-            || cap == GL_POINT_SMOOTH || cap == GL_POLYGON_SMOOTH
-            || (cap >= GL_LIGHT0 && cap <= GL_LIGHT0 + 7)
-            || cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T)
-            return 0;
         Core_Error(c, GL_INVALID_ENUM);
         return 0;
     }

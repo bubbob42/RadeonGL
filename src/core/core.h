@@ -139,6 +139,18 @@ struct CoreArray
 #define EN_POLY_OFFSET  0x0080UL    /* GL_POLYGON_OFFSET_FILL */
 #define EN_ZOFFSET      0x0100UL    /* MGL_Z_OFFSET */
 #define EN_LIGHTING     0x0200UL
+/* accepted and stored, no R200 effect (yet): */
+#define EN_STENCIL      0x0400UL    /* no stencil buffer: a no-op, but a valid cap */
+#define EN_PERSPECTIVE  0x0800UL    /* MGL_PERSPECTIVE_MAPPING: the R200 always is */
+#define EN_NORMALIZE    0x1000UL
+#define EN_COLOR_MATERIAL 0x2000UL
+#define EN_LINE_STIPPLE 0x4000UL
+#define EN_POLY_STIPPLE 0x8000UL
+#define EN_LOGIC_OP     0x10000UL
+#define EN_TEXGEN_S     0x20000UL
+#define EN_TEXGEN_T     0x40000UL
+#define EN_SMOOTH       0x80000UL   /* point, line, polygon smoothing */
+#define EN_LIGHT0       0x100000UL  /* lights 0..7: bits 20..27 */
 
 struct CoreMat
 {
