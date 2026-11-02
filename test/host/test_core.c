@@ -1090,6 +1090,111 @@ static void test_locked(void)
 static ULONG ring_mem[RING_DW];
 static ULONG ring_shadow[RING_DW];
 
+/* A back end whose video RAM moves (P96 bitmaps): texels only between the
+ * vram hooks, at the address they return; the stream into staging; a
+ * rebase moves textures and target. */
+static ULONG vram2[TEX_SIZE / 4];
+static ULONG staging[CORE_STREAM_BYTES / 4];
+static ULONG *vram_now;
+static ULONG vram_begins;
+static ULONG vram_ends;
+
+static ULONG *HostVramBegin(APTR env)
+{
+    (void) env;
+    vram_begins++;
+    return vram_now;
+}
+
+static void HostVramEnd(APTR env)
+{
+    (void) env;
+    vram_ends++;
+}
+
+static void test_vram_hooks(void)
+{
+    UBYTE rgba[4 * 4 * 4];
+    UWORD idx[3];
+    struct CoreTex *t;
+    struct R2ChkState st;
+    ULONG off;
+    ULONG gpu0;
+    ULONG i;
+    ULONG n;
+
+    LkArrays(1);
+    memset(vram, 0, sizeof(vram));
+    memset(vram2, 0, sizeof(vram2));
+    memset(staging, 0, sizeof(staging));
+    vram_now = vram2;
+    vram_begins = 0;
+    vram_ends = 0;
+    Core_SetVram(&core, HostVramBegin, HostVramEnd, staging);
+    for (i = 0; i < sizeof(rgba); i++)
+        rgba[i] = (UBYTE) (i * 7 + 1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    t = core.tex[3];
+    CHECK(t != NULL && t->gpu != 0);
+    off = (t->gpu - TEX_GPU) / 4;
+    CHECK_INT(t->pitch[0], 32);             /* 8 bytes of texels a row, padded */
+    for (i = 0, n = 0; i < 8; i++)
+        n += (vram2[off + (i / 2) * 8 + (i & 1)] != 0) ? 1 : 0;
+    CHECK_INT(n, 8);                        /* written where vram_begin said */
+    for (i = 0, n = 0; i < TEX_SIZE / 4; i++)
+        n += (vram[i] != 0) ? 1 : 0;
+    CHECK_INT(n, 0);                        /* never through the base Core_Init had */
+    CHECK_INT(vram_begins, 1);
+    CHECK_INT(vram_ends, 1);
+    /* out of reach: the upload is lost and counted, no end without a begin */
+    vram_now = NULL;
+    rgba[0] ^= 0xff;
+    memcpy(vram, vram2, sizeof(vram));
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    CHECK_INT(core.stat_vram_lost, 1);
+    CHECK_INT(vram_begins, 2);
+    CHECK_INT(vram_ends, 1);
+    CHECK(memcmp(vram, vram2, sizeof(vram)) == 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* the locked-array stream goes into staging, not the heap */
+    vram_now = vram2;
+    memcpy(vram, vram2, sizeof(vram));
+    idx[0] = 0; idx[1] = 1; idx[2] = 2;
+    Core_LockArrays(&core, 0, 3);
+    Core_DrawElements(&core, GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_draws, 1);
+    for (i = 0, n = 0; i < 3 * 4; i++)
+        n += (staging[i] != 0) ? 1 : 0;
+    CHECK(n >= 3);                          /* the colours at least (vertex 0 is 0,0,0) */
+    CHECK(memcmp(vram, vram2, sizeof(vram)) == 0);  /* the heap untouched */
+    CHECK_INT(core.stat_stream_bytes, 3 * 4 * 4 + 2 * 4);  /* 3 vertices, 3 indices */
+
+    /* a rebase: textures follow the heap, the target its new place, and
+     * everything is emitted again from a restarted stream */
+    gpu0 = t->gpu;
+    n = core.stream_gen;
+    Core_Rebase(&core, TEX_GPU + 0x00100000UL, COLOR_GPU + 0x1000, DEPTH_GPU + 0x1000);
+    CHECK_HEX(core.tex[3]->gpu, gpu0 + 0x00100000UL);
+    CHECK_INT(core.stream_gen, n + 1);
+    CHECK_INT(core.stream_pos, 0);
+    cs.ptr = stream;
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_Begin(&core, GL_TRIANGLES);
+    Core_TexCoord2f(&core, 0.0f, 0.0f);
+    Core_Vertex3f(&core, 0.0f, 0.0f, 0.0f);
+    Core_Vertex3f(&core, 1.0f, 0.0f, 0.0f);
+    Core_Vertex3f(&core, 0.0f, 1.0f, 0.0f);
+    Core_End(&core);
+    CHECK_HEX(LastReg(R_RB3D_COLOROFFSET), COLOR_GPU + 0x1000);
+    CHECK_HEX(LastReg(R_RB3D_DEPTHOFFSET), DEPTH_GPU + 0x1000);
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0) & ~0x1fUL, gpu0 + 0x00100000UL);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    (void) st;
+}
+
 static void test_frames_through_ring(void)
 {
     struct SimCp sim;
@@ -1250,6 +1355,7 @@ int main(void)
     test_arrays();
     test_locked();
     test_present();
+    test_vram_hooks();
     test_frames_through_ring();
     (void) t;
     (void) e;

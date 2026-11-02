@@ -43,6 +43,7 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     Tex_Defaults(c->tex[0], 0);
     c->stream_off = Heap_Alloc(c, CORE_STREAM_BYTES, 32);
     c->stream_size = (c->stream_off != 0xffffffffUL) ? CORE_STREAM_BYTES : 0;
+    c->stream_cpu = (c->stream_size != 0) ? heap_cpu + c->stream_off / 4 : NULL;
 
     /* GL's initial state */
     c->enables = EN_DITHER | EN_PERSPECTIVE;
@@ -111,7 +112,33 @@ void Core_GpuIdle(struct Core *c)
 {
     c->epoch++;
     c->stream_pos = 0;      /* everything in the stream has been read */
+    c->stream_gen++;
     c->lk_valid = 0;
+}
+
+void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR env),
+                  ULONG *staging)
+{
+    c->vram_begin = begin;
+    c->vram_end = end;
+    if (staging != NULL && c->stream_size != 0)
+        c->stream_cpu = staging;
+}
+
+void Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gpu)
+{
+    ULONG i;
+
+    if (c->tex != NULL)
+        for (i = 0; i < CORE_MAX_TEX; i++)
+            if (c->tex[i] != NULL && c->tex[i]->gpu != 0)
+                c->tex[i]->gpu = heap_gpu + (c->tex[i]->gpu - c->heap.gpu);
+    c->heap.gpu = heap_gpu;
+    c->target.color_gpu = color_gpu;
+    c->target.depth_gpu = depth_gpu;
+    c->dirty = D_ALL;
+    c->hw_units = 0xffffffffUL;
+    Core_GpuIdle(c);
 }
 
 void Core_MarkTextures(struct Core *c, ULONG units)

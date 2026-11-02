@@ -321,7 +321,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     if (upload)
     {
         off = StreamAlloc(c, vbytes);
-        p = c->heap.cpu + off / 4;
+        p = c->stream_cpu + (off - c->stream_off) / 4;
         for (k = 0; k < lcount; k++)
         {
             Fetch(c, first + k, pos);
@@ -342,7 +342,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     /* indices rebased to the lock, two to a dword, the first in the low
      * half as the GPU reads it (Mesa EMIT_TWO_ELTS) */
     off = StreamAlloc(c, ibytes);
-    p = c->heap.cpu + off / 4;
+    p = c->stream_cpu + (off - c->stream_off) / 4;
     for (i = 0; i < n; i += 2)
     {
         a = Index(type, idx, (LONG) i) - first;

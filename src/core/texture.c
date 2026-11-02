@@ -150,7 +150,6 @@ static void Release(struct Core *c, struct CoreTex *t)
         Core_TexHazard(c, t);       /* the GPU may still read the memory */
         Heap_Free(c, t->gpu - c->heap.gpu);
         t->gpu = 0;
-        t->cpu = NULL;
         t->bytes = 0;
         t->levels = 0;
     }
@@ -392,7 +391,7 @@ static void WriteRow(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG 
     unit = (cpp == 4) ? 0xffffffffUL : ((1UL << (cpp * 8)) - 1);
     per = 4 / cpp;
     byte0 = t->lofs[l] + y * t->pitch[l] + x * cpp;
-    dst = t->cpu + byte0 / 4;
+    dst = c->heap.cpu + (t->gpu - c->heap.gpu + byte0) / 4;
     first = (byte0 & 3) / cpp;
     acc = 0;
     mask = 0;
@@ -429,6 +428,7 @@ static void Upload(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG y,
 {
     ULONG row;
     ULONG stride;
+    ULONG *p;
 
     /* GL_UNPACK_ALIGNMENT 4, GL's default (glPixelStorei is not in
      * GLQuake's slots; the rest of the pixel store comes with it) */
@@ -436,8 +436,21 @@ static void Upload(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG y,
     /* the GPU may still read the old texels: wait (a staging buffer the
      * GPU copies from in ring order is the fast-path answer, concept 6.6) */
     Core_TexHazard(c, t);
+    /* where the heap is now (a back end's video RAM may have moved) */
+    if (c->vram_begin != NULL)
+    {
+        p = c->vram_begin(c->env.env);
+        if (p == NULL)
+        {
+            c->stat_vram_lost++;
+            return;
+        }
+        c->heap.cpu = p;
+    }
     for (row = 0; row < h; row++)
         WriteRow(c, t, l, x, y + row, w, src, bpp, pixels + row * stride);
+    if (c->vram_end != NULL)
+        c->vram_end(c->env.env);
 }
 
 static ULONG Log2(ULONG v)
@@ -489,7 +502,6 @@ static ULONG Allocate(struct Core *c, struct CoreTex *t, ULONG w, ULONG h, ULONG
     if (off == 0xffffffffUL)
         return GL_OUT_OF_MEMORY;
     t->gpu = c->heap.gpu + off;
-    t->cpu = c->heap.cpu + off / 4;
     t->bytes = total;
     t->w = w;
     t->h = h;

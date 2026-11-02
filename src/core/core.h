@@ -90,7 +90,6 @@ struct CoreTex
     ULONG hwfmt;            /* R_TXFORMAT_* (| R_TXFORMAT_ALPHA_IN_MAP) */
     ULONG cpp;              /* bytes per texel in VRAM */
     ULONG gpu;              /* VRAM of level 0, 0 = none */
-    ULONG *cpu;
     ULONG bytes;            /* allocated */
     ULONG lofs[CORE_MAX_LEVELS];    /* byte offset of each level */
     ULONG pitch[CORE_MAX_LEVELS];   /* bytes per row of each level */
@@ -238,6 +237,18 @@ struct Core
     ULONG stream_off;       /* heap offset */
     ULONG stream_size;      /* 0: no stream (arrays go the immediate way) */
     ULONG stream_pos;
+    ULONG *stream_cpu;      /* where its dwords are written: the heap, or a
+                             * back end's staging buffer (Core_SetVram) */
+    ULONG stream_gen;       /* counts Core_GpuIdle: the stream restarted at 0 */
+
+    /* Video RAM a back end reaches only for a moment (a P96 bitmap that
+     * moves when unlocked, docs/design-card-backend.md): texels are written
+     * only between vram_begin, which returns where the heap is now (NULL:
+     * out of reach, the upload is lost and counted), and vram_end. NULL
+     * hooks: heap.cpu is always valid (the null card, the host tests). */
+    ULONG *(*vram_begin)(APTR env);
+    void (*vram_end)(APTR env);
+    ULONG stat_vram_lost;
     ULONG lk_valid;         /* the locked range is in the stream */
     ULONG lk_gpu;           /* where */
     ULONG lk_units;         /* with these texture sets */
@@ -270,6 +281,20 @@ LONG  Core_Validate(struct Core *c);
 /* The host knows the GPU has finished everything emitted so far (a frame's
  * fence passed): every texture may be rewritten without waiting. */
 void  Core_GpuIdle(struct Core *c);
+
+/* A back end whose video RAM is reached only inside a lock: the hooks of
+ * struct Core's vram_begin/vram_end (env as CoreEnv's), and a fast-RAM
+ * staging buffer of CORE_STREAM_BYTES for the locked-array stream, which
+ * the back end copies to the stream's place in the heap before the GPU
+ * runs. staging NULL: the stream is written into the heap itself. */
+void  Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR env),
+                   ULONG *staging);
+
+/* The heap or the render target moved (P96 moved an unlocked bitmap): every
+ * texture's GPU address follows the heap, the target takes its new
+ * addresses, and the whole state is emitted again. What was emitted before
+ * holds the old addresses: the back end drops it. */
+void  Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gpu);
 
 /* --- State (state.c) ------------------------------------------------------------ */
 
