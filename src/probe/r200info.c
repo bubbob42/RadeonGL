@@ -39,17 +39,20 @@ struct Args
 static void ReportCpu(void)
 {
     UWORD f;
+    CONST_STRPTR cpu;
+    CONST_STRPTR fpu;
 
+    /* AttnFlags sets every lower CPU bit too: name the highest only. */
     f = SysBase->AttnFlags;
-    Log_Printf("CPU: %s%s%s%s%s FPU: %s\n",
-               (f & AFF_68060) ? (CONST_STRPTR)"68060 " : (CONST_STRPTR)"",
-               (f & AFF_68040) ? (CONST_STRPTR)"68040 " : (CONST_STRPTR)"",
-               (f & AFF_68030) ? (CONST_STRPTR)"68030 " : (CONST_STRPTR)"",
-               (f & AFF_68020) ? (CONST_STRPTR)"68020 " : (CONST_STRPTR)"",
-               (f & AFF_68010) ? (CONST_STRPTR)"68010 " : (CONST_STRPTR)"",
-               (f & AFF_FPU40) ? (CONST_STRPTR)"internal" :
-               (f & AFF_68882) ? (CONST_STRPTR)"68882" :
-               (f & AFF_68881) ? (CONST_STRPTR)"68881" : (CONST_STRPTR)"none");
+    cpu = (f & AFF_68060) ? (CONST_STRPTR)"68060" :
+          (f & AFF_68040) ? (CONST_STRPTR)"68040" :
+          (f & AFF_68030) ? (CONST_STRPTR)"68030" :
+          (f & AFF_68020) ? (CONST_STRPTR)"68020" :
+          (f & AFF_68010) ? (CONST_STRPTR)"68010" : (CONST_STRPTR)"68000";
+    fpu = (f & AFF_FPU40) ? (CONST_STRPTR)"internal" :
+          (f & AFF_68882) ? (CONST_STRPTR)"68882" :
+          (f & AFF_68881) ? (CONST_STRPTR)"68881" : (CONST_STRPTR)"none";
+    Log_Printf("CPU: %s, FPU: %s\n", cpu, fpu);
 }
 
 int main(void)
@@ -83,7 +86,6 @@ int main(void)
     ReportCpu();
 
     rc = RETURN_OK;
-    prev = NULL;
     if (!PciCard_Open(&card))
     {
         rc = RETURN_FAIL;

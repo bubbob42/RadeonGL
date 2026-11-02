@@ -44,7 +44,7 @@ static ULONG Attr(struct pci_dev *dev, ULONG tag)
 
 BOOL PciCard_Open(struct PciCard *card)
 {
-    static const struct PciCard zero;
+    static struct PciCard zero;          /* all zero: static storage */
     struct TagItem find[3];
     struct pci_dev *dev;
     int i;

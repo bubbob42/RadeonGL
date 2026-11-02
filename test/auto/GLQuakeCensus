@@ -1,0 +1,27 @@
+; GLQuakeCensus -- what GLQuake asks a minigl.library for, frame by frame:
+; timedemo demo1, demo2 and demo3 against the census back end
+; (docs/census.md). Each demo runs in the background (DEV:Test/RunCensus)
+; with up to 10 minutes; one that does not finish is reported with Status
+; and a screen grab, and the script moves on.
+; Needs: gmake glquake glquake-data census-lib.
+; LIMIT 2100
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/census-#?
+Echo "=== demo1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunCensus demo1
+Execute DEV:Test/WaitDone DEV:Test/census-demo1.done
+Type DEV:Test/census-demo1.log >>DEV:Test/auto.log
+Echo "=== demo2 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunCensus demo2
+Execute DEV:Test/WaitDone DEV:Test/census-demo2.done
+Type DEV:Test/census-demo2.log >>DEV:Test/auto.log
+Echo "=== demo3 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunCensus demo3
+Execute DEV:Test/WaitDone DEV:Test/census-demo3.done
+Type DEV:Test/census-demo3.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

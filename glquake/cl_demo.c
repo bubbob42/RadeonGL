@@ -535,6 +535,16 @@ void CL_FinishTimeDemo (void)
 		time = 1;
 
 	Con_Printf ("%i frames %5.1f seconds %5.1f fps\n", frames, time, frames/time);
+
+	/* RadeonGL: -timedemoquit ends the program after the timedemo, so a
+	 * benchmark or census run needs nobody at the keyboard. "quit" only
+	 * quits at once from the console; anywhere else it opens the "really
+	 * quit?" menu and waits for a key (measured in FS-UAE, 2026-11-02). */
+	if (COM_CheckParm ("-timedemoquit"))
+	{
+		key_dest = key_console;
+		Cbuf_AddText ("quit\n");
+	}
 }
 
 /*

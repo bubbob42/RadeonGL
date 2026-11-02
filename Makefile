@@ -140,7 +140,7 @@ GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config13 launch-fsuae13 run-fsuae13 info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run release-stage release-drawer release-archive release-lha release-adf release-aminet release-verify release-dist
 
-all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes
+all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes census-lib
 
 # release: advance the revision, then rebuild both profiles so the new $VER is
 # embedded. This is the ONLY target that bumps -- run it by hand when cutting a
@@ -669,10 +669,36 @@ dist/Probe/C/BusBench: build/probe/busbench.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# SAS/C builds of the same sources: dist/Probe/C/<Tool>_sasc. The P96
+# headers are copied under build/ so vamos reaches them through proj:
+# (it spins on a symlink out of a volume -- Herald). One vamos at a time:
+# never run these with -j.
+PROBE_SC_OBJS  := $(addprefix build/probe-sasc/,$(addsuffix .o,$(PROBE_COMMON)))
+PROBE_SC_IDIRS := IDIR=include: IDIR=proj:src/probe/ IDIR=proj:sdk/openpci/include/ IDIR=proj:build/p96inc/
+
+build/p96inc/.copied:
+	rm -rf build/p96inc
+	mkdir -p build
+	cp -R "$(P96_INC)" build/p96inc
+	touch $@
+
+build/probe-sasc/%.o: src/probe/%.c $(PROBE_HDRS) build/p96inc/.copied | $(VAMOSRC)
+	@mkdir -p build/probe-sasc
+	$(VAMOS_SC) sc $(SC_OPTS) CPU=68020 OPTIMIZE NOLINK $(PROBE_SC_IDIRS) OBJNAME=proj:$@ proj:$<
+
+dist/Probe/C/R200Info_sasc: build/probe-sasc/r200info.o $(PROBE_SC_OBJS) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
+dist/Probe/C/BusBench_sasc: build/probe-sasc/busbench.o $(PROBE_SC_OBJS) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 # The scripts write their report next to themselves (DEV:Probe/<Tool>.log),
-# where the host reads it from the share afterwards.
+# where the host reads it from the share afterwards. They run the GCC
+# builds; the _sasc builds sit beside them in C/.
 .PHONY: probes
-probes: dist/Probe/C/R200Info dist/Probe/C/BusBench
+probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -686,6 +712,39 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench
 	@touch dist/.backdrop
 	@grep -q '^Probe/R200Info$$' dist/.backdrop || printf 'Probe/R200Info\nProbe/BusBench\n' >> dist/.backdrop
 	@echo "probes: staged DEV:Probe/R200Info + BusBench (scripts, icons, C/)"
+
+# --- minigl.library, census back end (docs/census.md) ------------------------
+# Draws nothing; counts what a dispatch-ABI-5 client asks for. The table is
+# generated from the SDK header (tools/gen_dispatch.py), so every slot has the
+# SDK's exact signature. GCC only, -nostdlib, and NO -msasregparm: clients
+# call the table with GCC's stack convention. shell.o links first.
+MGL_SDK_INC   := sdk/minigl-29.1/minigl-shared-library/include
+MGL_DISPATCH  := $(MGL_SDK_INC)/libraries/minigl_dispatch.h
+CENSUS_HOOKS  := GLBegin,GLEnd,GLVertex2fv,GLVertex3fv,GLVertex4f,GLVertex4fv,GLTexCoord2f,GLTexCoord2fv,GLTexCoord4f,GLTexCoord4fv,GLMultiTexCoord2fARB,GLMultiTexCoord2fvARB,GLColor3fv,GLColor3ubv,GLColor4f,GLColor4fv,GLColor4ub,GLColor4ubv,GLNormal3f,GLNormal3fv,GLArrayElement,GLEnableClientState,GLDisableClientState,GLClientActiveTextureARB,GLLockArrays,GLUnlockArrays,GLDrawElements,GLDrawArrays,GLMultiDrawArrays,GLGenTextures,GLIsTexture,GLBindTexture,GLActiveTextureARB,GLTexImage2D,GLTexSubImage2D,GLClear,GLGetString,GLGetIntegerv,GLGetFloatv,GLGetBooleanv,GLIsEnabled,MGLCreateContext,MGLDeleteContext,MGLSwitchDisplay,MGLGetWindowHandle,MGLGetInputWindowHandle,MGLLockDisplay,MGLResizeContext
+LIB_CFLAGS    := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
+                 -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -m68020 -noixemul \
+                 -I$(MGL_SDK_INC) -Ilib -Ibuild/lib
+CENSUS_OBJS   := build/lib/shell.o build/lib/census.o build/lib/census_dispatch.o
+CENSUS_LIB    := dist/Libs/Census/minigl.library
+
+build/lib/census_dispatch.c build/lib/census_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py Makefile
+	@mkdir -p build/lib
+	$(PYTHON) -I tools/gen_dispatch.py $(MGL_DISPATCH) build/lib/census_dispatch \
+	    --prefix Cen_ --count Cen_Hit --include census.h --hooks $(CENSUS_HOOKS)
+
+build/lib/%.o: lib/%.c lib/census.h build/lib/census_dispatch.h
+	@mkdir -p build/lib
+	$(GCC_CC) $(LIB_CFLAGS) -c $< -o $@
+
+build/lib/census_dispatch.o: build/lib/census_dispatch.c lib/census.h
+	$(GCC_CC) $(LIB_CFLAGS) -Wno-unused-parameter -c $< -o $@
+
+$(CENSUS_LIB): $(CENSUS_OBJS)
+	@mkdir -p $(dir $@)
+	$(GCC_CC) -nostdlib -nostartfiles -nodefaultlibs -noixemul -m68020 -o $@ $(CENSUS_OBJS) -lgcc
+
+.PHONY: census-lib
+census-lib: $(CENSUS_LIB)
 
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a
@@ -719,7 +778,7 @@ autotest: $(AUTOTEST_CONFIG) dist/Test/Grab
 	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in test/auto>"; exit 2; }
 	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see docs/testing.md"; exit 2; }
 	@mkdir -p dist/Test
-	@cp test/auto/RunOne dist/Test/RunOne
+	@cp test/auto/RunOne test/auto/RunCensus test/auto/WaitDone dist/Test/
 	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
 
 # --- Tools -------------------------------------------------------------------

@@ -1,0 +1,17 @@
+.KEY demo/A
+.BRA {
+.KET }
+; RunCensus -- GLQuake against the census minigl.library (DEV:Libs/Census,
+; added to LIBS: for this run only): timedemo {demo}, then -timedemoquit
+; ends the program so the library writes its slot totals. Output:
+; DEV:Test/census-{demo}.csv + census-{demo}-slots.csv, GLQuake's own text
+; in DEV:Test/census-{demo}.log, a done marker when it is over.
+FailAt 1000
+CD DEV:Quake
+SetEnv MiniGLCensus DEV:Test/census-{demo}
+Assign LIBS: DEV:Libs/Census ADD
+GLQuake -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/census-{demo}.log
+Echo "census {demo} rc=$RC" >>DEV:Test/census-{demo}.log
+Assign LIBS: DEV:Libs/Census REMOVE
+UnSetEnv MiniGLCensus
+Echo >DEV:Test/census-{demo}.done done

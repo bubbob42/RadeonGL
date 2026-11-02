@@ -1,0 +1,23 @@
+.KEY marker/A
+.BRA {
+.KET }
+; WaitDone -- wait up to 10 minutes (40 x 15 s) for a done marker; when it
+; never comes, log Status and grab the screen. Bounded, never a free loop.
+; (AmigaDOS If has GT but no LT; VAL makes the comparison numeric.)
+FailAt 1000
+Set wd_n 0
+Lab again
+If EXISTS {marker}
+  Skip end
+EndIf
+Set wd_n `Eval $wd_n + 1`
+If $wd_n GT 40 VAL
+  Echo "TIMEOUT waiting for {marker}" >>DEV:Test/auto.log
+  Status >>DEV:Test/auto.log
+  DEV:Test/Grab 0 0 640 480 TO {marker}.ppm
+  Skip end
+EndIf
+Wait 15
+Skip again BACK
+Lab end
+UnSet wd_n

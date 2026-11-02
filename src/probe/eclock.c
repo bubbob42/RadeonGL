@@ -10,11 +10,8 @@
 
 #include "eclock.h"
 
-#ifdef __GNUC__
+/* struct Device * under both compilers' proto/timer.h. */
 struct Device *TimerBase = NULL;
-#else
-struct Library *TimerBase = NULL;
-#endif
 
 ULONG Clock_Freq = 709379;
 
@@ -46,11 +43,7 @@ BOOL Clock_Open(void)
         clk_Port = NULL;
         return FALSE;
     }
-#ifdef __GNUC__
     TimerBase = clk_Req->tr_node.io_Device;
-#else
-    TimerBase = (struct Library *)clk_Req->tr_node.io_Device;
-#endif
     clk_Open = TRUE;
     Clock_Freq = ReadEClock(&ev);
     if (Clock_Freq == 0)

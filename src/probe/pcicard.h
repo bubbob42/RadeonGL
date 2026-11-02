@@ -11,8 +11,7 @@
 #define PROBE_PCICARD_H
 
 #include <exec/types.h>
-
-struct pci_dev;
+#include <libraries/openpci.h>
 
 struct PciCard
 {

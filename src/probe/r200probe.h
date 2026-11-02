@@ -9,7 +9,7 @@
 
 #include <exec/types.h>
 
-struct PciCard;
+#include "pcicard.h"
 
 /* Reads CONFIG_MEMSIZE both ways, reports both, sets Mmio_Swap. Returns
  * the memory size in bytes, 0 when undecided. */
