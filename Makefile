@@ -140,7 +140,7 @@ GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config13 launch-fsuae13 run-fsuae13 info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run release-stage release-drawer release-archive release-lha release-adf release-aminet release-verify release-dist
 
-all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run
+all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes
 
 # release: advance the revision, then rebuild both profiles so the new $VER is
 # embedded. This is the ONLY target that bumps -- run it by hand when cutting a
@@ -642,6 +642,50 @@ push: all
 .PHONY: glquake glquake-data clean-glquake
 glquake glquake-data clean-glquake:
 	$(MAKE) -f glquake/Makefile.radeongl $@
+
+# --- Probes: the day-one tools for the real machine (docs/probes.md) --------
+# R200Info reads the Radeon's registers (never writes); BusBench measures
+# MMIO and aperture costs and AllocateDMAMemoryForBoard. Both bypass P96 as
+# far as possible (openpci for the card, P96 only as BusBench's fallback
+# scratch). GCC, -m68020 (the Mediator needs a 020 anyway). Binaries under
+# dist/Probe/C, IconX scripts beside them, icons on the desktop.
+P96_SDK ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
+P96_INC := $(P96_SDK)/Include
+PROBE_COMMON := mmio eclock plog pcicard r200probe
+PROBE_CFLAGS := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm -noixemul -m68020 \
+                -fomit-frame-pointer -Isdk/openpci/include -I$(P96_INC)
+PROBE_OBJS   := $(addprefix build/probe/,$(addsuffix .o,$(PROBE_COMMON)))
+PROBE_HDRS   := $(wildcard src/probe/*.h)
+
+build/probe/%.o: src/probe/%.c $(PROBE_HDRS)
+	@mkdir -p build/probe
+	$(GCC_CC) $(PROBE_CFLAGS) -c $< -o $@
+
+dist/Probe/C/R200Info: build/probe/r200info.o $(PROBE_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
+dist/Probe/C/BusBench: build/probe/busbench.o $(PROBE_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
+# The scripts write their report next to themselves (DEV:Probe/<Tool>.log),
+# where the host reads it from the share afterwards.
+.PHONY: probes
+probes: dist/Probe/C/R200Info dist/Probe/C/BusBench
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
+	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
+	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
+	@printf 'echo "Done. The report is DEV:Probe/R200Info.log"\n' >> dist/Probe/R200Info
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/BusBench
+	@printf 'echo "BusBench: MMIO and aperture costs, 1 MB blocks (about a minute)."\n' >> dist/Probe/BusBench
+	@printf 'DEV:Probe/C/BusBench LOG=DEV:Probe/BusBench.log\n' >> dist/Probe/BusBench
+	@printf 'echo "Done. The report is DEV:Probe/BusBench.log"\n' >> dist/Probe/BusBench
+	@cp icons/run.info dist/Probe/R200Info.info
+	@cp icons/run.info dist/Probe/BusBench.info
+	@touch dist/.backdrop
+	@grep -q '^Probe/R200Info$$' dist/.backdrop || printf 'Probe/R200Info\nProbe/BusBench\n' >> dist/.backdrop
+	@echo "probes: staged DEV:Probe/R200Info + BusBench (scripts, icons, C/)"
 
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a
