@@ -616,11 +616,31 @@ static void Point(struct Sim *s, struct V p)
             Frag(s, x, y, p.z, p.col, p.st);
 }
 
+/* SE_TCL_OUTPUT_VTX_COMP_SEL picks the outputs TCL COMPUTES: the lit colour
+ * (OUTPUT_COLOR_0) and transformed texture coordinates (OUTPUT_TEX_n). The
+ * sim passes the vertex's colour and coordinates through, which is what the
+ * R200 does only when those bits are clear (Mesa r200UpdateSpecular,
+ * update_texturematrix). MEASURED on the A4000D (Tri, 2026-11-02): with
+ * OUTPUT_COLOR_0 set and lighting off, the colours came out of uninitialised
+ * material state. So a request for a computed output is not modelled. */
+static void TclOutputs(struct Sim *s)
+{
+    ULONG compsel;
+
+    if (!(REG(s, R_SE_VAP_CNTL) & R_VAP_TCL_ENABLE))
+        return;
+    compsel = REG(s, R_SE_TCL_OUTPUT_VTX_COMP_SEL);
+    if (((compsel & R_OUTPUT_COLOR_0) && !(REG(s, R_SE_TCL_LIGHT_MODEL_CTL_0) & R_LIGHTING_ENABLE))
+        || (compsel & R_OUTPUT_TEX_MASK))
+        s->unsupported++;
+}
+
 static void DrawPrim(struct Sim *s, ULONG prim, struct V *v, ULONG n)
 {
     ULONG i;
     struct V d;
 
+    TclOutputs(s);
     switch (prim)
     {
         case R_VF_PRIM_TRIANGLES:

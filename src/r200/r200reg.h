@@ -304,11 +304,13 @@
 #define   R_OUTPUT_COLOR_0        (1UL << 8)
 #define   R_OUTPUT_COLOR_1        (1UL << 9)
 #define   R_OUTPUT_TEX_0          (1UL << 16)    /* unit n: << n */
+#define   R_OUTPUT_TEX_MASK       (0x3fUL << 16)
 #define R_SE_TCL_INPUT_VTX_VECTOR_ADDR_0 0x2254
 #define R_SE_TCL_INPUT_VTX_VECTOR_ADDR_1 0x2258
 #define R_SE_TCL_INPUT_VTX_VECTOR_ADDR_2 0x225c
 #define R_SE_TCL_INPUT_VTX_VECTOR_ADDR_3 0x2260
 #define R_SE_TCL_LIGHT_MODEL_CTL_0 0x2268
+#define   R_LIGHTING_ENABLE       (1UL << 0)
 #define R_SE_TCL_LIGHT_MODEL_CTL_1 0x226c
 #define R_SE_TCL_PER_LIGHT_CTL_0 0x2270  /* .. _3 at 0x227c */
 #define R_SE_TCL_STATE_FLUSH    0x2284

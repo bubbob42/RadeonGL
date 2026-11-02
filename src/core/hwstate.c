@@ -290,8 +290,14 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
     if (units == c->hw_units && !(c->dirty & D_VTXFMT))
         return;
     fmt1 = ((units & 1) ? 2UL : 0) | ((units & 2) ? 2UL << 3 : 0);
-    compsel = R_OUTPUT_XYZW | R_OUTPUT_COLOR_0
-            | ((units & 1) ? R_OUTPUT_TEX_0 : 0) | ((units & 2) ? R_OUTPUT_TEX_0 << 1 : 0);
+    /* COMP_SEL names the outputs TCL COMPUTES: the lit colour (lighting
+     * on) and transformed texture coordinates (a texture matrix or texgen).
+     * Neither is in the core yet, so colour and coordinates pass through.
+     * Mesa sets them the same way (r200UpdateSpecular,
+     * update_texturematrix); MEASURED on the A4000D (Tri, 2026-11-02):
+     * OUTPUT_COLOR_0 with lighting off draws uninitialised material
+     * colours. */
+    compsel = R_OUTPUT_XYZW;
     R2E_VertexFormat(c->cs, R_VTX_Z0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT), fmt1,
                      R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT), fmt1,
                      compsel);
