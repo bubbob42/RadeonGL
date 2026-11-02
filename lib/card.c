@@ -227,6 +227,19 @@ static BOOL AllocData(struct Card *k, ULONG i, ULONG bytes)
     return (BOOL) (k->b[i].bm != NULL);
 }
 
+/* Is bitmap i in video RAM now? P96 may keep a bitmap it cannot place on
+ * the board (too big, too tall) in fast RAM. */
+static BOOL OnBoard(struct Card *k, ULONG i)
+{
+    BOOL on;
+
+    if (!LockBm(k, i, TRUE))
+        return FALSE;
+    on = (BOOL) (p96GetBitMapAttr(k->b[i].bm, P96BMA_ISONBOARD) != 0);
+    UnlockBm(k, i);
+    return on;
+}
+
 /* Where target and ring sit in their bitmaps, from this lock: 4 KB aligned
  * (their content does not outlive a flush). The heap's place in its bitmap
  * is fixed at the open (k->heap_delta): its content must survive a move. */
@@ -785,16 +798,38 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
     if (!AllocData(k, CARD_TARGET, Align4k(k->color_bytes) + k->depth_bytes + 8192)
         || !AllocData(k, CARD_RING, CARD_RING_DW * 4 + 4096))
     {
-        Why(why, whylen, "no video RAM for the back buffer and the ring");
+        Why(why, whylen, "no memory for the back buffer and the ring bitmaps");
         Card_Close(k);
         return CARD_FAILED;
     }
+    if (!OnBoard(k, CARD_TARGET))
+    {
+        Why(why, whylen, "P96 did not put the back buffer bitmap on the board");
+        Card_Close(k);
+        return CARD_FAILED;
+    }
+    if (!OnBoard(k, CARD_RING))
+    {
+        Why(why, whylen, "P96 did not put the ring bitmap on the board");
+        Card_Close(k);
+        return CARD_FAILED;
+    }
+    /* the heap: 16 MB, halving to 4 MB, until P96 places it on the board
+     * (a bitmap too tall or too big for the board stays in fast RAM) */
     for (size = 16UL << 20; size >= (4UL << 20); size >>= 1)
-        if (AllocData(k, CARD_HEAP, size + 4096))
+    {
+        if (AllocData(k, CARD_HEAP, size + 4096) && OnBoard(k, CARD_HEAP))
             break;
+        if (k->b[CARD_HEAP].bm != NULL)
+        {
+            FreeBitMap(k->b[CARD_HEAP].bm);
+            k->b[CARD_HEAP].bm = NULL;
+            k->heap_offboard++;
+        }
+    }
     if (k->b[CARD_HEAP].bm == NULL)
     {
-        Why(why, whylen, "no video RAM for a 4 MB texture heap");
+        Why(why, whylen, "no texture heap of 4 MB or more on the board");
         Card_Close(k);
         return CARD_FAILED;
     }

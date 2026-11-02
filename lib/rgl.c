@@ -236,7 +236,8 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     PutU(f, r->core.stat_lock_uploads); Put(f, ", stream bytes: ");
     PutU(f, r->core.stat_stream_bytes); Put(f, "\n");
     Put(f, "texture heap used: "); PutU(f, r->core.heap.used); Put(f, " of ");
-    PutU(f, k->heap_size); Put(f, "\n");
+    PutU(f, k->heap_size); Put(f, " (larger sizes P96 kept off the board: ");
+    PutU(f, k->heap_offboard); Put(f, ")\n");
     Put(f, "checker: "); Put(f, k->check ? "on" : "OFF (RadeonGLCheck=0)"); Put(f, "\n");
     if (k->lost != 0)
     {

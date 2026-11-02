@@ -117,6 +117,7 @@ struct Card
     /* for the log */
     ULONG flushes, presents, dropped, moved, offboard, noscreen;
     ULONG dwords, fence_us_max, lock_us_max, lock_us_sum, vram_locks, cp_resets;
+    ULONG heap_offboard;        /* heap sizes P96 kept off the board at the open */
 };
 
 #define CARD_LOST_CHECKER  1    /* the checker refused a packet */
