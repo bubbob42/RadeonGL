@@ -196,7 +196,7 @@ static LONG EmitTexture(struct Core *c, ULONG u)
     r.format_x = R_LOD_BIAS_CORRECTION;
     r.multi = 0;
     r.offset = t->gpu;
-    t->used_since_idle = 1;
+    t->use_epoch = c->epoch;
     return R2E_Texture(c->cs, u, &r);
 }
 

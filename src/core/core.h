@@ -94,7 +94,7 @@ struct CoreTex
     ULONG lofs[CORE_MAX_LEVELS];    /* byte offset of each level */
     ULONG pitch[CORE_MAX_LEVELS];   /* bytes per row of each level */
     ULONG min_filter, mag_filter, wrap_s, wrap_t;
-    ULONG used_since_idle;  /* drawn with since the last wait_idle */
+    ULONG use_epoch;        /* the epoch it was last drawn in (0: never) */
 };
 
 /* Client vertex arrays (glVertexPointer ...). */
@@ -166,6 +166,7 @@ struct Core
     ULONG dirty;
     ULONG error;            /* first error since glGetError, GL_NO_ERROR = 0 */
     ULONG tex_swap;         /* texel dwords stored byte-reversed (no aperture swap) */
+    ULONG epoch;            /* GPU-idle epoch: bumped whenever the GPU is known idle */
 
     /* enables and state, in GL terms */
     ULONG enables;
@@ -251,6 +252,10 @@ void  Core_Error(struct Core *c, ULONG err);
 
 /* Emit every dirty register block (before a draw; tests call it too). */
 LONG  Core_Validate(struct Core *c);
+
+/* The host knows the GPU has finished everything emitted so far (a frame's
+ * fence passed): every texture may be rewritten without waiting. */
+void  Core_GpuIdle(struct Core *c);
 
 /* --- State (state.c) ------------------------------------------------------------ */
 

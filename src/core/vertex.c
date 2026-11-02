@@ -206,10 +206,9 @@ void Core_End(struct Core *c)
 
 static void Emit(struct Core *c, float x, float y, float z)
 {
-    struct R2Cs *cs;
     ULONG *p;
+    ULONG b0, b1, b2, b3;
     ULONG k;
-    ULONG b0, b1, b2;
 
     p = c->vptr;
     if (p == NULL)
@@ -221,29 +220,47 @@ static void Emit(struct Core *c, float x, float y, float z)
         if (p == NULL)
             return;
     }
-    cs = c->cs;
-    b0 = R2Cs_FloatBits(x);
-    b1 = R2Cs_FloatBits(y);
-    b2 = R2Cs_FloatBits(z);
-    p[0] = R2_OUT(cs, b0);
-    p[1] = R2_OUT(cs, b1);
-    p[2] = R2_OUT(cs, b2);
-    p[3] = R2_OUT(cs, c->cur_color);
+    /* the hot path: no calls (r2cs.h R2_FBITS, R2_SWAPI) */
+    b0 = R2_FBITS(x);
+    b1 = R2_FBITS(y);
+    b2 = R2_FBITS(z);
+    b3 = c->cur_color;
+    if (c->cs->swap)
+    {
+        R2_SWAPI(b0);
+        R2_SWAPI(b1);
+        R2_SWAPI(b2);
+        R2_SWAPI(b3);
+    }
+    p[0] = b0;
+    p[1] = b1;
+    p[2] = b2;
+    p[3] = b3;
     k = 4;
     if (c->units_on & 1)
     {
-        b0 = R2Cs_FloatBits(c->cur_st[0][0]);
-        b1 = R2Cs_FloatBits(c->cur_st[0][1]);
-        p[4] = R2_OUT(cs, b0);
-        p[5] = R2_OUT(cs, b1);
+        b0 = R2_FBITS(c->cur_st[0][0]);
+        b1 = R2_FBITS(c->cur_st[0][1]);
+        if (c->cs->swap)
+        {
+            R2_SWAPI(b0);
+            R2_SWAPI(b1);
+        }
+        p[4] = b0;
+        p[5] = b1;
         k = 6;
     }
     if (c->units_on & 2)
     {
-        b0 = R2Cs_FloatBits(c->cur_st[1][0]);
-        b1 = R2Cs_FloatBits(c->cur_st[1][1]);
-        p[k] = R2_OUT(cs, b0);
-        p[k + 1] = R2_OUT(cs, b1);
+        b0 = R2_FBITS(c->cur_st[1][0]);
+        b1 = R2_FBITS(c->cur_st[1][1]);
+        if (c->cs->swap)
+        {
+            R2_SWAPI(b0);
+            R2_SWAPI(b1);
+        }
+        p[k] = b0;
+        p[k + 1] = b1;
     }
     if (c->nverts == 0 && NeedsFirst(c->prim))
         for (k = 0; k < c->vtx_dw; k++)

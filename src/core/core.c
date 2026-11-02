@@ -85,6 +85,7 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     c->prim = CORE_NO_PRIM;
     c->hw_units = 0xffffffffUL;
     c->tex_swap = 1;
+    c->epoch = 1;
     c->dirty = D_ALL;
     return GL_NO_ERROR;
 }
@@ -102,6 +103,22 @@ void Core_Free(struct Core *c)
         c->tex = NULL;
     }
     Heap_FreeAll(c);
+}
+
+void Core_GpuIdle(struct Core *c)
+{
+    c->epoch++;
+}
+
+/* The GPU may still read texture t (drawn in this epoch): wait until it
+ * has finished, which makes every texture safe (a new epoch). */
+void Core_TexHazard(struct Core *c, struct CoreTex *t)
+{
+    if (t->use_epoch != c->epoch || c->env.wait_idle == NULL)
+        return;
+    c->env.wait_idle(c->env.env);
+    c->stat_idle_waits++;
+    c->epoch++;
 }
 
 void Core_Error(struct Core *c, ULONG err)

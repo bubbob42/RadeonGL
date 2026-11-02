@@ -68,4 +68,20 @@ ULONG R2Cs_FloatBits(float f);
 /* A value as it is stored in this stream. */
 #define R2_OUT(cs, v)  ((cs)->swap ? R2Cs_Swap32((ULONG) (v)) : (ULONG) (v))
 
+/* The hot path (one glVertex: 4 to 8 dwords) without calls.
+ *
+ * R2_FBITS(f): the bits of a float VARIABLE (an lvalue), read in place.
+ * Type punning through a pointer: the GCC builds pass -fno-strict-aliasing
+ * (Makefile), SAS/C does not reason about aliasing.
+ *
+ * R2_SWAPI(v): v byte-reversed, in place (v a ULONG variable). On GCC for
+ * the 68k three register instructions; elsewhere the function. */
+#define R2_FBITS(f)    (*(const ULONG *) (const void *) &(f))
+
+#if defined(__GNUC__) && defined(__mc68000__)
+#define R2_SWAPI(v)    __asm__("rol.w #8,%0\n\tswap %0\n\trol.w #8,%0" : "+d" (v))
+#else
+#define R2_SWAPI(v)    ((v) = R2Cs_Swap32(v))
+#endif
+
 #endif /* R2CS_H */

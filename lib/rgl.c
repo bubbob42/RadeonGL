@@ -422,8 +422,8 @@ void Hook_MGLSwitchDisplay(GLcontext context)
         return;
     /* end of frame: a fence, hand it over, wait (the null card is instant;
      * the Radeon will present here) */
-    if (R2Ring_Fence(&r->ring, &seq) == R2_OK)
-        R2Ring_WaitFence(&r->ring, seq);
+    if (R2Ring_Fence(&r->ring, &seq) == R2_OK && R2Ring_WaitFence(&r->ring, seq) == R2_OK)
+        Core_GpuIdle(&r->core);     /* every texture is free to rewrite */
     dw = r->card.dwords - r->last_dwords;
     if (dw > r->frame_dw_max)
         r->frame_dw_max = dw;

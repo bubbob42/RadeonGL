@@ -753,7 +753,7 @@ census-lib: $(CENSUS_LIB)
 R200_MODULES    := r2cs r2emit r2ring r2check
 R200_HDRS       := $(wildcard src/r200/*.h)
 HOSTCC          ?= cc
-HOST_MOD_CFLAGS := -O2 -std=c89 -pedantic -Wall -Wextra -Werror
+HOST_MOD_CFLAGS := -O2 -std=c89 -pedantic -Wall -Wextra -Werror -fno-strict-aliasing
 HOST_TST_CFLAGS := -O2 -std=c99 -Wall -Wextra -Werror
 HOST_INC        := -Itest/host/shim -Isrc/r200 -Itest/host
 HOST_R200_OBJS  := $(addprefix build/host/,$(addsuffix .o,$(R200_MODULES)))
@@ -799,7 +799,7 @@ test: build/host/test_r200 build/host/test_core build/host/test_sim build/host/r
 	./build/host/test_core
 	./build/host/test_sim
 
-R200_GCC_CFLAGS := $(GCC_WARNINGS) -O2 -std=gnu99 -m68020 -noixemul -fomit-frame-pointer -Isrc/r200
+R200_GCC_CFLAGS := $(GCC_WARNINGS) -O2 -std=gnu99 -m68020 -noixemul -fomit-frame-pointer -fno-strict-aliasing -Isrc/r200
 R200_GCC_OBJS   := $(addprefix build/r200-gcc/,$(addsuffix .o,$(R200_MODULES)))
 R200_SC_OBJS    := $(addprefix build/r200-sasc/,$(addsuffix .o,$(R200_MODULES)))
 
@@ -837,7 +837,7 @@ RGL_LIB    := dist/Libs/RadeonGL/minigl.library
 RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c | sort -u | paste -sd, -}
 RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
               -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
-              -m68060 -m68881 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl -Isrc/core -Isrc/r200
+              -fno-strict-aliasing -m68060 -m68881 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl -Isrc/core -Isrc/r200
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_MODULES))) \

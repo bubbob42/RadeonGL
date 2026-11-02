@@ -147,12 +147,7 @@ static void Release(struct Core *c, struct CoreTex *t)
 {
     if (t->gpu != 0)
     {
-        if (t->used_since_idle && c->env.wait_idle != NULL)
-        {
-            c->env.wait_idle(c->env.env);
-            c->stat_idle_waits++;
-            t->used_since_idle = 0;
-        }
+        Core_TexHazard(c, t);       /* the GPU may still read the memory */
         Heap_Free(c, t->gpu - c->heap.gpu);
         t->gpu = 0;
         t->cpu = NULL;
@@ -438,14 +433,9 @@ static void Upload(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG y,
     /* GL_UNPACK_ALIGNMENT 4, GL's default (glPixelStorei is not in
      * GLQuake's slots; the rest of the pixel store comes with it) */
     stride = (w * bpp + 3) & ~3UL;
-    if (t->used_since_idle && c->env.wait_idle != NULL)
-    {
-        /* the GPU may still read the old texels: wait (double-buffered
-         * lightmaps are the fast-path answer, concept 6.6) */
-        c->env.wait_idle(c->env.env);
-        c->stat_idle_waits++;
-        t->used_since_idle = 0;
-    }
+    /* the GPU may still read the old texels: wait (a staging buffer the
+     * GPU copies from in ring order is the fast-path answer, concept 6.6) */
+    Core_TexHazard(c, t);
     for (row = 0; row < h; row++)
         WriteRow(c, t, l, x, y + row, w, src, bpp, pixels + row * stride);
 }

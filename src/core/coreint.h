@@ -12,6 +12,9 @@ LONG  Core_Floor(double f);
 /* [0, 1] -> 0..255, rounded, clamped */
 ULONG Core_Unit255(float f);
 
+/* Wait for the GPU if texture t was drawn in the current epoch. */
+void  Core_TexHazard(struct Core *c, struct CoreTex *t);
+
 /* A fresh texture object's GL defaults. */
 void  Tex_Defaults(struct CoreTex *t, ULONG name);
 

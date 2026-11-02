@@ -464,6 +464,30 @@ static void test_textures(void)
     CHECK_HEX(Texel(t, 0, 2, 4), 0xf000UL | (((4 * 16 + 2) & 15) << 8) | ((4 * 16 + 2) & 0xff));
     CHECK_HEX(Texel(t, 0, 8, 5), 0xf000UL | (((5 * 16 + 8) & 15) << 8) | ((5 * 16 + 8) & 0xff));
 
+    /* hazards: an upload waits only for a texture drawn in this epoch, and
+     * one wait makes every texture safe (Regression 2026-11-02: each
+     * texture kept its own flag, so a frame of lightmap updates waited
+     * once per lightmap) */
+    {
+        ULONG w0 = idle_waits;
+        UBYTE row[16 * 2];
+        memset(row, 0x55, sizeof(row));
+        core.tex[5]->use_epoch = core.epoch;        /* both drawn this epoch */
+        core.tex[6]->use_epoch = core.epoch;
+        Core_BindTexture(&core, GL_TEXTURE_2D, 6);
+        Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 16, 1, MGL_UNSIGNED_SHORT_4_4_4_4,
+                           GL_UNSIGNED_BYTE, row);
+        CHECK_INT(idle_waits - w0, 1);
+        Core_BindTexture(&core, GL_TEXTURE_2D, 5);
+        Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 8, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        CHECK_INT(idle_waits - w0, 1);              /* the GPU was idle already */
+        core.tex[5]->use_epoch = core.epoch;
+        Core_GpuIdle(&core);                        /* a frame's fence passed */
+        Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 8, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        CHECK_INT(idle_waits - w0, 1);
+        Core_BindTexture(&core, GL_TEXTURE_2D, 6);
+    }
+
     /* luminance: four texels a dword */
     for (i = 0; i < 16; i++)
         l8[i] = (UBYTE) (0x10 * i);
