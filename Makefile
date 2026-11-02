@@ -762,16 +762,31 @@ build/host/%.o: src/r200/%.c $(R200_HDRS)
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -c $< -o $@
 
-build/host/%.o: test/host/%.c $(R200_HDRS) $(wildcard test/host/*.h)
+build/host/%.o: test/host/%.c $(R200_HDRS) $(wildcard src/core/*.h) $(wildcard test/host/*.h)
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_TST_CFLAGS) $(HOST_INC) -c $< -o $@
 
 build/host/test_r200: build/host/test_r200.o build/host/simcp.o $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
+# The GL core (src/core, decision D2: our own, C89 without OS calls) on the
+# same terms: host-tested down to the packets it emits.
+CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array
+CORE_HDRS       := $(wildcard src/core/*.h)
+HOST_CORE_OBJS  := $(addprefix build/host/core_,$(addsuffix .o,$(CORE_MODULES)))
+HOST_INC        += -Isrc/core
+
+build/host/core_%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS)
+	@mkdir -p build/host
+	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -c $< -o $@
+
+build/host/test_core: build/host/test_core.o build/host/simcp.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
+	$(HOSTCC) $^ -o $@
+
 .PHONY: test
-test: build/host/test_r200
+test: build/host/test_r200 build/host/test_core
 	./build/host/test_r200
+	./build/host/test_core
 
 R200_GCC_CFLAGS := $(GCC_WARNINGS) -O2 -std=gnu99 -m68020 -noixemul -fomit-frame-pointer -Isrc/r200
 R200_GCC_OBJS   := $(addprefix build/r200-gcc/,$(addsuffix .o,$(R200_MODULES)))
@@ -785,8 +800,19 @@ build/r200-sasc/%.o: src/r200/%.c $(R200_HDRS) | $(VAMOSRC)
 	@mkdir -p build/r200-sasc
 	$(VAMOS_SC) sc $(SC_OPTS) CPU=68020 OPTIMIZE NOLINK IDIR=include: IDIR=proj:src/r200/ OBJNAME=proj:$@ proj:$<
 
+CORE_GCC_OBJS   := $(addprefix build/core-gcc/,$(addsuffix .o,$(CORE_MODULES)))
+CORE_SC_OBJS    := $(addprefix build/core-sasc/,$(addsuffix .o,$(CORE_MODULES)))
+
 .PHONY: r200-objs
-r200-objs: $(R200_GCC_OBJS) $(R200_SC_OBJS)
+r200-objs: $(R200_GCC_OBJS) $(R200_SC_OBJS) $(CORE_GCC_OBJS) $(CORE_SC_OBJS)
+
+build/core-gcc/%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS)
+	@mkdir -p build/core-gcc
+	$(GCC_CC) $(R200_GCC_CFLAGS) -Isrc/core -c $< -o $@
+
+build/core-sasc/%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS) | $(VAMOSRC)
+	@mkdir -p build/core-sasc
+	$(VAMOS_SC) sc $(SC_OPTS) CPU=68020 OPTIMIZE NOLINK IDIR=include: IDIR=proj:src/r200/ IDIR=proj:src/core/ OBJNAME=proj:$@ proj:$<
 
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a

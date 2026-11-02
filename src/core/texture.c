@@ -1,0 +1,591 @@
+/*
+ * texture.c -- texture objects, their VRAM storage and uploads.
+ *
+ * Storage (concept 6.6): the R200 formats a 16-bit Quake needs, chosen
+ * from the internal format:
+ *
+ *   RGB (3, GL_RGB, GL_RGB5, MGL 5_6_5)        RGB565
+ *   RGBA (4, GL_RGBA, MGL 4_4_4_4, ...)        ARGB4444
+ *   LUMINANCE (1)                              I8      (alpha from the fragment)
+ *   INTENSITY, ALPHA                           I8 | ALPHA_IN_MAP (Mesa's table)
+ *   LUMINANCE_ALPHA (2)                        AI88
+ *
+ * Every mip level's rows are padded to 32 bytes and the levels follow each
+ * other (Mesa radeon_mipmap_tree); level 0 is 32-byte aligned. The chain
+ * for a power-of-two level 0 is allocated at once.
+ *
+ * Writes go to VRAM a dword at a time. A dword is first packed the way the
+ * little-endian GPU reads it (texel k in the k-th lowest bytes), then
+ * stored byte-reversed when the CPU must swap (tex_swap, as the stream's
+ * swap: the Mediator does not swap). Rows whose ends do not fall on dword
+ * boundaries read the edge dwords back first.
+ *
+ * Sources: GL_RGBA, GL_RGB, GL_LUMINANCE, GL_ALPHA, GL_LUMINANCE_ALPHA with
+ * GL_UNSIGNED_BYTE, MiniGL's MGL_UNSIGNED_SHORT_4_4_4_4 (A4R4G4B4 from the
+ * most significant bit, big-endian words) and _5_6_5 (R5G6B5), as format
+ * or as type -- GLQuake uploads its lightmaps as the former.
+ */
+
+#include "core.h"
+#include "coreint.h"
+#include "r200reg.h"
+
+void Tex_Defaults(struct CoreTex *t, ULONG name)
+{
+    UBYTE *p;
+    ULONG i;
+
+    p = (UBYTE *) t;
+    for (i = 0; i < sizeof(*t); i++)
+        p[i] = 0;
+    t->name = name;
+    t->min_filter = GL_NEAREST_MIPMAP_LINEAR;
+    t->mag_filter = GL_LINEAR;
+    t->wrap_s = GL_REPEAT;
+    t->wrap_t = GL_REPEAT;
+    t->base = GL_RGBA;
+}
+
+struct CoreTex *Tex_Get(struct Core *c, ULONG name)
+{
+    struct CoreTex *t;
+
+    if (name >= CORE_MAX_TEX)
+        return NULL;
+    t = c->tex[name];
+    if (t == NULL)
+    {
+        t = (struct CoreTex *) c->env.alloc(c->env.env, sizeof(struct CoreTex));
+        if (t == NULL)
+            return NULL;
+        Tex_Defaults(t, name);
+        c->tex[name] = t;
+    }
+    return t;
+}
+
+struct CoreTex *Core_Texture(struct Core *c, ULONG unit)
+{
+    struct CoreTex *t;
+
+    t = c->tex[c->bound[unit]];
+    if (t == NULL || t->gpu == 0 || !(t->levels & 1))
+        return NULL;
+    return t;
+}
+
+/* Every unit that has t bound must re-emit it. */
+static void Touched(struct Core *c, const struct CoreTex *t)
+{
+    ULONG u;
+
+    for (u = 0; u < CORE_UNITS; u++)
+        if (c->bound[u] == t->name)
+            DIRTY_UNIT(c, u);
+}
+
+void Core_BindTexture(struct Core *c, ULONG target, ULONG name)
+{
+    ULONG u;
+
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (target != GL_TEXTURE_2D)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    u = c->active_unit;
+    if (c->bound[u] == name)
+        return;
+    if (Tex_Get(c, name) == NULL)
+    {
+        Core_Error(c, name >= CORE_MAX_TEX ? GL_INVALID_VALUE : GL_OUT_OF_MEMORY);
+        return;
+    }
+    c->bound[u] = name;
+    DIRTY_UNIT(c, u);
+}
+
+static void Release(struct Core *c, struct CoreTex *t)
+{
+    if (t->gpu != 0)
+    {
+        if (t->used_since_idle && c->env.wait_idle != NULL)
+        {
+            c->env.wait_idle(c->env.env);
+            c->stat_idle_waits++;
+            t->used_since_idle = 0;
+        }
+        Heap_Free(c, t->gpu - c->heap.gpu);
+        t->gpu = 0;
+        t->cpu = NULL;
+        t->bytes = 0;
+        t->levels = 0;
+    }
+}
+
+void Core_DeleteTextures(struct Core *c, LONG n, const ULONG *names)
+{
+    LONG i;
+    ULONG u;
+    struct CoreTex *t;
+
+    for (i = 0; i < n; i++)
+    {
+        if (names[i] == 0 || names[i] >= CORE_MAX_TEX || c->tex[names[i]] == NULL)
+            continue;
+        t = c->tex[names[i]];
+        Release(c, t);
+        for (u = 0; u < CORE_UNITS; u++)
+            if (c->bound[u] == names[i])
+            {
+                c->bound[u] = 0;
+                DIRTY_UNIT(c, u);
+            }
+        c->env.free(c->env.env, t, sizeof(*t));
+        c->tex[names[i]] = NULL;
+    }
+}
+
+void Core_TexParameteri(struct Core *c, ULONG target, ULONG pname, LONG param)
+{
+    struct CoreTex *t;
+    ULONG p;
+
+    if (target != GL_TEXTURE_2D)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    t = c->tex[c->bound[c->active_unit]];
+    if (t == NULL)
+        return;
+    p = (ULONG) param;
+    switch (pname)
+    {
+        case GL_TEXTURE_MIN_FILTER:
+            if (p != GL_NEAREST && p != GL_LINEAR && p != GL_NEAREST_MIPMAP_NEAREST
+                && p != GL_NEAREST_MIPMAP_LINEAR && p != GL_LINEAR_MIPMAP_NEAREST
+                && p != GL_LINEAR_MIPMAP_LINEAR)
+                break;
+            t->min_filter = p;
+            Touched(c, t);
+            return;
+        case GL_TEXTURE_MAG_FILTER:
+            if (p != GL_NEAREST && p != GL_LINEAR)
+                break;
+            t->mag_filter = p;
+            Touched(c, t);
+            return;
+        case GL_TEXTURE_WRAP_S:
+        case GL_TEXTURE_WRAP_T:
+            if (p == GL_CLAMP_TO_EDGE)
+                p = GL_CLAMP;           /* R200: CLAMP_LAST either way */
+            if (p != GL_REPEAT && p != GL_CLAMP)
+                break;
+            if (pname == GL_TEXTURE_WRAP_S)
+                t->wrap_s = p;
+            else
+                t->wrap_t = p;
+            Touched(c, t);
+            return;
+    }
+    Core_Error(c, GL_INVALID_ENUM);
+}
+
+/* --- Formats -------------------------------------------------------------------- */
+
+/* GL internal format -> base format, or 0 if unsupported. */
+static ULONG BaseOf(LONG internal)
+{
+    switch ((ULONG) internal)
+    {
+        case 1: case GL_LUMINANCE: case GL_LUMINANCE8:
+            return GL_LUMINANCE;
+        case 2: case GL_LUMINANCE_ALPHA:
+            return GL_LUMINANCE_ALPHA;
+        case 3: case GL_RGB: case GL_RGB5: case GL_RGB8: case MGL_UNSIGNED_SHORT_5_6_5:
+            return GL_RGB;
+        case 4: case GL_RGBA: case GL_RGBA8: case GL_RGB5_A1: case MGL_UNSIGNED_SHORT_4_4_4_4:
+            return GL_RGBA;
+        case GL_ALPHA: case GL_ALPHA8:
+            return GL_ALPHA;
+        case GL_INTENSITY: case GL_INTENSITY8:
+            return GL_INTENSITY;
+    }
+    return 0;
+}
+
+static void HwOf(ULONG base, ULONG *hwfmt, ULONG *cpp)
+{
+    switch (base)
+    {
+        case GL_RGB:            *hwfmt = R_TXFORMAT_RGB565; *cpp = 2; return;
+        case GL_LUMINANCE:      *hwfmt = R_TXFORMAT_I8; *cpp = 1; return;
+        case GL_INTENSITY:
+        case GL_ALPHA:          *hwfmt = R_TXFORMAT_I8 | R_TXFORMAT_ALPHA_IN_MAP; *cpp = 1; return;
+        case GL_LUMINANCE_ALPHA: *hwfmt = R_TXFORMAT_AI88 | R_TXFORMAT_ALPHA_IN_MAP; *cpp = 2; return;
+    }
+    *hwfmt = R_TXFORMAT_ARGB4444 | R_TXFORMAT_ALPHA_IN_MAP;
+    *cpp = 2;
+}
+
+/* Source layouts */
+#define SRC_RGBA    1
+#define SRC_RGB     2
+#define SRC_L       3
+#define SRC_A       4
+#define SRC_LA      5
+#define SRC_4444    6   /* big-endian A4R4G4B4 words */
+#define SRC_565     7   /* big-endian R5G6B5 words */
+
+static ULONG SrcOf(ULONG format, ULONG type, ULONG *bpp)
+{
+    if (format == MGL_UNSIGNED_SHORT_4_4_4_4 || type == MGL_UNSIGNED_SHORT_4_4_4_4)
+    {
+        *bpp = 2;
+        return SRC_4444;
+    }
+    if (format == MGL_UNSIGNED_SHORT_5_6_5 || type == MGL_UNSIGNED_SHORT_5_6_5)
+    {
+        *bpp = 2;
+        return SRC_565;
+    }
+    if (type != GL_UNSIGNED_BYTE)
+        return 0;
+    switch (format)
+    {
+        case GL_RGBA:               *bpp = 4; return SRC_RGBA;
+        case GL_RGB:                *bpp = 3; return SRC_RGB;
+        case GL_LUMINANCE:          *bpp = 1; return SRC_L;
+        case GL_ALPHA:              *bpp = 1; return SRC_A;
+        case GL_LUMINANCE_ALPHA:    *bpp = 2; return SRC_LA;
+    }
+    return 0;
+}
+
+/* One source pixel as r, g, b, a bytes. */
+static void Fetch(ULONG src, const UBYTE *p, ULONG *r, ULONG *g, ULONG *b, ULONG *a)
+{
+    ULONG w;
+
+    switch (src)
+    {
+        case SRC_RGBA: *r = p[0]; *g = p[1]; *b = p[2]; *a = p[3]; return;
+        case SRC_RGB:  *r = p[0]; *g = p[1]; *b = p[2]; *a = 255; return;
+        case SRC_L:    *r = *g = *b = p[0]; *a = 255; return;
+        case SRC_A:    *r = *g = *b = 255; *a = p[0]; return;
+        case SRC_LA:   *r = *g = *b = p[0]; *a = p[1]; return;
+        case SRC_4444:
+            w = ((ULONG) p[0] << 8) | p[1];
+            *a = ((w >> 12) & 15) * 17;
+            *r = ((w >> 8) & 15) * 17;
+            *g = ((w >> 4) & 15) * 17;
+            *b = (w & 15) * 17;
+            return;
+        default:    /* SRC_565 */
+            w = ((ULONG) p[0] << 8) | p[1];
+            *r = ((w >> 11) & 31) * 255 / 31;
+            *g = ((w >> 5) & 63) * 255 / 63;
+            *b = (w & 31) * 255 / 31;
+            *a = 255;
+            return;
+    }
+}
+
+/* One texel in the storage format, as the GPU reads it. */
+static ULONG Encode(ULONG base, ULONG r, ULONG g, ULONG b, ULONG a)
+{
+    switch (base)
+    {
+        case GL_RGB:
+            return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+        case GL_LUMINANCE:
+            return r;
+        case GL_INTENSITY:
+            return r;
+        case GL_ALPHA:
+            return a;
+        case GL_LUMINANCE_ALPHA:
+            return (a << 8) | r;
+    }
+    return ((a >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+}
+
+/* A source pixel straight into the storage format, without the bytes in
+ * between, where the layouts already agree. */
+static ULONG Direct(ULONG src, ULONG base, const UBYTE *p, ULONG *texel)
+{
+    if ((src == SRC_4444 && base == GL_RGBA) || (src == SRC_565 && base == GL_RGB))
+    {
+        *texel = ((ULONG) p[0] << 8) | p[1];
+        return 1;
+    }
+    if (src == SRC_L && (base == GL_LUMINANCE || base == GL_INTENSITY))
+    {
+        *texel = p[0];
+        return 1;
+    }
+    return 0;
+}
+
+static ULONG Out(struct Core *c, ULONG g)
+{
+    return c->tex_swap ? R2Cs_Swap32(g) : g;
+}
+
+static ULONG In(struct Core *c, ULONG v)
+{
+    return c->tex_swap ? R2Cs_Swap32(v) : v;
+}
+
+/* Write w texels of one row: level l, row y, from column x. */
+static void WriteRow(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG y,
+                     ULONG w, ULONG src, ULONG bpp, const UBYTE *row)
+{
+    ULONG cpp;
+    ULONG per;          /* texels a dword */
+    ULONG byte0;
+    ULONG first;        /* first texel position within its dword */
+    ULONG *dst;
+    ULONG acc;
+    ULONG mask;
+    ULONG unit;
+    ULONG i;
+    ULONG slot;
+    ULONG texel;
+    ULONG r, g, b, a;
+
+    cpp = t->cpp;
+    unit = (cpp == 4) ? 0xffffffffUL : ((1UL << (cpp * 8)) - 1);
+    per = 4 / cpp;
+    byte0 = t->lofs[l] + y * t->pitch[l] + x * cpp;
+    dst = t->cpu + byte0 / 4;
+    first = (byte0 & 3) / cpp;
+    acc = 0;
+    mask = 0;
+    slot = first;
+    for (i = 0; i < w; i++)
+    {
+        if (!Direct(src, t->base, row + i * bpp, &texel))
+        {
+            Fetch(src, row + i * bpp, &r, &g, &b, &a);
+            texel = Encode(t->base, r, g, b, a);
+        }
+        acc |= texel << (slot * cpp * 8);
+        mask |= unit << (slot * cpp * 8);
+        slot++;
+        if (slot == per)
+        {
+            if (mask != 0xffffffffUL)
+                acc |= In(c, *dst) & ~mask;     /* a partial first dword */
+            *dst++ = Out(c, acc);
+            acc = 0;
+            mask = 0;
+            slot = 0;
+        }
+    }
+    if (slot != 0)
+    {
+        acc |= In(c, *dst) & ~mask;             /* a partial last dword */
+        *dst = Out(c, acc);
+    }
+}
+
+static void Upload(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG y,
+                   ULONG w, ULONG h, ULONG src, ULONG bpp, const UBYTE *pixels)
+{
+    ULONG row;
+    ULONG stride;
+
+    /* GL_UNPACK_ALIGNMENT 4, GL's default (glPixelStorei is not in
+     * GLQuake's slots; the rest of the pixel store comes with it) */
+    stride = (w * bpp + 3) & ~3UL;
+    if (t->used_since_idle && c->env.wait_idle != NULL)
+    {
+        /* the GPU may still read the old texels: wait (double-buffered
+         * lightmaps are the fast-path answer, concept 6.6) */
+        c->env.wait_idle(c->env.env);
+        c->stat_idle_waits++;
+        t->used_since_idle = 0;
+    }
+    for (row = 0; row < h; row++)
+        WriteRow(c, t, l, x, y + row, w, src, bpp, pixels + row * stride);
+}
+
+static ULONG Log2(ULONG v)
+{
+    ULONG n;
+
+    n = 0;
+    while ((1UL << n) < v)
+        n++;
+    return n;
+}
+
+/* Storage for level 0 of w x h in base: allocate the chain. */
+static ULONG Allocate(struct Core *c, struct CoreTex *t, ULONG w, ULONG h, ULONG base)
+{
+    ULONG hwfmt;
+    ULONG cpp;
+    ULONG l;
+    ULONG lw;
+    ULONG lh;
+    ULONG total;
+    ULONG off;
+    ULONG pot;
+
+    HwOf(base, &hwfmt, &cpp);
+    pot = (w & (w - 1)) == 0 && (h & (h - 1)) == 0;
+    if (t->gpu != 0 && t->w == w && t->h == h && t->hwfmt == hwfmt)
+    {
+        t->base = base;
+        return GL_NO_ERROR;
+    }
+    Release(c, t);
+    total = 0;
+    for (l = 0; l < CORE_MAX_LEVELS; l++)
+    {
+        lw = w >> l;
+        lh = h >> l;
+        if (lw == 0 && lh == 0)
+            break;
+        if (lw == 0) lw = 1;
+        if (lh == 0) lh = 1;
+        t->pitch[l] = (lw * cpp + 31) & ~31UL;
+        t->lofs[l] = total;
+        total += t->pitch[l] * lh;
+        if (!pot)
+            break;          /* NPOT: one level */
+    }
+    off = Heap_Alloc(c, total, 32);
+    if (off == 0xffffffffUL)
+        return GL_OUT_OF_MEMORY;
+    t->gpu = c->heap.gpu + off;
+    t->cpu = c->heap.cpu + off / 4;
+    t->bytes = total;
+    t->w = w;
+    t->h = h;
+    t->pot = pot;
+    t->lw = pot ? Log2(w) : 0;
+    t->lh = pot ? Log2(h) : 0;
+    t->base = base;
+    t->hwfmt = hwfmt;
+    t->cpp = cpp;
+    t->levels = 0;
+    return GL_NO_ERROR;
+}
+
+void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
+                     LONG w, LONG h, LONG border, ULONG format, ULONG type,
+                     const void *pixels)
+{
+    struct CoreTex *t;
+    ULONG base;
+    ULONG src;
+    ULONG bpp;
+    ULONG err;
+
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (target != GL_TEXTURE_2D)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    base = BaseOf(internal);
+    src = SrcOf(format, type, &bpp);
+    if (base == 0 || src == 0)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if (level < 0 || level >= CORE_MAX_LEVELS || border != 0 || w < 1 || h < 1
+        || w > CORE_MAX_TEXSIZE || h > CORE_MAX_TEXSIZE)
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
+    t = c->tex[c->bound[c->active_unit]];
+    if (t == NULL)
+        return;
+    if (level == 0)
+    {
+        err = Allocate(c, t, (ULONG) w, (ULONG) h, base);
+        if (err != GL_NO_ERROR)
+        {
+            Core_Error(c, err);
+            Touched(c, t);
+            return;
+        }
+    }
+    else
+    {
+        /* a level of the chain level 0 set up */
+        if (t->gpu == 0 || !t->pot
+            || (ULONG) w != ((t->w >> level) ? (t->w >> level) : 1)
+            || (ULONG) h != ((t->h >> level) ? (t->h >> level) : 1)
+            || BaseOf(internal) != t->base)
+        {
+            Core_Error(c, GL_INVALID_VALUE);
+            return;
+        }
+    }
+    if (pixels != NULL)     /* NULL: storage only (MiniGLV3D read address 0 here) */
+        Upload(c, t, (ULONG) level, 0, 0, (ULONG) w, (ULONG) h, src, bpp,
+               (const UBYTE *) pixels);
+    t->levels |= 1UL << level;
+    Touched(c, t);
+}
+
+void Core_TexSubImage2D(struct Core *c, ULONG target, LONG level, LONG x, LONG y,
+                        LONG w, LONG h, ULONG format, ULONG type, const void *pixels)
+{
+    struct CoreTex *t;
+    ULONG src;
+    ULONG bpp;
+    ULONG lw;
+    ULONG lh;
+
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (target != GL_TEXTURE_2D)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    src = SrcOf(format, type, &bpp);
+    if (src == 0)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    t = c->tex[c->bound[c->active_unit]];
+    if (t == NULL || t->gpu == 0 || level < 0 || level >= CORE_MAX_LEVELS
+        || !(t->levels & (1UL << level)))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    lw = (t->w >> level) ? (t->w >> level) : 1;
+    lh = (t->h >> level) ? (t->h >> level) : 1;
+    if (x < 0 || y < 0 || w < 0 || h < 0 || (ULONG) (x + w) > lw || (ULONG) (y + h) > lh)
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
+    if (w == 0 || h == 0 || pixels == NULL)
+        return;
+    Upload(c, t, (ULONG) level, (ULONG) x, (ULONG) y, (ULONG) w, (ULONG) h, src, bpp,
+           (const UBYTE *) pixels);
+}

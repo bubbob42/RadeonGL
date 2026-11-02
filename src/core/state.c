@@ -1,0 +1,414 @@
+/*
+ * state.c -- the GL state setters. Each stores the GL value and marks the
+ * R200 register blocks it affects; hwstate.c encodes them before the next
+ * draw. Validation follows the GL 1.1 rules (MiniGLV3D's checks, with the
+ * clamps it missed: alpha reference, depth range, scissor).
+ */
+
+#include "core.h"
+#include "coreint.h"
+
+static float Clamp01(double v)
+{
+    if (!(v > 0.0))
+        return 0.0f;
+    if (v > 1.0)
+        return 1.0f;
+    return (float) v;
+}
+
+static ULONG Bit(ULONG cap)
+{
+    switch (cap)
+    {
+        case GL_ALPHA_TEST:             return EN_ALPHA_TEST;
+        case GL_BLEND:                  return EN_BLEND;
+        case GL_CULL_FACE:              return EN_CULL_FACE;
+        case GL_DEPTH_TEST:             return EN_DEPTH_TEST;
+        case GL_DITHER:                 return EN_DITHER;
+        case GL_FOG:                    return EN_FOG;
+        case GL_SCISSOR_TEST:           return EN_SCISSOR;
+        case GL_POLYGON_OFFSET_FILL:    return EN_POLY_OFFSET;
+        case MGL_Z_OFFSET:              return EN_ZOFFSET;
+        case GL_LIGHTING:               return EN_LIGHTING;
+    }
+    return 0;
+}
+
+static ULONG Affects(ULONG bit)
+{
+    switch (bit)
+    {
+        case EN_ALPHA_TEST:     return D_PPCNTL;
+        case EN_BLEND:          return D_RB3D;
+        case EN_CULL_FACE:      return D_SECNTL;
+        case EN_DEPTH_TEST:     return D_RB3D;
+        case EN_DITHER:         return D_RB3D;
+        case EN_SCISSOR:        return D_SCISSOR;
+        case EN_POLY_OFFSET:    return D_SECNTL | D_ZBIAS;
+        case EN_ZOFFSET:        return D_SECNTL | D_ZBIAS;
+    }
+    return 0;           /* fog and lighting: stored, not drawn yet */
+}
+
+void Core_Enable(struct Core *c, ULONG cap, ULONG on)
+{
+    ULONG bit;
+
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (cap == GL_TEXTURE_2D)
+    {
+        if ((c->tex_enabled[c->active_unit] != 0) != (on != 0))
+        {
+            c->tex_enabled[c->active_unit] = on ? 1 : 0;
+            DIRTY_UNIT(c, c->active_unit);
+        }
+        return;
+    }
+    bit = Bit(cap);
+    if (bit == 0)
+    {
+        /* GL 1.1 caps without an R200 effect yet are accepted quietly;
+         * anything else is an error */
+        if (cap == GL_NORMALIZE || cap == GL_COLOR_MATERIAL || cap == GL_LINE_SMOOTH
+            || cap == GL_POINT_SMOOTH || cap == GL_POLYGON_SMOOTH
+            || (cap >= GL_LIGHT0 && cap <= GL_LIGHT0 + 7)
+            || cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T)
+            return;
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if (((c->enables & bit) != 0) == (on != 0))
+        return;
+    c->enables ^= bit;
+    c->dirty |= Affects(bit);
+}
+
+ULONG Core_IsEnabled(struct Core *c, ULONG cap)
+{
+    ULONG bit;
+
+    if (cap == GL_TEXTURE_2D)
+        return c->tex_enabled[c->active_unit];
+    bit = Bit(cap);
+    if (bit == 0)
+    {
+        if (cap == GL_NORMALIZE || cap == GL_COLOR_MATERIAL || cap == GL_LINE_SMOOTH
+            || cap == GL_POINT_SMOOTH || cap == GL_POLYGON_SMOOTH
+            || (cap >= GL_LIGHT0 && cap <= GL_LIGHT0 + 7)
+            || cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T)
+            return 0;
+        Core_Error(c, GL_INVALID_ENUM);
+        return 0;
+    }
+    return (c->enables & bit) ? 1UL : 0UL;
+}
+
+void Core_BlendFunc(struct Core *c, ULONG src, ULONG dst)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    /* GL 1.1: SRC_COLOR / ONE_MINUS_SRC_COLOR only as destination,
+     * DST_COLOR / ONE_MINUS_DST_COLOR / SRC_ALPHA_SATURATE only as source */
+    if (Hw_BlendFactor(src) == 0 || src == GL_SRC_COLOR || src == GL_ONE_MINUS_SRC_COLOR
+        || Hw_BlendFactor(dst) == 0 || dst == GL_DST_COLOR || dst == GL_ONE_MINUS_DST_COLOR
+        || dst == GL_SRC_ALPHA_SATURATE)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if (src == c->blend_src && dst == c->blend_dst)
+        return;
+    c->blend_src = src;
+    c->blend_dst = dst;
+    c->dirty |= D_BLEND;
+}
+
+void Core_AlphaFunc(struct Core *c, ULONG func, float ref)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (Hw_DepthFunc(func) == 0xffffffffUL)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->alpha_func = func;
+    c->alpha_ref = Clamp01(ref);
+    c->dirty |= D_ALPHA;
+}
+
+void Core_DepthFunc(struct Core *c, ULONG func)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (Hw_DepthFunc(func) == 0xffffffffUL)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if (func == c->depth_func)
+        return;
+    c->depth_func = func;
+    c->dirty |= D_ZSTENCIL;
+}
+
+void Core_DepthMask(struct Core *c, ULONG flag)
+{
+    flag = flag ? 1 : 0;
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (flag == c->depth_mask)
+        return;
+    c->depth_mask = flag;
+    c->dirty |= D_ZSTENCIL;
+}
+
+void Core_DepthRange(struct Core *c, double n, double f)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    c->depth_near = Clamp01(n);
+    c->depth_far = Clamp01(f);
+    c->dirty |= D_VIEWPORT;
+}
+
+void Core_CullFace(struct Core *c, ULONG mode)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (mode != GL_FRONT && mode != GL_BACK && mode != GL_FRONT_AND_BACK)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->cull_mode = mode;
+    c->dirty |= D_SECNTL;
+}
+
+void Core_FrontFace(struct Core *c, ULONG mode)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (mode != GL_CW && mode != GL_CCW)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->front_face = mode;
+    c->dirty |= D_SECNTL;
+}
+
+void Core_ShadeModel(struct Core *c, ULONG mode)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (mode != GL_FLAT && mode != GL_SMOOTH)
+    {
+        Core_Error(c, GL_INVALID_ENUM);   /* MiniGLV3D accepted anything */
+        return;
+    }
+    if (mode == c->shade_model)
+        return;
+    c->shade_model = mode;
+    c->dirty |= D_SECNTL;
+}
+
+void Core_ColorMask(struct Core *c, ULONG r, ULONG g, ULONG b, ULONG a)
+{
+    ULONG m;
+
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    m = (r ? 1UL : 0) | (g ? 2UL : 0) | (b ? 4UL : 0) | (a ? 8UL : 0);
+    if (m == c->color_mask)
+        return;
+    c->color_mask = m;
+    c->dirty |= D_PLANEMASK | D_RB3D;
+}
+
+void Core_Viewport(struct Core *c, LONG x, LONG y, LONG w, LONG h)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (w < 0 || h < 0)
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
+    if (w > CORE_MAX_TEXSIZE * 2)
+        w = CORE_MAX_TEXSIZE * 2;
+    if (h > CORE_MAX_TEXSIZE * 2)
+        h = CORE_MAX_TEXSIZE * 2;
+    c->vp_x = x;
+    c->vp_y = y;
+    c->vp_w = w;
+    c->vp_h = h;
+    c->dirty |= D_VIEWPORT;
+}
+
+void Core_Scissor(struct Core *c, LONG x, LONG y, LONG w, LONG h)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (w < 0 || h < 0)
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
+    c->sc_x = x;
+    c->sc_y = y;
+    c->sc_w = w;
+    c->sc_h = h;
+    c->dirty |= D_SCISSOR;
+}
+
+void Core_PolygonOffset(struct Core *c, float factor, float units)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    c->poly_factor = factor;
+    c->poly_units = units;
+    c->dirty |= D_ZBIAS;
+}
+
+void Core_PolygonMode(struct Core *c, ULONG face, ULONG mode)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if ((face != GL_FRONT && face != GL_BACK && face != GL_FRONT_AND_BACK)
+        || (mode != GL_POINT && mode != GL_LINE && mode != GL_FILL))
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->polygon_mode = mode;     /* stored: only GL_FILL is drawn so far */
+}
+
+void Core_PointSize(struct Core *c, float size)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (!(size > 0.0f))
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
+    c->point_size = size;
+    c->dirty |= D_POINTSIZE;
+}
+
+void Core_ClearColor(struct Core *c, float r, float g, float b, float a)
+{
+    c->clear_color[0] = Clamp01(r);
+    c->clear_color[1] = Clamp01(g);
+    c->clear_color[2] = Clamp01(b);
+    c->clear_color[3] = Clamp01(a);
+}
+
+void Core_ClearDepth(struct Core *c, double d)
+{
+    c->clear_depth = Clamp01(d);
+}
+
+void Core_Hint(struct Core *c, ULONG target, ULONG mode)
+{
+    (void) target;
+    if (mode != GL_FASTEST && mode != GL_NICEST && mode != GL_DONT_CARE)
+        Core_Error(c, GL_INVALID_ENUM);
+}
+
+void Core_SetZOffset(struct Core *c, float offset)
+{
+    c->zoffset = offset;
+    c->dirty |= D_ZBIAS;
+}
+
+void Core_ActiveTexture(struct Core *c, ULONG unit)
+{
+    if (unit < GL_TEXTURE0_ARB || unit >= GL_TEXTURE0_ARB + CORE_UNITS)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->active_unit = unit - GL_TEXTURE0_ARB;
+}
+
+void Core_ClientActiveTexture(struct Core *c, ULONG unit)
+{
+    if (unit < GL_TEXTURE0_ARB || unit >= GL_TEXTURE0_ARB + CORE_UNITS)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->client_unit = unit - GL_TEXTURE0_ARB;
+}
+
+void Core_TexEnvi(struct Core *c, ULONG target, ULONG pname, LONG param)
+{
+    ULONG u;
+
+    if (target != GL_TEXTURE_ENV || pname != GL_TEXTURE_ENV_MODE)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if ((ULONG) param != GL_MODULATE && (ULONG) param != GL_REPLACE
+        && (ULONG) param != GL_DECAL && (ULONG) param != GL_BLEND
+        && (ULONG) param != GL_ADD)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    u = c->active_unit;
+    if (c->tex_env[u] == (ULONG) param)
+        return;
+    c->tex_env[u] = (ULONG) param;
+    c->dirty |= D_COMBINE;
+}

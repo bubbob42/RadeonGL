@@ -176,6 +176,12 @@
 #define   R_FFACE_SOLID           (3UL << 3)
 #define   R_FLAT_SHADE_VTX_LAST   (3UL << 6)
 #define   R_DIFFUSE_SHADE_GOURAUD (2UL << 8)
+#define   R_DIFFUSE_SHADE_FLAT    (1UL << 8)
+#define   R_ALPHA_SHADE_FLAT      (1UL << 10)
+#define   R_SPECULAR_SHADE_FLAT   (1UL << 12)
+#define   R_FOG_SHADE_FLAT        (1UL << 14)
+#define   R_DISC_FOG_SHADE_FLAT   (1UL << 24)
+#define   R_ZBIAS_ENABLE_TRI      (1UL << 18)
 #define   R_ALPHA_SHADE_GOURAUD   (2UL << 10)
 #define   R_SPECULAR_SHADE_GOURAUD (2UL << 12)
 #define   R_FOG_SHADE_GOURAUD     (2UL << 14)
@@ -302,8 +308,11 @@
 #define R_SE_TCL_UCP_VERT_BLEND_CTL 0x22c0  /* Mesa: ..._CTL; Linux safe list: ..._CNTL */
 #define   R_UCP_IN_CLIP_SPACE     (1UL << 0)
 #define   R_CULL_FRONT_IS_CCW     (1UL << 28)
+#define   R_CULL_FRONT            (1UL << 29)
+#define   R_CULL_BACK             (1UL << 30)
 #define R_SE_TCL_POINT_SPRITE_CNTL 0x22c4
-#define R_RE_POINTSIZE          0x2648
+#define R_RE_POINTSIZE          0x2648   /* size * 16 | max size * 16 << 16 */
+#define   R_MAXPOINTSIZE_SHIFT    16
 #define R_RE_TOP_LEFT           0x26c0   /* x | y << 16 */
 #define R_RE_MISC               0x26c4
 #define R_RE_AUX_SCISSOR_CNTL   0x26f0
@@ -334,7 +343,10 @@
 #define R_PP_TXFILTER_0         0x2c00
 #define   R_MAG_FILTER_LINEAR     (1UL << 0)
 #define   R_MIN_FILTER_LINEAR     (1UL << 1)
+#define   R_MIN_FILTER_NEAREST_MIP_NEAREST (2UL << 1)
+#define   R_MIN_FILTER_NEAREST_MIP_LINEAR  (3UL << 1)
 #define   R_MIN_FILTER_LINEAR_MIP_NEAREST (6UL << 1)
+#define   R_MIN_FILTER_LINEAR_MIP_LINEAR  (7UL << 1)
 #define   R_MAX_MIP_LEVEL_SHIFT   16
 #define   R_MAX_MIP_LEVEL_MASK    (0xfUL << 16)
 #define   R_CLAMP_S_CLAMP_LAST    (2UL << 23)
@@ -381,6 +393,8 @@
 #define   R_TXA_ARG_R0_ALPHA      10UL
 #define   R_TXA_ARG_R1_ALPHA      12UL
 #define   R_TXC_OP_MADD           (0UL << 28)    /* A * B + C */
+#define   R_TXC_COMP_ARG_B        (1UL << 20)    /* B = 1 - B (B = ZERO gives one) */
+#define   R_TXA_COMP_ARG_B        (1UL << 20)    /* the same bit in TXABLEND */
 #define   R_TXC_CLAMP_0_1         (1UL << 12)    /* in TXCBLEND2 / TXABLEND2 */
 #define   R_TXC_OUTPUT_REG_R0     (1UL << 16)
 #define   R_TXC_TFACTOR_SEL_SHIFT 0      /* in TXCBLEND2 / TXABLEND2 */
