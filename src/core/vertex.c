@@ -23,7 +23,7 @@
 
 #define CNTL_BITS (R_VF_COLOR_ORDER_RGBA | R_VF_TCL_OUTPUT_VTX_ENABLE)
 
-static ULONG HwPrim(ULONG mode)
+ULONG Vtx_HwPrim(ULONG mode)
 {
     switch (mode)
     {
@@ -40,8 +40,7 @@ static ULONG HwPrim(ULONG mode)
     return R_VF_PRIM_POLYGON;
 }
 
-/* The longest prefix of n vertices that is a whole primitive of mode. */
-static ULONG Whole(ULONG mode, ULONG n)
+ULONG Vtx_Whole(ULONG mode, ULONG n)
 {
     switch (mode)
     {
@@ -109,7 +108,7 @@ static void Split(struct Core *c)
         case GL_LINES:
         case GL_TRIANGLES:
         case GL_QUADS:
-            keep = Whole(c->prim, n);
+            keep = Vtx_Whole(c->prim, n);
             for (i = keep; i < n; i++)
                 carry[ncarry++] = i;
             break;
@@ -177,7 +176,7 @@ void Core_Begin(struct Core *c, ULONG mode)
     c->units_on = units;
     c->vtx_dw = 4 + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);
     c->prim = mode;
-    c->hwprim = HwPrim(mode);
+    c->hwprim = Vtx_HwPrim(mode);
     Open(c);
 }
 
@@ -191,7 +190,7 @@ void Core_End(struct Core *c)
         Core_Error(c, GL_INVALID_OPERATION);
         return;
     }
-    n = Whole(c->prim, c->nverts);
+    n = Vtx_Whole(c->prim, c->nverts);
     if (c->prim == GL_LINE_LOOP && n >= 2 && c->vbase != NULL)
     {
         /* close the loop: the first vertex once more (the spare room) */

@@ -16,6 +16,12 @@ ULONG Core_Unit255(float f);
  * reuse a texture whose registers were emitted frames ago). */
 void  Core_MarkTextures(struct Core *c, ULONG units);
 
+/* The R200 primitive for a GL mode (a line loop is drawn as a strip). */
+ULONG Vtx_HwPrim(ULONG mode);
+
+/* The longest prefix of n vertices that is a whole primitive of mode. */
+ULONG Vtx_Whole(ULONG mode, ULONG n);
+
 /* Wait for the GPU if texture t was drawn in the current epoch. */
 void  Core_TexHazard(struct Core *c, struct CoreTex *t);
 

@@ -42,6 +42,7 @@
 #define CORE_P_DEPTH      8
 #define CORE_T_DEPTH      8
 #define CORE_IMMD_VERTS   256     /* vertices reserved per glBegin; more are split */
+#define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
 
 /* What the core needs from its host (the library or a test). */
 struct CoreEnv
@@ -232,8 +233,20 @@ struct Core
     struct CoreArray va, ca, ta[CORE_UNITS];
     LONG  lock_first, lock_count;   /* glLockArraysEXT, count 0 = none */
 
+    /* the stream block: VRAM the locked arrays and their indices are
+     * written to, from 0 again once the GPU is idle */
+    ULONG stream_off;       /* heap offset */
+    ULONG stream_size;      /* 0: no stream (arrays go the immediate way) */
+    ULONG stream_pos;
+    ULONG lk_valid;         /* the locked range is in the stream */
+    ULONG lk_gpu;           /* where */
+    ULONG lk_units;         /* with these texture sets */
+    ULONG lk_color;         /* and these current values (for disabled arrays) */
+    float lk_st[CORE_UNITS][2];
+
     /* statistics for tests and the census */
     ULONG stat_prims, stat_verts, stat_splits, stat_state_emits, stat_idle_waits;
+    ULONG stat_lock_uploads, stat_lock_draws, stat_stream_wraps;
 };
 
 #define CORE_NO_PRIM 0xffffffffUL

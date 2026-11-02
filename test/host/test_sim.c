@@ -26,6 +26,7 @@ static ULONG *vram;
 static struct Core core;
 static struct R2Cs cs;
 static struct Sim sim;
+static ULONG stream_swap = 1;   /* the stream's byte order (textures: always swapped) */
 
 static APTR HostAlloc(APTR env, ULONG size) { (void) env; return calloc(1, size); }
 static void HostFree(APTR env, APTR mem, ULONG size) { (void) env; (void) size; free(mem); }
@@ -38,7 +39,7 @@ static void Fresh(void)
 
     Core_Free(&core);
     memset(vram, 0, VRAM_SIZE);
-    R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, 1);
+    R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, stream_swap);
     t.width = W_;
     t.height = H_;
     t.color_gpu = COLOR_GPU;
@@ -58,7 +59,7 @@ static void Render(const char *name)
 {
     char path[128];
 
-    Sim_Init(&sim, vram, 0, VRAM_SIZE, 1, 1);
+    Sim_Init(&sim, vram, 0, VRAM_SIZE, stream_swap, 1);
     Sim_Run(&sim, stream, (ULONG) (cs.ptr - stream));
     snprintf(path, sizeof(path), "build/host/sim-%s.ppm", name);
     Sim_WritePPM(&sim, path, COLOR_GPU, W_, R_COLOR_FORMAT_RGB565, W_, H_);
@@ -275,6 +276,113 @@ static void test_dump(void)
     CHECK_INT(px[2], 0);
 }
 
+/* A GLQuake alias model, shaped: a 9 x 9 grid of vertices in arrays,
+ * per-vertex colours (MGL_UBYTE_ARGB), a modulated texture, depth on,
+ * drawn by glDrawElements in two halves. locked: under glLockArraysEXT
+ * (from the stream in VRAM) or not (the immediate way). */
+#define GRID 9
+static void AliasScene(ULONG locked)
+{
+    static float pos[GRID * GRID * 3];
+    static float st[GRID * GRID * 2];
+    static UBYTE col[GRID * GRID * 4];
+    static UWORD idx[(GRID - 1) * (GRID - 1) * 6];
+    UBYTE tex[8 * 8 * 4];
+    ULONG x, y, i, n;
+
+    Fresh();
+    for (y = 0; y < GRID; y++)
+        for (x = 0; x < GRID; x++)
+        {
+            i = y * GRID + x;
+            pos[i * 3 + 0] = 40.0f + (float) x * 25.0f + (float) ((x * y) % 3);
+            pos[i * 3 + 1] = 20.0f + (float) y * 25.0f;
+            pos[i * 3 + 2] = (float) ((x + y) % 4) - 2.0f;
+            st[i * 2 + 0] = (float) x / (GRID - 1);
+            st[i * 2 + 1] = (float) y / (GRID - 1);
+            col[i * 4 + 0] = 255;                       /* A */
+            col[i * 4 + 1] = (UBYTE) (64 + x * 20);     /* R */
+            col[i * 4 + 2] = (UBYTE) (64 + y * 20);     /* G */
+            col[i * 4 + 3] = (UBYTE) (255 - x * 10);    /* B */
+        }
+    n = 0;
+    for (y = 0; y + 1 < GRID; y++)
+        for (x = 0; x + 1 < GRID; x++)
+        {
+            i = y * GRID + x;
+            idx[n++] = (UWORD) i;
+            idx[n++] = (UWORD) (i + 1);
+            idx[n++] = (UWORD) (i + GRID);
+            idx[n++] = (UWORD) (i + 1);
+            idx[n++] = (UWORD) (i + GRID + 1);
+            idx[n++] = (UWORD) (i + GRID);
+        }
+    for (i = 0; i < 64; i++)
+    {
+        tex[i * 4 + 0] = (UBYTE) ((i & 1) ? 255 : 128);
+        tex[i * 4 + 1] = (UBYTE) ((i & 8) ? 255 : 160);
+        tex[i * 4 + 2] = 200;
+        tex[i * 4 + 3] = 255;
+    }
+    Core_ClearColor(&core, 0.0f, 0.0f, 0.25f, 0.0f);
+    Core_Clear(&core, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    Ortho();
+    Core_Enable(&core, GL_DEPTH_TEST, 1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, tex);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_TexEnvi(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
+    Core_TexCoordPointer(&core, 2, GL_FLOAT, 0, st);
+    Core_ColorPointer(&core, 4, MGL_UBYTE_ARGB, 0, col);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+    Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+    if (locked)
+        Core_LockArrays(&core, 0, GRID * GRID);
+    Core_DrawElements(&core, GL_TRIANGLES, (LONG) (n / 2), GL_UNSIGNED_SHORT, idx);
+    Core_DrawElements(&core, GL_TRIANGLES, (LONG) (n - n / 2), GL_UNSIGNED_SHORT, idx + n / 2);
+    if (locked)
+        Core_UnlockArrays(&core);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(core.stat_lock_draws, locked ? 2 : 0);
+    CHECK_INT(core.stat_lock_uploads, locked ? 1 : 0);
+}
+
+/* Locked arrays drawn from VRAM put the same pixels on screen as the
+ * immediate way, in both stream byte orders. */
+static void test_locked_pixels(void)
+{
+    static UWORD ref[W_ * H_];
+    const UWORD *fb;
+    ULONG diff;
+    ULONG lit;
+    ULONG i;
+
+    fb = (const UWORD *) (vram + COLOR_GPU / 4);
+    for (stream_swap = 0; stream_swap < 2; stream_swap++)
+    {
+        AliasScene(0);
+        Render(stream_swap ? "alias-immediate" : "alias-immediate-noswap");
+        memcpy(ref, fb, sizeof(ref));
+        lit = 0;
+        for (i = 0; i < W_ * H_; i++)
+            if (ref[i] != ref[0])
+                lit++;
+        CHECK(lit > 30000);             /* the model covers about 200 x 200 pixels */
+        AliasScene(1);
+        Render(stream_swap ? "alias-locked" : "alias-locked-noswap");
+        diff = 0;
+        for (i = 0; i < W_ * H_; i++)
+            if (fb[i] != ref[i])
+                diff++;
+        CHECK_INT(diff, 0);
+    }
+    stream_swap = 1;
+}
+
 int main(void)
 {
     vram = (ULONG *) calloc(1, VRAM_SIZE);
@@ -283,6 +391,7 @@ int main(void)
     test_depth_and_cull();
     test_textures();
     test_present();
+    test_locked_pixels();
     test_dump();
     Core_Free(&core);
     free(vram);

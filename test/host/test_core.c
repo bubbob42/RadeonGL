@@ -8,6 +8,7 @@
 #include <string.h>
 #include "testkit.h"
 #include "core.h"
+#include "coreint.h"
 #include "r2check.h"
 #include "r2pm4.h"
 #include "r200reg.h"
@@ -80,16 +81,29 @@ static void Fresh(ULONG swap)
     idle_waits = 0;
 }
 
+/* the checker reads every index of an indexed draw from the heap */
+static LONG Peek(APTR ctx, ULONG gpu, ULONG *val)
+{
+    (void) ctx;
+    if (gpu < TEX_GPU || gpu - TEX_GPU + 4 > TEX_SIZE)
+        return -1;
+    *val = vram[(gpu - TEX_GPU) / 4];
+    return 0;
+}
+
 static void Cfg(struct R2ChkCfg *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
     cfg->range[0].gpu = COLOR_GPU; cfg->range[0].size = W_ * H_ * 2;
     cfg->range[0].kinds = R2K_COLOR | R2K_TEXTURE;     /* the present reads it */
     cfg->range[1].gpu = DEPTH_GPU; cfg->range[1].size = W_ * H_ * 2; cfg->range[1].kinds = R2K_DEPTH;
-    cfg->range[2].gpu = TEX_GPU;   cfg->range[2].size = TEX_SIZE;    cfg->range[2].kinds = R2K_TEXTURE;
+    cfg->range[2].gpu = TEX_GPU;   cfg->range[2].size = TEX_SIZE;
+    cfg->range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;    /* textures, the stream */
     cfg->range[3].gpu = SCREEN_GPU; cfg->range[3].size = 1024 * 768 * 4; cfg->range[3].kinds = R2K_COLOR;
     cfg->nranges = 4;
     cfg->fence_reg = FENCE_REG;
+    cfg->peek = Peek;
+    cfg->peek_ctx = NULL;
 }
 
 static LONG Checked(struct R2ChkState *st)
@@ -200,7 +214,17 @@ static void Expand(LONG (*l)[3], int *n, ULONG prim, const LONG *v, ULONG cnt)
     }
 }
 
-/* Every immediate packet in the stream, its vertices' x as ids. */
+/* A heap dword as the core stored it, in the stream's byte order. */
+static ULONG HeapV(ULONG gpu)
+{
+    ULONG v;
+
+    v = vram[(gpu - TEX_GPU) / 4];
+    return cs.swap ? R2Cs_Swap32(v) : v;
+}
+
+/* Every draw in the stream (immediate packets, and indexed draws from the
+ * arrays in the heap), its vertices' x as ids. */
 static void Collect(void)
 {
     ULONG i;
@@ -210,7 +234,16 @@ static void Collect(void)
     ULONG nv;
     ULONG vd;
     ULONG k;
+    ULONG aos_gpu;
+    ULONG aos_stride;
+    ULONG pend_cntl;
+    ULONG ix;
+    ULONG a;
     LONG ids[4096];
+
+    aos_gpu = 0;
+    aos_stride = 0;
+    pend_cntl = 0;
 
     ngot = 0;
     packets_seen = 0;
@@ -236,6 +269,25 @@ static void Collect(void)
                 Expand(got, &ngot, cntl & R_VF_PRIM_MASK, ids, nv);
                 packets_seen++;
             }
+        }
+        if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_3D_LOAD_VBPNTR)
+        {
+            aos_stride = (V(i + 2) >> 8) & 0x7f;    /* one array: the whole vertex */
+            aos_gpu = V(i + 3);
+        }
+        if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_INDX_2)
+            pend_cntl = V(i + 1);
+        if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_INDX_BUFFER)
+        {
+            nv = pend_cntl >> 16;
+            for (k = 0; k < nv && k < 4096; k++)
+            {
+                a = V(i + 2) + 4 * (k / 2);
+                ix = (k & 1) ? HeapV(a) >> 16 : HeapV(a) & 0xffffUL;
+                ids[k] = (LONG) F(HeapV(aos_gpu + 4 * aos_stride * ix));
+            }
+            Expand(got, &ngot, pend_cntl & R_VF_PRIM_MASK, ids, nv);
+            packets_seen++;
         }
         i += 2 + R2_PKT_COUNT(h);
     }
@@ -783,6 +835,256 @@ static void test_arrays(void)
     CHECK_INT(Checked(&st), R2CE_OK);
 }
 
+/* --- Locked arrays from the stream (array.c DrawLocked) --------------------------- */
+
+#define LK_MAX 12000
+static float lk_pos[LK_MAX * 3];
+static ULONG lk_rand;
+
+static ULONG LkRand(void)
+{
+    lk_rand = lk_rand * 1103515245UL + 12345UL;
+    return (lk_rand >> 16) & 0x7fff;
+}
+
+/* Arrays whose vertex k has x = k (the id Collect reads back). */
+static void LkArrays(ULONG swap)
+{
+    ULONG k;
+
+    Fresh(swap);
+    for (k = 0; k < LK_MAX; k++)
+    {
+        lk_pos[k * 3 + 0] = (float) k;
+        lk_pos[k * 3 + 1] = (float) (k & 7);
+        lk_pos[k * 3 + 2] = 0.0f;
+    }
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, lk_pos);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+}
+
+/* What was drawn equals what GL draws for mode over the indices, times
+ * times. */
+static int SameAsGlTimes(ULONG mode, const UWORD *idx, ULONG n, ULONG times)
+{
+    LONG ids[4096];
+    ULONG i;
+    ULONG k;
+    struct R2ChkState st;
+
+    if (Checked(&st) != R2CE_OK)
+        return 0;
+    if (st.index_unchecked != 0)
+        return 0;
+    Collect();
+    nwant = 0;
+    for (i = 0; i < n; i++)
+        ids[i] = (LONG) idx[i];
+    if (mode == GL_LINE_LOOP)
+    {
+        if (n >= 2)
+        {
+            Expand(want, &nwant, R_VF_PRIM_LINE_STRIP, ids, n);
+            Add(want, &nwant, ids[n - 1], ids[0], 0, 1);
+        }
+    }
+    else
+    {
+        k = Vtx_Whole(mode, n);
+        for (i = 0; i < times; i++)
+            Expand(want, &nwant, GlToHw(mode), ids, k);
+    }
+    if (ngot != nwant)
+    {
+        printf("  mode %lu n %lu: %d drawn, %d wanted\n", (unsigned long) mode,
+               (unsigned long) n, ngot, nwant);
+        return 0;
+    }
+    qsort(got, (size_t) ngot, sizeof(got[0]), Cmp);
+    qsort(want, (size_t) nwant, sizeof(want[0]), Cmp);
+    if (memcmp(got, want, (size_t) ngot * sizeof(got[0])) != 0)
+    {
+        printf("  mode %lu n %lu: different primitives\n", (unsigned long) mode, (unsigned long) n);
+        return 0;
+    }
+    return 1;
+}
+
+static int SameAsGl(ULONG mode, const UWORD *idx, ULONG n)
+{
+    return SameAsGlTimes(mode, idx, n, 1);
+}
+
+static void test_locked(void)
+{
+    static const ULONG lens[] = { 1, 2, 3, 4, 5, 6, 7, 8, 12, 255, 256, 257, 600, 1001 };
+    static UWORD idx[2048];
+    UBYTE idx8[6];
+    ULONG idx32[6];
+    UBYTE col[4];
+    UBYTE texel[2 * 2 * 4];
+    ULONG swap;
+    ULONG mode;
+    ULONG i;
+    ULONG l;
+    ULONG bad;
+    ULONG lock_draws;
+    struct R2ChkState st;
+
+    /* every mode but the line loop goes the locked way, in both byte
+     * orders, and draws what GL draws over the same indices */
+    bad = 0;
+    lk_rand = 1;
+    for (swap = 0; swap < 2; swap++)
+        for (mode = GL_POINTS; mode <= GL_POLYGON; mode++)
+            for (l = 0; l < sizeof(lens) / sizeof(lens[0]); l++)
+            {
+                LkArrays(swap);
+                for (i = 0; i < lens[l]; i++)
+                    idx[i] = (UWORD) (5 + LkRand() % 40);
+                Core_LockArrays(&core, 5, 40);
+                Core_DrawElements(&core, mode, (LONG) lens[l], GL_UNSIGNED_SHORT, idx);
+                Core_UnlockArrays(&core);
+                lock_draws = (mode != GL_LINE_LOOP && Vtx_Whole(mode, lens[l]) != 0) ? 1 : 0;
+                if (!SameAsGl(mode, idx, lens[l]) || core.stat_lock_draws != lock_draws
+                    || Core_GetError(&core) != GL_NO_ERROR)
+                {
+                    printf("  locked: swap %lu mode %lu n %lu (locked draws %lu)\n",
+                           (unsigned long) swap, (unsigned long) mode, (unsigned long) lens[l],
+                           (unsigned long) core.stat_lock_draws);
+                    bad++;
+                }
+            }
+    CHECK_INT(bad, 0);
+
+    /* the range is written once per lock: two draws, one upload */
+    LkArrays(1);
+    for (i = 0; i < 6; i++)
+        idx[i] = (UWORD) (i < 3 ? i : 5 - i + 3);
+    Core_LockArrays(&core, 0, 8);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 1);
+    CHECK_INT(core.stat_lock_draws, 2);
+    /* a current colour without a colour array is in the packed vertices:
+     * a new one writes them again, the same one does not */
+    Core_Color4ub(&core, 1, 2, 3, 4);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 2);
+    Core_Color4ub(&core, 1, 2, 3, 4);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 2);
+    /* with a colour array the current colour does not matter */
+    col[0] = col[1] = col[2] = col[3] = 0x40;
+    Core_ColorPointer(&core, 4, GL_UNSIGNED_BYTE, 0, col);
+    Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+    Core_UnlockArrays(&core);
+    Core_LockArrays(&core, 0, 1);
+    idx[0] = 0; idx[1] = 0; idx[2] = 0;
+    Core_DrawElements(&core, GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 3);           /* a new lock */
+    Core_Color4ub(&core, 9, 9, 9, 9);
+    Core_DrawElements(&core, GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 3);
+    /* a texture set more: a longer vertex, written again */
+    memset(texel, 0xff, sizeof(texel));
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel);
+    Core_DrawElements(&core, GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 3);           /* (not enabled yet) */
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_DrawElements(&core, GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 4);
+    Core_Enable(&core, GL_TEXTURE_2D, 0);
+    /* an array pointer set while locked */
+    Core_ColorPointer(&core, 4, GL_UNSIGNED_BYTE, 0, col);
+    Core_DrawElements(&core, GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 5);
+    Core_UnlockArrays(&core);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* the other index types go the locked way too */
+    LkArrays(1);
+    for (i = 0; i < 6; i++)
+    {
+        idx[i] = (UWORD) (10 + (i * 7) % 6);
+        idx8[i] = (UBYTE) idx[i];
+        idx32[i] = idx[i];
+    }
+    Core_LockArrays(&core, 10, 6);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, idx8);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_INT, idx32);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_draws, 2);
+    CHECK_INT(core.stat_lock_uploads, 1);
+
+    /* fallbacks to the immediate way, drawing the same: an index outside
+     * the lock, no lock, no stream */
+    LkArrays(1);
+    for (i = 0; i < 6; i++)
+        idx[i] = (UWORD) (i == 4 ? 30 : i);
+    Core_LockArrays(&core, 0, 8);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_draws, 0);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 6));
+    LkArrays(1);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_draws, 0);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 6));
+    LkArrays(1);
+    core.stream_size = 0;
+    Core_LockArrays(&core, 0, 40);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_draws, 0);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 6));
+    /* a lock larger than the stream */
+    LkArrays(1);
+    Core_LockArrays(&core, 0, (LONG) (CORE_STREAM_BYTES / 16 + 1));
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_draws, 0);
+    CHECK_INT(core.stat_stream_wraps, 0);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 6));
+
+    /* the stream runs full: one wait for the GPU, from 0 again. Four locks
+     * of 10000 vertices (160000 bytes each) need 640000 of 524288. */
+    LkArrays(1);
+    for (i = 0; i < 6; i++)
+        idx[i] = (UWORD) (9990 + i);
+    for (l = 0; l < 4; l++)
+    {
+        Core_LockArrays(&core, 0, 10000);
+        Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+        Core_UnlockArrays(&core);
+    }
+    CHECK_INT(core.stat_lock_draws, 4);
+    CHECK_INT(core.stat_lock_uploads, 4);
+    CHECK_INT(core.stat_stream_wraps, 1);
+    CHECK_INT(idle_waits, 1);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK(SameAsGlTimes(GL_TRIANGLES, idx, 6, 4));  /* (the rewritten stream holds the same) */
+    /* the wrap forgot the lock: the next draw of the same lock writes it */
+    Core_LockArrays(&core, 0, 10000);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_uploads, 5);
+    /* and so does the end of a frame (the GPU idle) */
+    Core_LockArrays(&core, 0, 10000);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 6);
+    Core_GpuIdle(&core);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 7);
+    CHECK_INT(core.stream_pos, 160000 + 32);    /* from 0 again: one range, one index block */
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_draws, 8);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
 #define RING_DW 16384
 static ULONG ring_mem[RING_DW];
 static ULONG ring_shadow[RING_DW];
@@ -945,6 +1247,7 @@ int main(void)
     test_state();
     test_matrices();
     test_arrays();
+    test_locked();
     test_present();
     test_frames_through_ring();
     (void) t;

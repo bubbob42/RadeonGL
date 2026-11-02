@@ -53,6 +53,17 @@ static ULONG Rd32(const struct Sim *s, ULONG a)
     return s->tex_swap ? Swap32(*p) : *p;
 }
 
+/* Vertex and index data: in the stream's byte order (the core packs them
+ * as it writes the ring), which need not be the texels'. */
+static ULONG RdStream(const struct Sim *s, ULONG a)
+{
+    ULONG *p = Dw(s, a & ~3UL);
+
+    if (p == NULL)
+        return 0;
+    return s->swap ? Swap32(*p) : *p;
+}
+
 static void Wr32(struct Sim *s, ULONG a, ULONG g)
 {
     ULONG *p = Dw(s, a & ~3UL);
@@ -692,7 +703,7 @@ static void ArrayVertex(struct Sim *s, ULONG idx, struct V *v)
 
     for (a = 0; a < s->aos_n; a++)
         for (c = 0; c < s->aos_comps[a] && k < 32; c++)
-            d[k++] = Rd32(s, s->aos_gpu[a] + 4 * (s->aos_stride[a] * idx + c));
+            d[k++] = RdStream(s, s->aos_gpu[a] + 4 * (s->aos_stride[a] * idx + c));
     Unpack(s, d, v);
     Transform(s, v);
 }
@@ -707,7 +718,8 @@ static void Arrays(struct Sim *s, ULONG cntl, ULONG n, ULONG idx_gpu)
     {
         k = i;
         if (idx_gpu != 0)
-            k = Rd(s, idx_gpu + 2 * i, 2);      /* first index in the low half */
+            k = (RdStream(s, idx_gpu + 2 * i) >> (((idx_gpu + 2 * i) & 2) * 8)) & 0xffffUL;
+                                                /* first index in the low half */
         ArrayVertex(s, k, &v[i]);
     }
     DrawPrim(s, cntl & R_VF_PRIM_MASK, v, n);

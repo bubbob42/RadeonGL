@@ -41,6 +41,8 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
         return GL_OUT_OF_MEMORY;
     }
     Tex_Defaults(c->tex[0], 0);
+    c->stream_off = Heap_Alloc(c, CORE_STREAM_BYTES, 32);
+    c->stream_size = (c->stream_off != 0xffffffffUL) ? CORE_STREAM_BYTES : 0;
 
     /* GL's initial state */
     c->enables = EN_DITHER | EN_PERSPECTIVE;
@@ -108,6 +110,8 @@ void Core_Free(struct Core *c)
 void Core_GpuIdle(struct Core *c)
 {
     c->epoch++;
+    c->stream_pos = 0;      /* everything in the stream has been read */
+    c->lk_valid = 0;
 }
 
 void Core_MarkTextures(struct Core *c, ULONG units)

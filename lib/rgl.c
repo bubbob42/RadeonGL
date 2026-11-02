@@ -100,6 +100,19 @@ static LONG EnvIdle(APTR env)
     return R2Ring_Idle(&((struct Rgl *) env)->ring);
 }
 
+/* The checker reads the indices of every indexed draw from the heap
+ * (locked arrays, array.c). */
+static LONG HeapPeek(APTR ctx, ULONG gpu, ULONG *val)
+{
+    struct Rgl *r;
+
+    r = (struct Rgl *) ctx;
+    if (gpu < HEAP_GPU || gpu - HEAP_GPU + 4 > r->heap_size)
+        return -1;
+    *val = r->heap_mem[(gpu - HEAP_GPU) / 4];
+    return 0;
+}
+
 void Rgl_Unimpl(ULONG slot)
 {
     ULONG *bits;
@@ -173,6 +186,9 @@ static void WriteLog(struct Rgl *r)
     Put(f, "state blocks: "); PutU(f, r->core.stat_state_emits); Put(f, "\n");
     Put(f, "split packets: "); PutU(f, r->core.stat_splits); Put(f, "\n");
     Put(f, "idle waits: "); PutU(f, r->core.stat_idle_waits); Put(f, "\n");
+    Put(f, "locked draws: "); PutU(f, r->core.stat_lock_draws); Put(f, "\n");
+    Put(f, "locked uploads: "); PutU(f, r->core.stat_lock_uploads); Put(f, "\n");
+    Put(f, "stream wraps: "); PutU(f, r->core.stat_stream_wraps); Put(f, "\n");
     Put(f, "ring wraps: "); PutU(f, r->ring.stats.wraps); Put(f, "\n");
     Put(f, "texture heap used: "); PutU(f, r->core.heap.used); Put(f, " of ");
     PutU(f, r->heap_size); Put(f, "\n");
@@ -327,8 +343,11 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         ((UBYTE *) &cfg)[i] = 0;
     cfg.range[0].gpu = COLOR_GPU; cfg.range[0].size = pitch * (ULONG) h * 2; cfg.range[0].kinds = R2K_COLOR;
     cfg.range[1].gpu = DEPTH_GPU; cfg.range[1].size = pitch * (ULONG) h * 2; cfg.range[1].kinds = R2K_DEPTH;
-    cfg.range[2].gpu = HEAP_GPU;  cfg.range[2].size = r->heap_size;          cfg.range[2].kinds = R2K_TEXTURE;
+    cfg.range[2].gpu = HEAP_GPU;  cfg.range[2].size = r->heap_size;
+    cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;      /* textures, the stream */
     cfg.nranges = 3;
+    cfg.peek = HeapPeek;
+    cfg.peek_ctx = r;
     cfg.fence_reg = FENCE_REG;
     NullCard_Init(&r->card, r->ring_mem, RING_DW, 1, FENCE_REG, &cfg);
     if (GetVar((STRPTR) "RadeonGLCheck", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
