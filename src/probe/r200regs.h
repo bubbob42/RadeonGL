@@ -23,6 +23,11 @@
 #define R_DP_CNTL               0x16c0
 #define R_DP_WRITE_MASK         0x16cc
 
+/* Tri PATH=DIRECT: the vertex port the CP feeds from 3D_DRAW_IMMD_2; the
+ * X.org driver's MMIO render path writes vertices here (radeon_reg.h
+ * RADEON_SE_PORT_DATA0). */
+#define R_SE_PORT_DATA0         0x2000
+
 /* The PCI configuration space as the chip mirrors it in the register
  * aperture (radeon_reg.h: VENDOR_ID 0x0f00, DEVICE_ID 0x0f02); read as
  * dwords. Whether the R200 does is for LockBench to show. */

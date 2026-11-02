@@ -34,6 +34,9 @@ Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== Tri ===" >>DEV:Test/auto.log
 DEV:Probe/C/Tri LOG=DEV:Test/probe-tri.log NOSHOW >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== Tri PATH=DIRECT REPEAT=10 ===" >>DEV:Test/auto.log
+DEV:Probe/C/Tri LOG=DEV:Test/probe-tri-direct.log NOSHOW PATH=DIRECT REPEAT=10 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== Tri_sasc ===" >>DEV:Test/auto.log
 DEV:Probe/C/Tri_sasc LOG=DEV:Test/probe-tri-sasc.log NOSHOW >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log

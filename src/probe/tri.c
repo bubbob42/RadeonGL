@@ -33,9 +33,17 @@
  * Eight pixels are read back through the aperture and compared with what
  * the host's reference rasteriser draws for the same stream (test_sim).
  *
- *   Tri LOG/K,WAIT/N,NOSHOW/S,PPM/K,SCENE/K
+ *   Tri LOG/K,WAIT/N,NOSHOW/S,PPM/K,SCENE/K,PATH/K,REPEAT/N
  *
  * SCENE=TRI (default) is triscene.c, SCENE=TEX the textured texscene.c.
+ *
+ * PATH=RING (default) feeds the CP from the ring. PATH=DIRECT is what the
+ * Picasso96 advised instead: the CP stays off and the CPU replays the
+ * stream as register writes (see "the direct path" below). REPEAT=n draws
+ * the scene n times (each draw starts with its clear, so the picture is the
+ * same) and times the whole: the like-for-like comparison of the two paths.
+ * The colour buffer is filled with a pattern first, so a picture left by an
+ * earlier run cannot pass the pixel check.
  *
  * PPM= writes the drawn buffer, read back through the aperture, as a PPM
  * file (remote screenshots of the RTG Workbench do not work).
@@ -71,9 +79,9 @@
 #include "triscene.h"
 #include "texscene.h"
 
-static const char ver[] = "$VER: Tri 0.2 (02.11.2026)";
+static const char ver[] = "$VER: Tri 0.3 (02.11.2026)";
 
-#define TEMPLATE "LOG/K,WAIT/N,NOSHOW/S,PPM/K,SCENE/K"
+#define TEMPLATE "LOG/K,WAIT/N,NOSHOW/S,PPM/K,SCENE/K,PATH/K,REPEAT/N"
 
 struct Args
 {
@@ -82,6 +90,8 @@ struct Args
     LONG noshow;
     STRPTR ppm;
     STRPTR scene;
+    STRPTR path;
+    LONG *repeat;
 };
 
 #define RING_DW       4096UL
@@ -95,6 +105,9 @@ struct Args
 #define TIMEOUT_US    100000UL
 
 #define MAXPIX        32
+#define MAXREPEAT     1000UL
+#define FIFO_STEP     32UL         /* direct path: writes between FIFO checks */
+#define PATTERN       0x5A5A5A5AUL /* the colour buffer before a draw */
 #define PAL_FILL      0x80000080UL
 #define CANARY_VALUE  0xA5C3C3A5UL
 #define MMIO_TEST     0x5A3C3C5AUL
@@ -124,6 +137,8 @@ struct Ctx
     ULONG got[MAXPIX];      /* the pixels read back, 0xRRGGBB */
     UBYTE *rgb;             /* the whole buffer read back (PPM=), or NULL */
     BOOL drawn;             /* the fence passed */
+    BOOL direct;            /* PATH=DIRECT */
+    ULONG repeat;           /* REPEAT= */
 };
 
 static struct Core core;
@@ -218,6 +233,210 @@ static BOOL Reset3D(struct Ctx *c)
     return (BOOL)(R2Cp_WaitIdle(&c->hw, TIMEOUT_US) == R2_OK);
 }
 
+static void LogRing(const struct R2Ring *r)
+{
+    Log_Printf("  ring: %lu commits, %lu RPTR reads, %lu stalls, %lu wraps, %lu pad dwords\n",
+               r->stats.commits, r->stats.rptr_reads, r->stats.stalls, r->stats.wraps,
+               r->stats.pad_dw);
+}
+
+/* --- the direct path: the stream replayed as register writes ------------------
+ *
+ * What Picasso96 advised instead of a ring: the CPU writes the
+ * registers itself, the CP stays off (Radeon.card works this way). The
+ * core's stream, built without the ring's byte swap, is walked packet by
+ * packet:
+ *   type 0  each value to its register, or all to one with ONE_REG_WR;
+ *   type 2  a filler, skipped;
+ *   type 3  3D_DRAW_IMMD_2: its control dword to SE_VF_CNTL, then every
+ *           vertex dword to SE_PORT_DATA0 -- the port the CP feeds, and the
+ *           way the X.org Radeon driver draws when it runs without the CP;
+ *           NOP: skipped.
+ * Anything else is refused before the first write. Before every FIFO_STEP
+ * writes the CPU waits for that many free FIFO slots, as such a driver must.
+ */
+
+struct Direct
+{
+    ULONG writes;
+    ULONG waits;            /* FIFO checks that found too few free slots */
+};
+
+/* TRUE when every packet of s[0..n) is one the direct path can replay;
+ * else *bad is the first header it cannot. */
+static BOOL DirectScan(const ULONG *s, ULONG n, ULONG *bad)
+{
+    ULONG i;
+    ULONG h;
+    ULONG len;
+
+    for (i = 0; i < n; i += len)
+    {
+        h = s[i];
+        if (R2_PKT_TYPE(h) == 2)
+            len = 1;
+        else if (R2_PKT_TYPE(h) == 0
+                 || (R2_PKT_TYPE(h) == 3 && (R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_IMMD_2
+                                             || R2_PKT3_OPCODE(h) == R2_OP_NOP)))
+            len = R2_PKT_COUNT(h) + 2;
+        else
+            len = 0;
+        if (len == 0 || i + len > n)
+        {
+            *bad = h;
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static BOOL DirectWrite(struct Ctx *c, struct Direct *d, ULONG reg, ULONG val)
+{
+    ULONG t0;
+
+    if (d->writes % FIFO_STEP == 0)
+    {
+        t0 = HwClock(c);
+        while ((HwRead(c, R_RBBM_STATUS) & R_RBBM_FIFOCNT_MASK) < FIFO_STEP)
+        {
+            d->waits++;
+            if (HwClock(c) - t0 > TIMEOUT_US)
+                return FALSE;
+        }
+    }
+    HwWrite(c, reg, val);
+    d->writes++;
+    return TRUE;
+}
+
+/* Replays s[0..n) (DirectScan passed). R2_OK, or R2_ETIMEOUT when the FIFO
+ * stayed full. */
+static LONG DirectRun(struct Ctx *c, struct Direct *d, const ULONG *s, ULONG n)
+{
+    ULONG i;
+    ULONG k;
+    ULONG h;
+    ULONG cnt;
+    ULONG reg;
+
+    i = 0;
+    while (i < n)
+    {
+        h = s[i];
+        if (R2_PKT_TYPE(h) == 2)
+        {
+            i++;
+            continue;
+        }
+        cnt = R2_PKT_COUNT(h) + 1;
+        if (R2_PKT_TYPE(h) == 0)
+        {
+            reg = R2_PKT0_REG(h);
+            for (k = 0; k < cnt; k++)
+                if (!DirectWrite(c, d, R2_PKT0_ONE_REG_WR(h) ? reg : reg + 4 * k, s[i + 1 + k]))
+                    return R2_ETIMEOUT;
+        }
+        else if (R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_IMMD_2)
+        {
+            if (!DirectWrite(c, d, R_SE_VF_CNTL, s[i + 1]))
+                return R2_ETIMEOUT;
+            for (k = 1; k < cnt; k++)
+                if (!DirectWrite(c, d, R_SE_PORT_DATA0, s[i + 1 + k]))
+                    return R2_ETIMEOUT;
+        }
+        i += cnt + 1;
+    }
+    return R2_OK;
+}
+
+/* The fence of the direct path: flush the caches, let the FIFO wait for a
+ * clean 3D engine, then poll until all of it has drained. */
+static LONG DirectFence(struct Ctx *c, struct Direct *d)
+{
+    if (!DirectWrite(c, d, R_RB3D_DSTCACHE_CTLSTAT, R_RB3D_DC_FLUSH_ALL)
+        || !DirectWrite(c, d, R_RB3D_ZCACHE_CTLSTAT, R_RB3D_ZC_FLUSH_ALL)
+        || !DirectWrite(c, d, R_WAIT_UNTIL, R_WAIT_3D_IDLECLEAN))
+        return R2_ETIMEOUT;
+    return R2Cp_WaitIdle(&c->hw, TIMEOUT_US);
+}
+
+/* The scene c->repeat times through the direct path, then the fence. TRUE
+ * when it passed. */
+static BOOL DrawDirect(struct Ctx *c, const ULONG *buf, ULONG n)
+{
+    struct Direct d;
+    ULONG bad;
+    ULONG r;
+    ULONG t0;
+    ULONG dt;
+    LONG e;
+
+    Log_Section("Draw, the direct path (the CP stays off)");
+    if (!DirectScan(buf, n, &bad))
+    {
+        Log_Printf("the stream holds a packet the direct path cannot replay (0x%08lx): nothing drawn\n",
+                   bad);
+        return FALSE;
+    }
+    if (R2Cp_WaitIdle(&c->hw, TIMEOUT_US) != R2_OK)
+    {
+        Log_Printf("the engine is not idle (RBBM_STATUS 0x%08lx): nothing drawn\n",
+                   HwRead(c, R_RBBM_STATUS));
+        return FALSE;
+    }
+    d.writes = 0;
+    d.waits = 0;
+    t0 = HwClock(c);
+    e = R2_OK;
+    for (r = 0; r < c->repeat && e == R2_OK; r++)
+        e = DirectRun(c, &d, buf, n);
+    if (e == R2_OK)
+        e = DirectFence(c, &d);
+    dt = HwClock(c) - t0;
+    Log_Printf("%lu x %lu dwords, %lu register writes, and the fence: %s after %lu us "
+               "(%lu ns a stream dword); %lu FIFO checks waited; RBBM_STATUS 0x%08lx\n",
+               r, n, d.writes, e == R2_OK ? (CONST_STRPTR)"passed" : (CONST_STRPTR)"TIMED OUT",
+               dt, (r * n != 0) ? dt * 1000UL / (r * n) : 0UL, d.waits, HwRead(c, R_RBBM_STATUS));
+    if (e != R2_OK)
+    {
+        if (Reset3D(c))
+            Log_Printf("the 3D blocks (SE, RE, PP) were reset: the engine is idle\n");
+        else
+            Log_Printf("THE ENGINE STAYS BUSY (RBBM_STATUS 0x%08lx): save your work and reboot\n",
+                       HwRead(c, R_RBBM_STATUS));
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* The check pixels (and with PPM= the whole buffer) through the aperture:
+ * ARGB8888 is stored B, G, R, A, so a 68k longword reads 0xBBGGRRAA. */
+static void ReadBack(struct Ctx *c, ULONG color_cpu)
+{
+    volatile ULONG *col;
+    ULONG i;
+    ULONG v;
+
+    col = (volatile ULONG *)color_cpu;
+    for (i = 0; i < c->npix; i++)
+    {
+        v = col[c->pix[i].y * (c->bpr / 4) + c->pix[i].x];
+        c->got[i] = (((v >> 8) & 0xffUL) << 16) | (((v >> 16) & 0xffUL) << 8) | (v >> 24);
+    }
+    if (c->rgb != NULL)
+    {
+        /* the whole buffer while the block is still locked (256 KB of
+         * aperture reads, about 60 ms) */
+        for (i = 0; i < TRI_W * TRI_H; i++)
+        {
+            v = col[(i / TRI_W) * (c->bpr / 4) + (i % TRI_W)];
+            c->rgb[i * 3] = (UBYTE)(v >> 8);
+            c->rgb[i * 3 + 1] = (UBYTE)(v >> 16);
+            c->rgb[i * 3 + 2] = (UBYTE)(v >> 24);
+        }
+    }
+}
+
 /* --- the GPU part, inside one lock of the block -------------------------------- */
 
 /* Inside the lock, before anything is written: the register byte order, a
@@ -277,7 +496,6 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     struct R2ChkCfg cfg;
     struct R2ChkError err;
     volatile ULONG *mem;
-    volatile ULONG *col;
     ULONG *ring_cpu;
     ULONG ring_gpu;
     ULONG color_cpu;
@@ -292,6 +510,7 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     ULONG v;
     ULONG seq;
     ULONG reset;
+    ULONG r;
     LONG e;
 
     if (!P96Board_Lock(c->board))
@@ -337,10 +556,15 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
         Log_Printf("the block overlaps a swapping surface window: nothing drawn\n");
         goto unlock;
     }
+    /* a picture an earlier run left in this video RAM must not pass */
+    for (i = 0; i < TRI_H; i++)
+        for (v = 0; v < TRI_W; v++)
+            ((volatile ULONG *)(color_cpu + i * c->bpr))[v] = PATTERN;
 
     /* 1. the stream, in fast RAM, through the GL core */
     Log_Section("Stream (GL core, fast RAM)");
-    R2Cs_InitBuffer(&bcs, buf, STREAM_DW, 1);
+    /* the ring's byte order, or the registers' own for the direct path */
+    R2Cs_InitBuffer(&bcs, buf, STREAM_DW, c->direct ? 0UL : 1UL);
     env.alloc = EnvAlloc;
     env.free = EnvFree;
     env.wait_idle = EnvIdle;
@@ -376,7 +600,7 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     cfg.nranges = 3;
     cfg.fence_reg = FENCE_REG;
     R2Chk_Reset(&chk);
-    e = R2Chk_Run(&cfg, &chk, buf, n, 1, 0, &err);
+    e = R2Chk_Run(&cfg, &chk, buf, n, c->direct ? 0UL : 1UL, 0, &err);
     Log_Printf("checker: %s (%lu packets, %lu draws, %lu vertices)\n",
                e == R2CE_OK ? (CONST_STRPTR)"clean" : (CONST_STRPTR)R2Chk_ErrorName(e),
                chk.packets, chk.draws, chk.vertices);
@@ -384,6 +608,16 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     {
         Log_Printf("  at dword %lu: what 0x%08lx, value 0x%08lx -- the CP is not started\n",
                    err.at, err.what, err.value);
+        goto unlock;
+    }
+
+    if (c->direct)
+    {
+        if (DrawDirect(c, buf, n))
+        {
+            c->drawn = TRUE;
+            ReadBack(c, color_cpu);
+        }
         goto unlock;
     }
 
@@ -438,49 +672,35 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     if (rptr != 16 || v != CANARY_VALUE)
         goto stop;
 
-    /* 3. the scene, then one fence */
-    Log_Section("Draw");
-    p = R2Cs_Room(&ring.cs, n);
-    if (p == NULL)
-    {
-        Log_Printf("no ring room for %lu dwords: %ld\n", n, ring.cs.error);
-        goto stop;
-    }
-    for (i = 0; i < n; i++)
-        p[i] = buf[i];      /* already in the ring's byte order */
-    ring.cs.ptr = p + n;
+    /* 3. the scene (c->repeat times), then one fence */
+    Log_Section("Draw, the ring");
     t0 = HwClock(c);
+    for (r = 0; r < c->repeat; r++)
+    {
+        p = R2Cs_Room(&ring.cs, n);
+        if (p == NULL)
+        {
+            Log_Printf("no ring room for %lu dwords: %ld\n", n, ring.cs.error);
+            goto stop;
+        }
+        for (i = 0; i < n; i++)
+            p[i] = buf[i];      /* already in the ring's byte order */
+        ring.cs.ptr = p + n;
+    }
     e = R2Ring_Fence(&ring, &seq);
     if (e == R2_OK)
         e = R2Ring_WaitFence(&ring, seq);
     dt = HwClock(c) - t0;
-    Log_Printf("%lu dwords and a fence: %s after %lu us; RPTR %lu, WPTR %lu, RBBM_STATUS 0x%08lx\n",
-               n, e == R2_OK ? (CONST_STRPTR)"passed" : (CONST_STRPTR)"TIMED OUT", dt,
+    Log_Printf("%lu x %lu dwords and a fence: %s after %lu us (%lu ns a stream dword); "
+               "RPTR %lu, WPTR %lu, RBBM_STATUS 0x%08lx\n",
+               c->repeat, n, e == R2_OK ? (CONST_STRPTR)"passed" : (CONST_STRPTR)"TIMED OUT", dt,
+               dt * 1000UL / (c->repeat * n),
                HwRead(c, R_CP_RB_RPTR), HwRead(c, R_CP_RB_WPTR), HwRead(c, R_RBBM_STATUS));
+    LogRing(&ring);
     if (e != R2_OK)
         goto stop;
     c->drawn = TRUE;
-
-    /* the check pixels, through the aperture: ARGB8888 is stored B, G, R, A,
-     * so a 68k longword reads 0xBBGGRRAA */
-    col = (volatile ULONG *)color_cpu;
-    for (i = 0; i < c->npix; i++)
-    {
-        v = col[c->pix[i].y * (c->bpr / 4) + c->pix[i].x];
-        c->got[i] = (((v >> 8) & 0xffUL) << 16) | (((v >> 16) & 0xffUL) << 8) | (v >> 24);
-    }
-    if (c->rgb != NULL)
-    {
-        /* the whole buffer while the block is still locked (256 KB of
-         * aperture reads, about 60 ms) */
-        for (i = 0; i < TRI_W * TRI_H; i++)
-        {
-            v = col[(i / TRI_W) * (c->bpr / 4) + (i % TRI_W)];
-            c->rgb[i * 3] = (UBYTE)(v >> 8);
-            c->rgb[i * 3 + 1] = (UBYTE)(v >> 16);
-            c->rgb[i * 3 + 2] = (UBYTE)(v >> 24);
-        }
-    }
+    ReadBack(c, color_cpu);
 
 stop:
     e = R2Cp_Stop(&c->hw, &c->saved, TIMEOUT_US, &reset);
@@ -590,6 +810,8 @@ int main(void)
     args.noshow = 0;
     args.ppm = NULL;
     args.scene = NULL;
+    args.path = NULL;
+    args.repeat = NULL;
     rda = ReadArgs(TEMPLATE, (LONG *)&args, NULL);
     if (rda == NULL)
     {
@@ -627,7 +849,13 @@ int main(void)
             c.pix[i] = TriScene_Pixels[i];
         c.npix = TRI_NPIXELS;
     }
-    Log_Printf("scene %s, %lu check pixels\n", (CONST_STRPTR)c.scene, c.npix);
+    c.direct = (BOOL)(args.path != NULL && (args.path[0] == 'D' || args.path[0] == 'd'));
+    c.repeat = (args.repeat && *args.repeat > 0) ? (ULONG)*args.repeat : 1UL;
+    if (c.repeat > MAXREPEAT)
+        c.repeat = MAXREPEAT;
+    Log_Printf("scene %s, %lu check pixels; path %s, %lu draw%s\n", (CONST_STRPTR)c.scene, c.npix,
+               c.direct ? (CONST_STRPTR)"DIRECT (register writes, no CP)" : (CONST_STRPTR)"RING (the CP)",
+               c.repeat, c.repeat == 1 ? (CONST_STRPTR)"" : (CONST_STRPTR)"s");
 
     if (!Clock_Open())
     {
