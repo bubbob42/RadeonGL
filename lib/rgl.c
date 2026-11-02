@@ -11,6 +11,9 @@
  * dwords, draws, packet-checker errors with the first one decoded, and
  * every dispatch slot called that is not implemented yet.
  *
+ * RadeonGLCheck=0 makes the null card consume the ring without the
+ * packet checker, so a timedemo times the emitter alone.
+ *
  * Frame dump: with RadeonGLDump=N the null card records frame N (the core
  * re-emits its whole state at that frame's start, so the recording stands
  * alone) and writes it with the texture heap to RadeonGLDumpFile (default
@@ -173,7 +176,8 @@ static void WriteLog(struct Rgl *r)
     PutU(f, r->heap_size); Put(f, "\n");
     Put(f, "WPTR misaligned: "); PutU(f, r->card.bad_align); Put(f, "\n");
     Put(f, "packets across the ring end: "); PutU(f, r->card.straddle); Put(f, "\n");
-    Put(f, "checker errors: "); PutU(f, r->card.errors); Put(f, "\n");
+    Put(f, "checker errors: "); PutU(f, r->card.errors);
+    Put(f, r->card.no_check ? " (checker OFF: RadeonGLCheck=0)\n" : "\n");
     if (r->card.errors != 0)
     {
         Put(f, "first: "); Put(f, R2Chk_ErrorName(r->card.first_code));
@@ -274,6 +278,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     ULONG pitch;
     LONG n;
     ULONG i;
+    char flag[8];
 
     (void) offx;
     (void) offy;
@@ -319,6 +324,8 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     cfg.nranges = 3;
     cfg.fence_reg = FENCE_REG;
     NullCard_Init(&r->card, r->ring_mem, RING_DW, 1, FENCE_REG, &cfg);
+    if (GetVar((STRPTR) "RadeonGLCheck", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
+        r->card.no_check = 1;
     if (R2Ring_Init(&r->ring, r->ring_mem, RING_GPU, RING_DW, &r->card.hw, 1, FENCE_REG,
                     1000000) != R2_OK)
     {

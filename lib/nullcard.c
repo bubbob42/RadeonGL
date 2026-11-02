@@ -37,7 +37,8 @@ static ULONG Step(struct NullCard *n)
         n->rptr = n->wptr;
         return avail;
     }
-    e = R2Chk_Run(&n->cfg, &n->st, n->ring + n->rptr, len, n->swap, n->rptr, &err);
+    e = n->no_check ? R2CE_OK
+                    : R2Chk_Run(&n->cfg, &n->st, n->ring + n->rptr, len, n->swap, n->rptr, &err);
     if (e != R2CE_OK)
     {
         if (n->errors == 0)

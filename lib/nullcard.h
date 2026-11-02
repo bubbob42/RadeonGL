@@ -43,6 +43,7 @@ struct NullCard
     ULONG  rec_n;
     ULONG  rec_max;
     ULONG  rec_lost;        /* packets that did not fit */
+    ULONG  no_check;        /* consume without the checker (to time the emitter alone) */
 };
 
 void NullCard_Init(struct NullCard *n, ULONG *ring, ULONG size, ULONG swap,

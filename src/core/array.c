@@ -18,7 +18,9 @@ static ULONG TypeSize(ULONG type)
     switch (type)
     {
         case GL_UNSIGNED_BYTE:
-        case GL_BYTE:           return 1;
+        case GL_BYTE:
+        case MGL_UBYTE_ARGB:    /* MiniGL's packed colour layouts, a byte each */
+        case MGL_UBYTE_BGRA:    return 1;
         case GL_SHORT:
         case GL_UNSIGNED_SHORT: return 2;
         case GL_INT:
@@ -48,6 +50,11 @@ static float Comp(const UBYTE *p, ULONG type, ULONG k)
 static void SetArray(struct Core *c, struct CoreArray *a, LONG size, ULONG type,
                      LONG stride, const void *p, LONG minsize)
 {
+    if ((type == MGL_UBYTE_ARGB || type == MGL_UBYTE_BGRA) && (a != &c->ca || size != 4))
+    {
+        Core_Error(c, GL_INVALID_ENUM);         /* colour arrays of four only */
+        return;
+    }
     if (size < minsize || size > 4 || stride < 0)
     {
         Core_Error(c, GL_INVALID_VALUE);
@@ -135,7 +142,12 @@ static void ArrayVertex(struct Core *c, ULONG i)
     if (c->ca.enabled)
     {
         p = Elem(&c->ca, i);
-        if (c->ca.type == GL_UNSIGNED_BYTE)
+        /* GLQuake's alias models use MGL_UBYTE_ARGB: A, R, G, B in memory */
+        if (c->ca.type == MGL_UBYTE_ARGB)
+            Core_Color4ub(c, p[1], p[2], p[3], p[0]);
+        else if (c->ca.type == MGL_UBYTE_BGRA)
+            Core_Color4ub(c, p[2], p[1], p[0], p[3]);
+        else if (c->ca.type == GL_UNSIGNED_BYTE)
             Core_Color4ub(c, p[0], p[1], p[2], c->ca.size == 4 ? p[3] : 255);
         else
             Core_Color4f(c, Comp(p, c->ca.type, 0), Comp(p, c->ca.type, 1),

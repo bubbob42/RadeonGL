@@ -904,7 +904,7 @@ autotest: $(AUTOTEST_CONFIG) dist/Test/Grab
 	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in test/auto>"; exit 2; }
 	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see docs/testing.md"; exit 2; }
 	@mkdir -p dist/Test
-	@cp test/auto/RunOne test/auto/RunCensus test/auto/RunNull test/auto/WaitDone dist/Test/
+	@cp test/auto/RunOne test/auto/RunCensus test/auto/RunNull test/auto/RunNullTime test/auto/WaitDone dist/Test/
 	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
 
 # --- Tools -------------------------------------------------------------------

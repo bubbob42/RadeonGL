@@ -696,6 +696,31 @@ static void test_arrays(void)
     CHECK_INT(st.vertices, 10);
     Core_UnlockArrays(&core);
     CHECK_INT(Core_GetError(&core), GL_INVALID_OPERATION);
+
+    /* Regression (2026-11-02, GLQuake in FS-UAE): alias models declare their
+     * colours as MiniGL's MGL_UBYTE_ARGB; the core refused the type, kept
+     * the old pointer and drew every model black. */
+    Fresh(1);
+    for (i = 0; i < 4; i++)
+    {
+        col[i * 4 + 0] = 0x80;          /* A */
+        col[i * 4 + 1] = 0x11;          /* R */
+        col[i * 4 + 2] = 0x22;          /* G */
+        col[i * 4 + 3] = 0x33;          /* B */
+    }
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
+    Core_ColorPointer(&core, 4, MGL_UBYTE_ARGB, 0, col);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+    Core_DrawArrays(&core, GL_TRIANGLES, 0, 3);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(core.cur_color, 0x80332211UL);    /* a << 24 | b << 16 | g << 8 | r */
+    Core_ColorPointer(&core, 4, MGL_UBYTE_BGRA, 0, col);
+    Core_DrawArrays(&core, GL_TRIANGLES, 0, 3);
+    CHECK_HEX(core.cur_color, 0x33801122UL);    /* B = 0x80, G = 0x11, R = 0x22, A = 0x33 */
+    Core_ColorPointer(&core, 3, MGL_UBYTE_ARGB, 0, col);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    CHECK_INT(Checked(&st), R2CE_OK);
 }
 
 #define RING_DW 16384

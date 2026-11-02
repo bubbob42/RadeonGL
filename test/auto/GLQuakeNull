@@ -6,14 +6,17 @@
 ; reported with Status and a screen grab, and the script moves on.
 ; Per demo: DEV:Test/null-<demo>.log = GLQuake's text + the library's
 ; summary (frames, dwords, draws, checker errors, unimplemented slots).
+; Then demo1 once more without the checker (RunNullTime): its fps times
+; GLQuake plus the emitter alone.
 ; Needs: gmake glquake glquake-data rgl-lib.
-; LIMIT 2100
+; LIMIT 2700
 FailAt 1000
 Wait 12
 Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Stack 1000000
 Delete >NIL: DEV:Test/null-#?
+Delete >NIL: DEV:Test/time-#?
 Echo "=== demo1 ===" >>DEV:Test/auto.log
 Run >NIL: Execute DEV:Test/RunNull demo1
 Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
@@ -29,5 +32,10 @@ Run >NIL: Execute DEV:Test/RunNull demo3
 Execute DEV:Test/WaitDone DEV:Test/null-demo3.done
 Type DEV:Test/null-demo3.log >>DEV:Test/auto.log
 Type DEV:Test/null-demo3-lib.log >>DEV:Test/auto.log
+Echo "=== demo1, checker off ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullTime demo1
+Execute DEV:Test/WaitDone DEV:Test/time-demo1.done
+Type DEV:Test/time-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/time-demo1-lib.log >>DEV:Test/auto.log
 Echo "=== done ===" >>DEV:Test/auto.log
 Echo >DEV:Test/AutoDone done

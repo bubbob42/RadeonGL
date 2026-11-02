@@ -1,0 +1,18 @@
+.KEY demo/A
+.BRA {
+.KET }
+; RunNullTime -- RunNull without the packet checker (RadeonGLCheck=0) and
+; without a frame dump: the timedemo's fps then times GLQuake plus the
+; library's emitter alone (emulated: compare builds, never hardware).
+; Output: DEV:Test/time-{demo}.log + time-{demo}-lib.log, a done marker.
+FailAt 1000
+CD DEV:Quake
+SetEnv RadeonGLLog DEV:Test/time-{demo}-lib.log
+SetEnv RadeonGLCheck 0
+Assign LIBS: DEV:Libs/RadeonGL ADD
+GLQuake -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/time-{demo}.log
+Echo "time {demo} rc=$RC" >>DEV:Test/time-{demo}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+UnSetEnv RadeonGLLog
+UnSetEnv RadeonGLCheck
+Echo >DEV:Test/time-{demo}.done done
