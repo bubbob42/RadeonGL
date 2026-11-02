@@ -692,6 +692,11 @@ dist/Probe/C/BusBench: build/probe/busbench.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# CxBreak quits the Blanker / DPMSManager commodities before a test
+dist/Probe/C/CxBreak: build/probe/cxbreak.o
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 dist/Probe/C/CPRing: build/probe/cpring.o $(PROBE_OBJS) $(PROBE_R200_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
@@ -723,7 +728,10 @@ dist/Probe/C/Tri: $(TRI_OBJS)
 	$(GCC_CC) -noixemul -m68060 -m68881 $^ -o $@ -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
-# SAS/C builds of the same sources: dist/Probe/C/<Tool>_sasc. The P96
+# SAS/C builds of the same sources: dist/Probe/C/<Tool>_sasc. Every link
+# runs under tools/slink-guard: slink 6.57 under vamos can crash or hang in
+# its exit path AFTER writing a complete executable (layout-dependent; met
+# first by CxBreak_sasc, 2026-11-02). The P96
 # headers are copied under build/ so vamos reaches them through proj:
 # (it spins on a symlink out of a volume -- Herald). One vamos at a time:
 # never run these with -j.
@@ -747,15 +755,19 @@ build/probe-sasc/r200/%.o: src/r200/%.c $(PROBE_HDRS) | $(VAMOSRC)
 
 dist/Probe/C/R200Info_sasc: build/probe-sasc/r200info.o $(PROBE_SC_OBJS) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
-	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
 dist/Probe/C/BusBench_sasc: build/probe-sasc/busbench.o $(PROBE_SC_OBJS) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
-	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
+dist/Probe/C/CxBreak_sasc: build/probe-sasc/cxbreak.o | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
 dist/Probe/C/CPRing_sasc: build/probe-sasc/cpring.o $(PROBE_SC_OBJS) $(PROBE_SC_R200_OBJS) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
-	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
 
 # SAS/C Tri: the core objects of r200-objs (the same SC_OPTS), SAS/C's own
 # software float (scm.lib)
@@ -763,14 +775,15 @@ dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o $(PROB
                        $(PROBE_SC_R200_OBJS) build/probe-sasc/r200/r2check.o \
                        $(addprefix build/core-sasc/,$(addsuffix .o,$(CORE_MODULES))) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
-	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
 
 # The scripts write their report next to themselves (DEV:Probe/<Tool>.log),
 # where the host reads it from the share afterwards. They run the GCC
 # builds; the _sasc builds sit beside them in C/.
 .PHONY: probes
-probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Probe/C/Tri \
-        dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc
+probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Probe/C/Tri dist/Probe/C/CxBreak \
+        dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
+        dist/Probe/C/CxBreak_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info

@@ -34,6 +34,11 @@ Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== Tri_sasc ===" >>DEV:Test/auto.log
 DEV:Probe/C/Tri_sasc LOG=DEV:Test/probe-tri-sasc.log NOSHOW >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== CxBreak (a name that does not run) ===" >>DEV:Test/auto.log
+DEV:Probe/C/CxBreak NoSuchCommodity >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+DEV:Probe/C/CxBreak_sasc NoSuchCommodity >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== IconX scripts (Execute) ===" >>DEV:Test/auto.log
 Execute DEV:Probe/R200Info >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
