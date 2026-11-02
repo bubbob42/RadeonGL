@@ -1,0 +1,26 @@
+; GLQuakeStack -- GLQuake started with a small stack (Stack 100000), as a
+; user may from the shell. The A4000D crashed with a guru that way
+; (2026-11-02): GLQuake needs 768 KB and the GCC build never asked for it.
+; GLQuake now grows its own stack (glquake/sys_amiga.c, QUAKE_STACK): demo1
+; must run to its end on the null card and the program must exit cleanly,
+; its stack freed (Avail before and after).
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/null-#?
+Avail >NIL: FLUSH
+Echo "=== free before ===" >>DEV:Test/auto.log
+Avail FLUSH >>DEV:Test/auto.log
+Stack 100000
+Echo "=== demo1 with Stack 100000 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNull demo1
+Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
+Type DEV:Test/null-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo1-lib.log >>DEV:Test/auto.log
+Echo "=== free after ===" >>DEV:Test/auto.log
+Avail FLUSH >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

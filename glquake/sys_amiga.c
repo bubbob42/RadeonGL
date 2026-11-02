@@ -267,6 +267,33 @@ void usleep(unsigned long timeout)
 
 static qboolean prevent_crash = true; //surgeon
 
+/* RadeonGL addition: GLQuake grows its own stack.
+ *
+ * Upstream asked libnix for 768 KB through `__stack`, but only for non-GCC
+ * builds, and the libnix of this toolchain reads `__stack` nowhere: a GCC
+ * build ran on whatever the shell gave it. With `Stack 100000` it overran
+ * that on the A4000D and crashed with a guru (2026-11-02). Now main() checks
+ * the stack it got; below QUAKE_STACK it allocates one and runs QuakeMain
+ * on it through exec's StackSwap. Every way out goes through cleanup(),
+ * which then longjmps back onto the big stack's base instead of calling
+ * exit() from it, so the stack is swapped back and freed, and libnix's
+ * exit runs from main's return as usual.
+ *
+ * QuakeOnBigStack has no locals: between its two StackSwaps only statics
+ * are touched (with -fomit-frame-pointer, a local would be addressed
+ * through the swapped stack pointer). */
+#include <setjmp.h>
+
+#define QUAKE_STACK 0xC0000UL       /* 768 KB, what upstream's __stack asked for */
+
+static struct StackSwapStruct sw_sss;
+static APTR sw_mem;
+static int sw_argc;
+static char **sw_argv;
+static int sw_rc;
+static int sw_on;
+static jmp_buf sw_quit;
+
 static void cleanup(int rc)
 {
 	int i;
@@ -332,6 +359,12 @@ static void cleanup(int rc)
 	//if (UtilityBase)
 		//CloseLibrary(UtilityBase); //closed at mgl.lib - Cowcat 2022
 
+	if (sw_on)
+	{
+		/* RadeonGL: back to the big stack's base (see QUAKE_STACK) */
+		sw_rc = rc;
+		longjmp(sw_quit, 1);
+	}
 	exit(rc);
 }
 
@@ -535,7 +568,46 @@ int Sys_MapRawKey(int rawkey) // new 2019 - Cowcat
 
 //=============================================================================
 
+static int QuakeMain (int argc, char *argv[]);
+
+/* RadeonGL: run QuakeMain on sw_sss's stack (see QUAKE_STACK). */
+static int __attribute__((noinline)) QuakeOnBigStack (void)
+{
+	StackSwap(&sw_sss);
+	sw_on = 1;
+	if (setjmp(sw_quit) == 0)
+		sw_rc = QuakeMain(sw_argc, sw_argv);
+	sw_on = 0;
+	StackSwap(&sw_sss);
+	return sw_rc;
+}
+
 int main (int argc, char *argv[])
+{
+	struct Task *me;
+	int rc;
+
+	me = FindTask(NULL);
+	if ((ULONG)me->tc_SPUpper - (ULONG)me->tc_SPLower >= QUAKE_STACK)
+		return QuakeMain(argc, argv);
+	sw_mem = AllocVec(QUAKE_STACK, MEMF_ANY);
+	if (sw_mem == NULL)
+	{
+		printf("GLQuake: no memory for a %lu byte stack (or start it with Stack 1000000)\n",
+		       QUAKE_STACK);
+		return 20;
+	}
+	sw_sss.stk_Lower = sw_mem;
+	sw_sss.stk_Upper = (ULONG)sw_mem + QUAKE_STACK;
+	sw_sss.stk_Pointer = (APTR)sw_sss.stk_Upper;
+	sw_argc = argc;
+	sw_argv = argv;
+	rc = QuakeOnBigStack();
+	FreeVec(sw_mem);
+	return rc;
+}
+
+static int QuakeMain (int argc, char *argv[])
 {
 	extern		int vcrFile;
 	extern		int recording;
