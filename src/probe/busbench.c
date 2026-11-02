@@ -470,7 +470,7 @@ int main(void)
     if (!PciCard_Open(&card))
         goto out;
     PciCard_Report(&card);
-    if (R200_ReportEndian(&card) == 0)
+    if (R200_ReportEndian(&card) == MMIO_UNDECIDED)
         Log_Printf("(register orientation undecided; MMIO figures still valid)\n");
 
     b.ram = AllocVec(b.bytes, MEMF_FAST | MEMF_PUBLIC);

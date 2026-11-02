@@ -11,8 +11,9 @@
 
 #include "pcicard.h"
 
-/* Reads CONFIG_MEMSIZE both ways, reports both, sets Mmio_Swap. Returns
- * the memory size in bytes, 0 when undecided. */
+/* Decides and reports the register byte order (Mmio_DetectSwap: by
+ * CONFIG_MEMSIZE, else by CONFIG_APER_0_BASE against BAR0), sets
+ * Mmio_Swap. Returns MMIO_UNDECIDED, MMIO_BY_MEMSIZE or MMIO_BY_APER. */
 ULONG R200_ReportEndian(const struct PciCard *card);
 
 /* Number of entries in the register table (for a caller's previous-value

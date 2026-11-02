@@ -97,23 +97,35 @@ ULONG R200_ReportEndian(const struct PciCard *card)
 {
     ULONG raw;
     ULONG size;
+    ULONG how;
+    ULONG bar0;
 
     Log_Section("Register byte order");
+    bar0 = card->cfgBar[0] & 0xfffffff0UL;
     raw = MMIO_RAW(card->mmio, R_CONFIG_MEMSIZE);
-    size = Mmio_DetectSwap(card->mmio);
+    how = Mmio_DetectSwap(card->mmio, bar0, &size);
     Log_Printf("CONFIG_MEMSIZE native read 0x%08lx, byte-swapped 0x%08lx\n",
                raw, Mmio_Swap32(raw));
-    if (size == 0)
+    if (how != MMIO_BY_MEMSIZE)
     {
-        Log_Printf("neither reading is a whole number of megabytes: "
-                   "UNDECIDED, assuming little-endian registers (swap)\n");
-        return 0;
+        raw = MMIO_RAW(card->mmio, R_CONFIG_APER_0_BASE);
+        Log_Printf("  not a whole number of megabytes either way (no PC BIOS set it)\n");
+        Log_Printf("CONFIG_APER_0_BASE native read 0x%08lx, byte-swapped 0x%08lx; BAR0 PCI 0x%08lx\n",
+                   raw, Mmio_Swap32(raw), bar0);
     }
-    Log_Printf("verdict: registers read %s; memory size %lu MB\n",
+    if (how == MMIO_UNDECIDED)
+    {
+        Log_Printf("UNDECIDED, assuming little-endian registers (swap)\n");
+        return MMIO_UNDECIDED;
+    }
+    Log_Printf("verdict: registers read %s (by %s)\n",
                Mmio_Swap ? (CONST_STRPTR)"little-endian (68k swaps every access)"
-                         : (CONST_STRPTR)"big-endian as seen from the 68k (NO swap)",
-               size >> 20);
-    return size;
+                         : (CONST_STRPTR)"right as they are (NO swap)",
+               how == MMIO_BY_MEMSIZE ? (CONST_STRPTR)"CONFIG_MEMSIZE"
+                                      : (CONST_STRPTR)"CONFIG_APER_0_BASE");
+    if (size != 0)
+        Log_Printf("memory size %lu MB\n", size >> 20);
+    return how;
 }
 
 static void DumpOne(CONST_STRPTR name, ULONG off, ULONG value, ULONG *prev,
@@ -176,6 +188,35 @@ static CONST_STRPTR OnOff(ULONG bit)
     return bit ? (CONST_STRPTR)"on" : (CONST_STRPTR)"off";
 }
 
+/* The surface windows that do something: a tiling mode or a CPU-side byte
+ * swap over a VRAM range (Linux radeon_reg.h SURFACEn_INFO; R200 tile mode
+ * in bits 18:16). RadeonGL's ring and heap must stay out of a swapping
+ * window or follow it. */
+static void DecodeSurfaces(const struct PciCard *card)
+{
+    ULONG n;
+    ULONG off;
+    ULONG lo;
+    ULONG hi;
+    ULONG inf;
+
+    for (n = 0; n < R_SURFACE_COUNT; n++)
+    {
+        off = n * R_SURFACE_STRIDE;
+        lo = Mmio_Read(card->mmio, R_SURFACE0_LOWER_BOUND + off);
+        hi = Mmio_Read(card->mmio, R_SURFACE0_UPPER_BOUND + off);
+        inf = Mmio_Read(card->mmio, R_SURFACE0_INFO + off);
+        if ((inf & 0x00f70000UL) == 0)
+            continue;               /* no tiling, no swap: no effect */
+        Log_Printf("  SURFACE%lu: 0x%08lx - 0x%08lx, tile mode %lu, AP0 swap 16bpp %s 32bpp %s, "
+                   "AP1 swap 16bpp %s 32bpp %s (INFO 0x%08lx)\n",
+                   n, lo, hi, (inf >> 16) & 7UL,
+                   OnOff(inf & R_NONSURF_AP0_SWP_16BPP), OnOff(inf & R_NONSURF_AP0_SWP_32BPP),
+                   OnOff(inf & R_NONSURF_AP1_SWP_16BPP), OnOff(inf & R_NONSURF_AP1_SWP_32BPP),
+                   inf);
+    }
+}
+
 void R200_DecodeRegisters(const struct PciCard *card)
 {
     ULONG v;
@@ -212,6 +253,11 @@ void R200_DecodeRegisters(const struct PciCard *card)
     Log_Printf("SURFACE_CNTL: AP0 swap 16bpp %s 32bpp %s; AP1 swap 16bpp %s 32bpp %s\n",
                OnOff(v & R_NONSURF_AP0_SWP_16BPP), OnOff(v & R_NONSURF_AP0_SWP_32BPP),
                OnOff(v & R_NONSURF_AP1_SWP_16BPP), OnOff(v & R_NONSURF_AP1_SWP_32BPP));
+
+    Log_Printf("SURFACE_CNTL: surface windows %s\n",
+               (v & R_SURF_TRANSLATION_DIS) ? (CONST_STRPTR)"OFF (translation disabled)"
+                                            : (CONST_STRPTR)"active");
+    DecodeSurfaces(card);
 
     v = Mmio_Read(card->mmio, R_DP_DATATYPE);
     Log_Printf("DP_DATATYPE: HOST_BIG_ENDIAN_EN %s\n", OnOff(v & R_HOST_BIG_ENDIAN_EN));

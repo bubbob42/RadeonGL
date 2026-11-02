@@ -46,22 +46,39 @@ static BOOL PlausibleMemSize(ULONG v)
     return TRUE;
 }
 
-ULONG Mmio_DetectSwap(APTR base)
+ULONG Mmio_DetectSwap(APTR base, ULONG bar0_pci, ULONG *memsize)
 {
     ULONG raw;
     ULONG swapped;
 
+    *memsize = 0;
     raw = MMIO_RAW(base, R_CONFIG_MEMSIZE);
     swapped = Mmio_Swap32(raw);
     if (PlausibleMemSize(swapped) && !PlausibleMemSize(raw))
     {
         Mmio_Swap = TRUE;
-        return swapped;
+        *memsize = swapped;
+        return MMIO_BY_MEMSIZE;
     }
     if (PlausibleMemSize(raw) && !PlausibleMemSize(swapped))
     {
         Mmio_Swap = FALSE;
-        return raw;
+        *memsize = raw;
+        return MMIO_BY_MEMSIZE;
     }
-    return 0;
+    /* No PC BIOS ran (CONFIG_MEMSIZE 0): the aperture base register holds
+     * the PCI address BAR0 was given */
+    raw = MMIO_RAW(base, R_CONFIG_APER_0_BASE);
+    swapped = Mmio_Swap32(raw);
+    if (bar0_pci != 0 && raw == bar0_pci && swapped != bar0_pci)
+    {
+        Mmio_Swap = FALSE;
+        return MMIO_BY_APER;
+    }
+    if (bar0_pci != 0 && swapped == bar0_pci && raw != bar0_pci)
+    {
+        Mmio_Swap = TRUE;
+        return MMIO_BY_APER;
+    }
+    return MMIO_UNDECIDED;
 }

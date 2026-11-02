@@ -77,6 +77,7 @@
 
 /* --- Surfaces (aperture byte swapping) ------------------------------------ */
 #define R_SURFACE_CNTL          0x0b00
+#define   R_SURF_TRANSLATION_DIS  (1UL << 8)
 #define   R_NONSURF_AP0_SWP_16BPP (1UL << 20)
 #define   R_NONSURF_AP0_SWP_32BPP (1UL << 21)
 #define   R_NONSURF_AP1_SWP_16BPP (1UL << 22)

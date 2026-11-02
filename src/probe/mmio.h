@@ -1,12 +1,14 @@
 /*
  * mmio.h -- 32-bit register access to the Radeon through the Mediator.
  *
- * The bridge does not swap bytes and the chip's registers are little-endian,
- * so a plain 68k longword read returns the register byte-reversed. Whether
- * that holds on the running machine is MEASURED, not assumed: R200Info
- * reads CONFIG_MEMSIZE both ways and keeps the orientation that gives a
- * whole number of megabytes (Mmio_Swap). Every read and write goes through
- * these helpers so the probes share one answer.
+ * The chip's registers are little-endian. Whether a plain 68k longword
+ * read returns them byte-reversed depends on the bridge and on the card's
+ * set-up, so it is MEASURED, not assumed (Mmio_DetectSwap): CONFIG_MEMSIZE
+ * read both ways must give a whole number of megabytes, or, where no PC
+ * BIOS set it (it reads 0), CONFIG_APER_0_BASE must equal BAR0's PCI
+ * address. MEASURED on the A4000D (Mediator, Radeon.card 43.579,
+ * 2026-11-02): native reads are right, no swap. Every read and write goes
+ * through these helpers so the probes share one answer.
  *
  * Reads are volatile and their value is always USED by the caller (SAS/C
  * drops a discarded volatile read; a benchmark loop must sum what it reads).
@@ -32,9 +34,15 @@ ULONG Mmio_Read(APTR base, ULONG off);
 /* Write a register value (orientation applied). */
 void Mmio_Write(APTR base, ULONG off, ULONG value);
 
-/* Decide Mmio_Swap from CONFIG_MEMSIZE. Returns the memory size in bytes
- * in the chosen orientation, or 0 when neither reading is plausible (the
- * flag is then left at its default). */
-ULONG Mmio_DetectSwap(APTR base);
+/* How Mmio_DetectSwap decided. */
+#define MMIO_UNDECIDED  0
+#define MMIO_BY_MEMSIZE 1   /* CONFIG_MEMSIZE: a whole number of megabytes */
+#define MMIO_BY_APER    2   /* CONFIG_APER_0_BASE == BAR0's PCI address */
+
+/* Decide Mmio_Swap: from CONFIG_MEMSIZE, else from CONFIG_APER_0_BASE
+ * against bar0_pci (BAR0's PCI address). Returns MMIO_*; *memsize gets the
+ * memory size in bytes when CONFIG_MEMSIZE decided, else 0. Undecided
+ * leaves the flag at its default. */
+ULONG Mmio_DetectSwap(APTR base, ULONG bar0_pci, ULONG *memsize);
 
 #endif /* PROBE_MMIO_H */
