@@ -373,10 +373,36 @@ LONG Card_Flush(struct Card *k, BOOL present)
         return (k->lost != 0) ? R2_ETIMEOUT : R2_OK;
     }
     k->in_flush = 1;
-    k->clock_base = Ticks();
     k->flushes++;
     e = R2_OK;
     scr_ok = FALSE;
+
+    /* 0. every packet through the checker before the CP sees one -- outside
+     * the lock (the GUI waits while it is held), against the addresses the
+     * frame was built with; a frame whose bitmaps moved is dropped below */
+    if (k->check && n != 0)
+    {
+        k->cfg.range[0].gpu = k->color_gpu;
+        k->cfg.range[0].size = k->color_bytes;
+        k->cfg.range[0].kinds = R2K_COLOR | R2K_TEXTURE;    /* the present reads it */
+        k->cfg.range[1].gpu = k->depth_gpu;
+        k->cfg.range[1].size = k->depth_bytes;
+        k->cfg.range[1].kinds = R2K_DEPTH;
+        k->cfg.range[2].gpu = k->heap_gpu;
+        k->cfg.range[2].size = k->heap_size;
+        k->cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;
+        k->cfg.nranges = 3;
+        e = R2Chk_Run(&k->cfg, &k->chk, k->cmd, n, 1, 0, &k->err);
+        if (e != R2CE_OK)
+        {
+            k->err_code = e;
+            k->lost = CARD_LOST_CHECKER;
+            ResetCs(k);
+            k->in_flush = 0;
+            return R2_ETIMEOUT;
+        }
+    }
+    k->clock_base = Ticks();
 
     /* 1. the locks: target, ring, heap, on the board */
     if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
@@ -407,6 +433,7 @@ LONG Card_Flush(struct Card *k, BOOL present)
     }
 
     /* 3. the present, at the screen bitmap's address of this lock */
+    i = n;
     if (present)
     {
         scr_ok = LockBm(k, CARD_SCREEN, FALSE);
@@ -437,27 +464,23 @@ LONG Card_Flush(struct Card *k, BOOL present)
         goto unlock;
     }
 
-    /* 4. every packet through the checker before the CP sees one */
-    if (k->check)
+    /* 4. the present's packets through the checker too, with the screen */
+    if (k->check && n > i)
     {
         k->cfg.range[0].gpu = k->color_gpu;
         k->cfg.range[0].size = k->color_bytes;
-        k->cfg.range[0].kinds = R2K_COLOR | R2K_TEXTURE;    /* the present reads it */
+        k->cfg.range[0].kinds = R2K_COLOR | R2K_TEXTURE;
         k->cfg.range[1].gpu = k->depth_gpu;
         k->cfg.range[1].size = k->depth_bytes;
         k->cfg.range[1].kinds = R2K_DEPTH;
         k->cfg.range[2].gpu = k->heap_gpu;
         k->cfg.range[2].size = k->heap_size;
         k->cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;
-        k->cfg.nranges = 3;
-        if (scr_ok)
-        {
-            k->cfg.range[3].gpu = k->b[CARD_SCREEN].gpu;
-            k->cfg.range[3].size = k->b[CARD_SCREEN].bpr * k->height;
-            k->cfg.range[3].kinds = R2K_COLOR;
-            k->cfg.nranges = 4;
-        }
-        e = R2Chk_Run(&k->cfg, &k->chk, k->cmd, n, 1, 0, &k->err);
+        k->cfg.range[3].gpu = k->b[CARD_SCREEN].gpu;
+        k->cfg.range[3].size = k->b[CARD_SCREEN].bpr * k->height;
+        k->cfg.range[3].kinds = R2K_COLOR;
+        k->cfg.nranges = 4;
+        e = R2Chk_Run(&k->cfg, &k->chk, k->cmd + i, n - i, 1, i, &k->err);
         if (e != R2CE_OK)
         {
             k->err_code = e;
