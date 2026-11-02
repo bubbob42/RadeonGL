@@ -217,6 +217,8 @@ static BOOL AllocData(struct Card *k, ULONG i, ULONG bytes)
 
     sbm = k->scr->RastPort.BitMap;
     k->b[i].bytes = bytes;
+    k->b[i].bpp = k->bpp;
+    k->b[i].p96 = 0;
     k->b[i].bm = AllocBitMap(CARD_ROW / k->bpp, (bytes + CARD_ROW - 1) / CARD_ROW,
                              GetBitMapAttr(sbm, BMA_DEPTH), BMF_MINPLANES, sbm);
     if (k->b[i].bm != NULL && !p96GetBitMapAttr(k->b[i].bm, P96BMA_ISP96))
@@ -225,6 +227,37 @@ static BOOL AllocData(struct Card *k, ULONG i, ULONG bytes)
         k->b[i].bm = NULL;
     }
     return (BOOL) (k->b[i].bm != NULL);
+}
+
+/* The heap as a 32-bit bitmap 2048 pixels wide (8 KB a row): MEASURED on the
+ * A4000D, P96 leaves a bitmap 4096 rows high off the board but places 2048
+ * rows, so 32 bits a pixel holds twice what the 16-bit screen's format does
+ * in the same shape. Only where the GL screen's mode can hold B8G8R8A8
+ * beside itself without reconfiguring the aperture. */
+static BOOL AllocHeap32(struct Card *k, ULONG bytes)
+{
+    struct CardBm *b;
+
+    b = &k->b[CARD_HEAP];
+    b->bm = NULL;
+    if (!(k->compat & RGBFF_B8G8R8A8))
+        return FALSE;
+    b->bytes = bytes;
+    b->bpp = 4;
+    b->p96 = 1;
+    b->bm = p96AllocBitMap(2048, (bytes + 8191) / 8192, 32, BMF_MINPLANES, NULL, RGBFB_B8G8R8A8);
+    return (BOOL) (b->bm != NULL);
+}
+
+static void FreeBm(struct Card *k, ULONG i)
+{
+    if (k->b[i].bm == NULL)
+        return;
+    if (k->b[i].p96)
+        p96FreeBitMap(k->b[i].bm);
+    else
+        FreeBitMap(k->b[i].bm);
+    k->b[i].bm = NULL;
 }
 
 /* Is bitmap i in video RAM now? P96 may keep a bitmap it cannot place on
@@ -654,9 +687,9 @@ static const char *ChipCheck(struct Card *k)
     {
         ap = ((ULONG) k->b[i].mem - (ULONG) k->membase) / k->ap_size;
         if (ap == 0)
-            swp = surf & ((k->bpp == 2) ? R_NONSURF_AP0_SWP_16BPP : R_NONSURF_AP0_SWP_32BPP);
+            swp = surf & ((k->b[i].bpp == 2) ? R_NONSURF_AP0_SWP_16BPP : R_NONSURF_AP0_SWP_32BPP);
         else
-            swp = surf & ((k->bpp == 2) ? R_NONSURF_AP1_SWP_16BPP : R_NONSURF_AP1_SWP_32BPP);
+            swp = surf & ((k->b[i].bpp == 2) ? R_NONSURF_AP1_SWP_16BPP : R_NONSURF_AP1_SWP_32BPP);
         if (swp != 0)
             return "the aperture byte-swaps this screen's bitmaps (not supported yet)";
     }
@@ -764,6 +797,7 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
 
     /* the GL screen and its input window */
     fmt = p96GetModeIDAttr(id, P96IDA_RGBFORMAT);
+    k->compat = p96GetModeIDAttr(id, P96IDA_COMPATIBLEFORMATS);
     t[0].ti_Tag = P96SA_DisplayID;  t[0].ti_Data = id;
     t[1].ti_Tag = P96SA_Width;      t[1].ti_Data = w;
     t[2].ti_Tag = P96SA_Height;     t[2].ti_Data = h;
@@ -837,17 +871,22 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
         Card_Close(k);
         return CARD_FAILED;
     }
-    /* the heap: 16 MB, halving to 4 MB, until P96 places it on the board
+    /* the heap: 16 MB as a 32-bit bitmap first; else in the screen's
+     * format, 16 MB halving to 4 MB; each until P96 places it on the board
      * (a bitmap too tall or too big for the board stays in fast RAM) */
-    for (size = 16UL << 20; size >= (4UL << 20); size >>= 1)
+    size = 16UL << 20;
+    if (!(AllocHeap32(k, size + 8192) && OnBoard(k, CARD_HEAP)))
     {
-        if (AllocData(k, CARD_HEAP, size + 4096) && OnBoard(k, CARD_HEAP))
-            break;
         if (k->b[CARD_HEAP].bm != NULL)
-        {
-            FreeBitMap(k->b[CARD_HEAP].bm);
-            k->b[CARD_HEAP].bm = NULL;
             k->heap_offboard++;
+        FreeBm(k, CARD_HEAP);
+        for (size = 16UL << 20; size >= (4UL << 20); size >>= 1)
+        {
+            if (AllocData(k, CARD_HEAP, size + 4096) && OnBoard(k, CARD_HEAP))
+                break;
+            if (k->b[CARD_HEAP].bm != NULL)
+                k->heap_offboard++;
+            FreeBm(k, CARD_HEAP);
         }
     }
     if (k->b[CARD_HEAP].bm == NULL)
@@ -936,11 +975,7 @@ void Card_Close(struct Card *k)
     k->vram_lock = 0;
     WaitBlit();
     for (i = 0; i < CARD_SCREEN; i++)
-        if (k->b[i].bm != NULL)
-        {
-            FreeBitMap(k->b[i].bm);
-            k->b[i].bm = NULL;
-        }
+        FreeBm(k, i);
     k->b[CARD_SCREEN].bm = NULL;
     if (k->win != NULL)
     {

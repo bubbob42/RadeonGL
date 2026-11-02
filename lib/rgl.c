@@ -235,9 +235,12 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, "locked draws: "); PutU(f, r->core.stat_lock_draws); Put(f, ", uploads: ");
     PutU(f, r->core.stat_lock_uploads); Put(f, ", stream bytes: ");
     PutU(f, r->core.stat_stream_bytes); Put(f, "\n");
-    Put(f, "texture heap used: "); PutU(f, r->core.heap.used); Put(f, " of ");
-    PutU(f, k->heap_size); Put(f, " (larger sizes P96 kept off the board: ");
-    PutU(f, k->heap_offboard); Put(f, ")\n");
+    Put(f, "texture heap: "); PutU(f, k->heap_size >> 20);
+    Put(f, k->b[CARD_HEAP].bpp == 4 ? " MB, a 32-bit bitmap" : " MB, in the screen's format");
+    Put(f, " (sizes P96 kept off the board first: "); PutU(f, k->heap_offboard); Put(f, ")\n");
+    Put(f, "texture heap used at the end: "); PutU(f, r->core.heap.used);
+    Put(f, ", at most: "); PutU(f, r->core.heap.peak);
+    Put(f, "; allocations refused: "); PutU(f, r->core.heap.fails); Put(f, "\n");
     Put(f, "checker: "); Put(f, k->check ? "on" : "OFF (RadeonGLCheck=0)"); Put(f, "\n");
     if (k->lost != 0)
     {
@@ -320,7 +323,8 @@ static void WriteLog(struct Rgl *r)
     Put(f, r->no_lock ? " (locked arrays OFF: RadeonGLLocked=0)\n" : "\n");
     Put(f, "ring wraps: "); PutU(f, r->ring.stats.wraps); Put(f, "\n");
     Put(f, "texture heap used: "); PutU(f, r->core.heap.used); Put(f, " of ");
-    PutU(f, r->heap_size); Put(f, "\n");
+    PutU(f, r->heap_size); Put(f, ", at most "); PutU(f, r->core.heap.peak);
+    Put(f, ", allocations refused "); PutU(f, r->core.heap.fails); Put(f, "\n");
     Put(f, "WPTR misaligned: "); PutU(f, r->card.bad_align); Put(f, "\n");
     Put(f, "packets across the ring end: "); PutU(f, r->card.straddle); Put(f, "\n");
     Put(f, "checker errors: "); PutU(f, r->card.errors);

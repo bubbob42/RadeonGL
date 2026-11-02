@@ -21,6 +21,8 @@ LONG Heap_Init(struct CoreHeap *h, ULONG gpu, ULONG *cpu, ULONG size)
     h->cpu = cpu;
     h->size = size;
     h->used = 0;
+    h->peak = 0;
+    h->fails = 0;
     h->blocks = NULL;
     return 0;
 }
@@ -50,7 +52,10 @@ ULONG Heap_Alloc(struct Core *c, ULONG size, ULONG align)
         if (start <= end && end - start >= size)
             break;
         if (b == NULL)
+        {
+            h->fails++;
             return 0xffffffffUL;
+        }
         start = b->offset + b->size;
         prev = b;
         b = b->next;
@@ -66,6 +71,8 @@ ULONG Heap_Alloc(struct Core *c, ULONG size, ULONG align)
     else
         h->blocks = n;
     h->used += size;
+    if (h->used > h->peak)
+        h->peak = h->used;
     return start;
 }
 

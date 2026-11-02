@@ -64,6 +64,8 @@ struct CardBm
     UBYTE *mem;                 /* inside a lock */
     ULONG bpr;
     ULONG gpu;                  /* GPU address of mem, inside a lock */
+    ULONG bpp;                  /* bytes a pixel (the aperture swap depends on it) */
+    ULONG p96;                  /* from p96AllocBitMap: freed with p96FreeBitMap */
 };
 
 struct Card
@@ -77,6 +79,7 @@ struct Card
     ULONG pitch;                /* the target's pitch in pixels */
     ULONG color_bytes, depth_bytes;
     ULONG heap_size;
+    ULONG compat;               /* P96IDA_COMPATIBLEFORMATS of the GL screen's mode */
     ULONG heap_delta;           /* where the heap starts in its bitmap (fixed at the open) */
 
     /* the chip (from the first lock) */

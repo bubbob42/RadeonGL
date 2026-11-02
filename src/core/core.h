@@ -75,6 +75,8 @@ struct CoreHeap
     ULONG *cpu;             /* CPU address of the same byte */
     ULONG size;             /* bytes */
     ULONG used;             /* bytes handed out */
+    ULONG peak;             /* the most ever handed out at once */
+    ULONG fails;            /* allocations refused (no gap large enough) */
     struct CoreHeapBlock *blocks;   /* allocated blocks, by address */
 };
 
