@@ -327,6 +327,21 @@ struct CoreTex *Core_Texture(struct Core *c, ULONG unit);   /* bound and complet
 
 void Core_Clear(struct Core *c, ULONG mask);
 
+/* The screen a frame is presented to: a P96 bitmap's VRAM. */
+struct CoreScreen
+{
+    ULONG gpu;              /* GPU address of the bitmap's first pixel (16-byte aligned) */
+    ULONG pitch;            /* pixels, a multiple of 8 */
+    ULONG format;           /* R_COLOR_FORMAT_RGB565 or _ARGB8888 */
+    ULONG width, height;
+};
+
+/* Copy the target's colour buffer 1:1 to (x, y) on the screen with the 3D
+ * engine (concept 6.7; Mesa r200_blit): flush the colour cache, wait for
+ * the 3D engine, draw the back buffer as a texture into the screen. The
+ * client's state comes back at the next draw. */
+void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y);
+
 /* --- Queries (get.c) --------------------------------------------------------------- */
 
 void Core_GetFloatv(struct Core *c, ULONG pname, float *out);

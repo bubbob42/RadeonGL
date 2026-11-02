@@ -1,5 +1,5 @@
 /*
- * frame.c -- glClear.
+ * frame.c -- glClear and the present.
  *
  * Clearing is a draw: one window-space RECT_LIST over the target, with TCL
  * off for that one draw (Mesa r200_blit's vertex state) and the colour,
@@ -98,5 +98,101 @@ void Core_Clear(struct Core *c, ULONG mask)
     /* back to the client's state at the next draw */
     c->dirty |= D_VAP | D_VTXFMT | D_PPCNTL | D_COMBINE | D_RB3D | D_PLANEMASK
               | D_ZSTENCIL | D_SECNTL;
+    c->hw_units = 0xffffffffUL;
+}
+
+void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y)
+{
+    struct R2Cs *cs;
+    struct R2Tex t;
+    ULONG v[12];
+    ULONG w;
+    ULONG h;
+    ULONG cpp;
+    float fx0, fy0, fx1, fy1;
+    float s1, t1;
+
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    w = c->target.width;
+    h = c->target.height;
+    /* the visible part only */
+    if (x < 0 || y < 0 || (ULONG) x + w > s->width || (ULONG) y + h > s->height)
+    {
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if ((ULONG) x >= s->width || (ULONG) y >= s->height)
+            return;
+        if ((ULONG) x + w > s->width) w = s->width - (ULONG) x;
+        if ((ULONG) y + h > s->height) h = s->height - (ULONG) y;
+    }
+    Core_Validate(c);
+    cs = c->cs;
+    cpp = (c->target.color_format == R_COLOR_FORMAT_ARGB8888) ? 4 : 2;
+
+    /* everything drawn so far must be in VRAM before it is read as a texture */
+    R2E_Reg(cs, R_RB3D_DSTCACHE_CTLSTAT, R_RB3D_DC_FLUSH_ALL);
+    R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_3D_IDLECLEAN);
+
+    /* vertex state of Mesa's blit: TCL off, window xy, one st pair */
+    R2E_Reg(cs, R_SE_VAP_CNTL_STATUS, cs->swap ? R_VC_NO_SWAP : R_VC_32BIT_SWAP);
+    R2E_Reg(cs, R_SE_VAP_CNTL, R_VAP_FORCE_W_TO_ONE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
+    R2E_Reg(cs, R_SE_VTX_STATE_CNTL, 0);
+    R2E_Reg(cs, R_SE_VTE_CNTL, 0);
+    R2E_VertexFormat(cs, 0, 2UL << R_VTX_TEX0_COMP_CNT_SHIFT, 0, 2UL << R_VTX_TEX0_COMP_CNT_SHIFT,
+                     R_OUTPUT_XYZW | R_OUTPUT_TEX_0);
+    R2E_Reg(cs, R_SE_CNTL, R_DIFFUSE_SHADE_GOURAUD | R_BFACE_SOLID | R_FFACE_SOLID
+                         | R_VTX_PIX_CENTER_OGL | R_ROUND_MODE_ROUND | R_ROUND_PREC_4TH_PIX);
+
+    /* the back buffer as texture 0: NPOT, nearest, REPLACE */
+    R2E_Reg(cs, R_PP_CNTL, R_TEX_0_ENABLE | R_TEX_BLEND_0_ENABLE);
+    R2E_Combiner(cs, 0, (R_TXC_ARG_R0_COLOR << R_TXC_ARG_C_SHIFT) | R_TXC_OP_MADD,
+                 R_TXC_CLAMP_0_1 | R_TXC_OUTPUT_REG_R0,
+                 (R_TXA_ARG_R0_ALPHA << R_TXC_ARG_C_SHIFT) | R_TXC_OP_MADD,
+                 R_TXC_CLAMP_0_1 | R_TXC_OUTPUT_REG_R0);
+    R2E_Reg(cs, R_PP_CNTL_X, 0);
+    t.filter = R_CLAMP_S_CLAMP_LAST | R_CLAMP_T_CLAMP_LAST;
+    t.format = R_TXFORMAT_NON_POWER2
+             | (cpp == 4 ? (R_TXFORMAT_ARGB8888 | R_TXFORMAT_ALPHA_IN_MAP) : R_TXFORMAT_RGB565);
+    t.format_x = 0;
+    t.size = (c->target.width - 1) | ((c->target.height - 1) << 16);
+    t.pitch = c->target.color_pitch * cpp - 32;
+    t.multi = 0;
+    t.offset = c->target.color_gpu;
+    R2E_Texture(cs, 0, &t);
+
+    /* the screen as the colour target, the rectangle as the scissor */
+    R2E_Reg(cs, R_RE_AUX_SCISSOR_CNTL, 0);
+    R2E_Reg(cs, R_RE_CNTL, R_SCISSOR_ENABLE);
+    R2E_Scissor(cs, (ULONG) x, (ULONG) y, (ULONG) x + w - 1, (ULONG) y + h - 1);
+    R2E_Reg(cs, R_RB3D_PLANEMASK, 0xffffffffUL);
+    R2E_Reg(cs, R_RB3D_BLENDCNTL, (R_BLEND_GL_ONE << R_SRC_BLEND_SHIFT)
+                                | (R_BLEND_GL_ZERO << R_DST_BLEND_SHIFT));
+    R2E_Reg(cs, R_RB3D_CNTL, s->format);
+    R2E_ColorTarget(cs, s->gpu, s->pitch, 0);
+
+    /* three corners, texture coordinates normalised to the back buffer */
+    fx0 = (float) x;
+    fy0 = (float) y;
+    fx1 = (float) (x + (LONG) w);
+    fy1 = (float) (y + (LONG) h);
+    s1 = (float) w / (float) c->target.width;
+    t1 = (float) h / (float) c->target.height;
+    v[0] = R2Cs_FloatBits(fx0); v[1] = R2Cs_FloatBits(fy1);
+    v[2] = R2Cs_FloatBits(0.0f);
+    v[3] = R2Cs_FloatBits(t1);
+    v[4] = R2Cs_FloatBits(fx1); v[5] = R2Cs_FloatBits(fy1);
+    v[6] = R2Cs_FloatBits(s1);
+    v[7] = v[3];
+    v[8] = R2Cs_FloatBits(fx1); v[9] = R2Cs_FloatBits(fy0);
+    v[10] = v[6];
+    v[11] = R2Cs_FloatBits(0.0f);
+    R2E_Immd(cs, R_VF_PRIM_RECT_LIST, 4, 3, v);
+
+    /* the next draw goes to the back buffer again, with the client's state */
+    c->dirty |= D_INIT;
     c->hw_units = 0xffffffffUL;
 }

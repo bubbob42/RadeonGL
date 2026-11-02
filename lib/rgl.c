@@ -246,7 +246,9 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         for (i = 0; i < sizeof("PROGDIR:radeongl.log"); i++)
             r->log[i] = "PROGDIR:radeongl.log"[i];
 
-    pitch = ((ULONG) w + 7) & ~7UL;
+    /* rows a multiple of 32 bytes: the present reads the back buffer as a
+     * texture (R200 TXPITCH, Mesa); 16 pixels at 16 bits */
+    pitch = ((ULONG) w + 15) & ~15UL;
     for (i = 0; i < sizeof(cfg); i++)
         ((UBYTE *) &cfg)[i] = 0;
     cfg.range[0].gpu = COLOR_GPU; cfg.range[0].size = pitch * (ULONG) h * 2; cfg.range[0].kinds = R2K_COLOR;

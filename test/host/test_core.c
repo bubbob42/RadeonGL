@@ -20,6 +20,7 @@
 #define TEX_GPU     0x00400000UL
 #define TEX_SIZE    0x00400000UL
 #define FENCE_REG   R_SCRATCH_REG2
+#define SCREEN_GPU  0x01000000UL
 
 static ULONG stream[400000];
 static ULONG vram[TEX_SIZE / 4];
@@ -82,10 +83,12 @@ static void Fresh(ULONG swap)
 static void Cfg(struct R2ChkCfg *cfg)
 {
     memset(cfg, 0, sizeof(*cfg));
-    cfg->range[0].gpu = COLOR_GPU; cfg->range[0].size = W_ * H_ * 2; cfg->range[0].kinds = R2K_COLOR;
+    cfg->range[0].gpu = COLOR_GPU; cfg->range[0].size = W_ * H_ * 2;
+    cfg->range[0].kinds = R2K_COLOR | R2K_TEXTURE;     /* the present reads it */
     cfg->range[1].gpu = DEPTH_GPU; cfg->range[1].size = W_ * H_ * 2; cfg->range[1].kinds = R2K_DEPTH;
     cfg->range[2].gpu = TEX_GPU;   cfg->range[2].size = TEX_SIZE;    cfg->range[2].kinds = R2K_TEXTURE;
-    cfg->nranges = 3;
+    cfg->range[3].gpu = SCREEN_GPU; cfg->range[3].size = 1024 * 768 * 4; cfg->range[3].kinds = R2K_COLOR;
+    cfg->nranges = 4;
     cfg->fence_reg = FENCE_REG;
 }
 
@@ -804,6 +807,45 @@ static void test_frames_through_ring(void)
     Core_Free(&core);
 }
 
+static void test_present(void)
+{
+    struct CoreScreen scr;
+    struct R2ChkState st;
+    ULONG before;
+
+    Fresh(1);
+    Core_Clear(&core, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    Core_Enable(&core, GL_DEPTH_TEST, 1);
+    Draw1();
+    scr.gpu = SCREEN_GPU;
+    scr.pitch = 1024;
+    scr.format = R_COLOR_FORMAT_ARGB8888;
+    scr.width = 1024;
+    scr.height = 768;
+    Core_Present(&core, &scr, 192, 144);        /* centred */
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(st.draws, 3);                     /* clear, triangle, the copy */
+    CHECK_HEX(LastReg(R_RB3D_COLOROFFSET), SCREEN_GPU);
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0), COLOR_GPU);
+    CHECK_HEX(LastReg(R_PP_TXPITCH_0), W_ * 2 - 32);
+    CHECK_HEX(LastReg(R_RE_TOP_LEFT), 192UL | (144UL << 16));
+    CHECK_HEX(LastReg(R_RE_WIDTH_HEIGHT), (192UL + W_ - 1) | ((144UL + H_ - 1) << 16));
+    CHECK_HEX(LastReg(R_RB3D_DSTCACHE_CTLSTAT), R_RB3D_DC_FLUSH_ALL);
+    /* the next draw is back on the back buffer, TCL on */
+    before = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK(LastReg(R_SE_VAP_CNTL) & R_VAP_TCL_ENABLE);
+    CHECK_HEX(LastReg(R_RB3D_COLOROFFSET), COLOR_GPU);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK((ULONG) (cs.ptr - stream) - before < 400);   /* one full state re-emit, no more */
+    /* a screen smaller than the frame: only the visible part is copied */
+    scr.width = 320;
+    scr.height = 200;
+    Core_Present(&core, &scr, 0, 0);
+    CHECK_HEX(LastReg(R_RE_WIDTH_HEIGHT), 319UL | (199UL << 16));
+    CHECK_INT(Checked(&st), R2CE_OK);
+}
+
 int main(void)
 {
     struct CoreTarget t;
@@ -818,6 +860,7 @@ int main(void)
     test_state();
     test_matrices();
     test_arrays();
+    test_present();
     test_frames_through_ring();
     (void) t;
     (void) e;
