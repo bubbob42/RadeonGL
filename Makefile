@@ -140,7 +140,7 @@ GCC_LDFLAGS  := -noixemul -lamiga
 
 .PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config13 launch-fsuae13 run-fsuae13 info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run release-stage release-drawer release-archive release-lha release-adf release-aminet release-verify release-dist
 
-all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes census-lib
+all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes census-lib r200-objs
 
 # release: advance the revision, then rebuild both profiles so the new $VER is
 # embedded. This is the ONLY target that bumps -- run it by hand when cutting a
@@ -653,9 +653,9 @@ P96_SDK ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
 P96_INC := $(P96_SDK)/Include
 PROBE_COMMON := mmio eclock plog pcicard r200probe
 PROBE_CFLAGS := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm -noixemul -m68020 \
-                -fomit-frame-pointer -Isdk/openpci/include -I$(P96_INC)
+                -fomit-frame-pointer -Isdk/openpci/include -I$(P96_INC) -Isrc/r200
 PROBE_OBJS   := $(addprefix build/probe/,$(addsuffix .o,$(PROBE_COMMON)))
-PROBE_HDRS   := $(wildcard src/probe/*.h)
+PROBE_HDRS   := $(wildcard src/probe/*.h) src/r200/r200reg.h
 
 build/probe/%.o: src/probe/%.c $(PROBE_HDRS)
 	@mkdir -p build/probe
@@ -674,7 +674,7 @@ dist/Probe/C/BusBench: build/probe/busbench.o $(PROBE_OBJS)
 # (it spins on a symlink out of a volume -- Herald). One vamos at a time:
 # never run these with -j.
 PROBE_SC_OBJS  := $(addprefix build/probe-sasc/,$(addsuffix .o,$(PROBE_COMMON)))
-PROBE_SC_IDIRS := IDIR=include: IDIR=proj:src/probe/ IDIR=proj:sdk/openpci/include/ IDIR=proj:build/p96inc/
+PROBE_SC_IDIRS := IDIR=include: IDIR=proj:src/probe/ IDIR=proj:src/r200/ IDIR=proj:sdk/openpci/include/ IDIR=proj:build/p96inc/
 
 build/p96inc/.copied:
 	rm -rf build/p96inc
@@ -745,6 +745,48 @@ $(CENSUS_LIB): $(CENSUS_OBJS)
 
 .PHONY: census-lib
 census-lib: $(CENSUS_LIB)
+
+# --- R200 packet layer: emitter, ring, checker (src/r200, docs/r200-packets.md)
+# Pure C89 without OS calls: the library and the probes link it. `gmake test`
+# runs it on the Mac against test/host/shim (32-bit ULONG) and a simulated CP
+# (test/host/simcp.c); `gmake r200-objs` builds it with both Amiga compilers.
+R200_MODULES    := r2cs r2emit r2ring r2check
+R200_HDRS       := $(wildcard src/r200/*.h)
+HOSTCC          ?= cc
+HOST_MOD_CFLAGS := -O2 -std=c89 -pedantic -Wall -Wextra -Werror
+HOST_TST_CFLAGS := -O2 -std=c99 -Wall -Wextra -Werror
+HOST_INC        := -Itest/host/shim -Isrc/r200 -Itest/host
+HOST_R200_OBJS  := $(addprefix build/host/,$(addsuffix .o,$(R200_MODULES)))
+
+build/host/%.o: src/r200/%.c $(R200_HDRS)
+	@mkdir -p build/host
+	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -c $< -o $@
+
+build/host/%.o: test/host/%.c $(R200_HDRS) $(wildcard test/host/*.h)
+	@mkdir -p build/host
+	$(HOSTCC) $(HOST_TST_CFLAGS) $(HOST_INC) -c $< -o $@
+
+build/host/test_r200: build/host/test_r200.o build/host/simcp.o $(HOST_R200_OBJS)
+	$(HOSTCC) $^ -o $@
+
+.PHONY: test
+test: build/host/test_r200
+	./build/host/test_r200
+
+R200_GCC_CFLAGS := $(GCC_WARNINGS) -O2 -std=gnu99 -m68020 -noixemul -fomit-frame-pointer -Isrc/r200
+R200_GCC_OBJS   := $(addprefix build/r200-gcc/,$(addsuffix .o,$(R200_MODULES)))
+R200_SC_OBJS    := $(addprefix build/r200-sasc/,$(addsuffix .o,$(R200_MODULES)))
+
+build/r200-gcc/%.o: src/r200/%.c $(R200_HDRS)
+	@mkdir -p build/r200-gcc
+	$(GCC_CC) $(R200_GCC_CFLAGS) -c $< -o $@
+
+build/r200-sasc/%.o: src/r200/%.c $(R200_HDRS) | $(VAMOSRC)
+	@mkdir -p build/r200-sasc
+	$(VAMOS_SC) sc $(SC_OPTS) CPU=68020 OPTIMIZE NOLINK IDIR=include: IDIR=proj:src/r200/ OBJNAME=proj:$@ proj:$<
+
+.PHONY: r200-objs
+r200-objs: $(R200_GCC_OBJS) $(R200_SC_OBJS)
 
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a
