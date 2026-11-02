@@ -87,6 +87,16 @@ static const struct RegEntry reg_Table[] =
 
 #define REG_TABLE_SIZE (sizeof(reg_Table) / sizeof(reg_Table[0]))
 
+void R200_CardFromP96(struct PciCard *card, const struct P96Board *b)
+{
+    static struct PciCard zero;
+
+    *card = zero;
+    card->mmio = b->memIoBase;
+    card->aper = b->memBase;
+    card->bar1 = b->ioBase;
+}
+
 /* The table above, then SURFACE0..7 LOWER/UPPER/INFO. */
 ULONG R200_RegisterCount(void)
 {
@@ -110,8 +120,17 @@ ULONG R200_ReportEndian(const struct PciCard *card)
     {
         raw = MMIO_RAW(card->mmio, R_CONFIG_APER_0_BASE);
         Log_Printf("  not a whole number of megabytes either way (no PC BIOS set it)\n");
-        Log_Printf("CONFIG_APER_0_BASE native read 0x%08lx, byte-swapped 0x%08lx; BAR0 PCI 0x%08lx\n",
-                   raw, Mmio_Swap32(raw), bar0);
+        if (bar0 != 0)
+            Log_Printf("CONFIG_APER_0_BASE native read 0x%08lx, byte-swapped 0x%08lx; BAR0 PCI 0x%08lx\n",
+                       raw, Mmio_Swap32(raw), bar0);
+        else
+            Log_Printf("CONFIG_APER_0_BASE native read 0x%08lx (BAR0's PCI address unknown)\n", raw);
+    }
+    if (how == MMIO_BY_APERSIZE || how == MMIO_UNDECIDED)
+    {
+        raw = MMIO_RAW(card->mmio, R_CONFIG_APER_SIZE);
+        Log_Printf("CONFIG_APER_SIZE native read 0x%08lx, byte-swapped 0x%08lx\n",
+                   raw, Mmio_Swap32(raw));
     }
     if (how == MMIO_UNDECIDED)
     {
@@ -122,7 +141,8 @@ ULONG R200_ReportEndian(const struct PciCard *card)
                Mmio_Swap ? (CONST_STRPTR)"little-endian (68k swaps every access)"
                          : (CONST_STRPTR)"right as they are (NO swap)",
                how == MMIO_BY_MEMSIZE ? (CONST_STRPTR)"CONFIG_MEMSIZE"
-                                      : (CONST_STRPTR)"CONFIG_APER_0_BASE");
+               : how == MMIO_BY_APER  ? (CONST_STRPTR)"CONFIG_APER_0_BASE"
+                                      : (CONST_STRPTR)"CONFIG_APER_SIZE");
     if (size != 0)
         Log_Printf("memory size %lu MB\n", size >> 20);
     return how;
@@ -231,23 +251,29 @@ void R200_DecodeRegisters(const struct PciCard *card)
     hi = (v & 0xffff0000UL) | 0xffffUL;
     Log_Printf("MC_FB_LOCATION: GPU frame buffer 0x%08lx - 0x%08lx\n", lo, hi);
     aperPci = card->cfgBar[0] & 0xfffffff0UL;
-    Log_Printf("  PCI BAR0 = 0x%08lx: %s\n", aperPci,
-               (aperPci == lo) ? (CONST_STRPTR)"GPU address == PCI address (flat)"
-                               : (CONST_STRPTR)"GPU address != PCI address (offset needed)");
+    if (aperPci != 0)
+        Log_Printf("  PCI BAR0 = 0x%08lx: %s\n", aperPci,
+                   (aperPci == lo) ? (CONST_STRPTR)"GPU address == PCI address (flat)"
+                                   : (CONST_STRPTR)"GPU address != PCI address (offset needed)");
     v = Mmio_Read(card->mmio, R_MC_AGP_LOCATION);
     Log_Printf("MC_AGP_LOCATION: 0x%08lx - 0x%08lx\n",
                (v & 0xffffUL) << 16, (v & 0xffff0000UL) | 0xffffUL);
     v = Mmio_Read(card->mmio, R_CONFIG_APER_SIZE);
-    Log_Printf("CONFIG_APER_SIZE: %lu MB; openpci BAR0 window %lu MB\n",
-               v >> 20, card->aperSize >> 20);
+    if (card->aperSize != 0)
+        Log_Printf("CONFIG_APER_SIZE: %lu MB; openpci BAR0 window %lu MB\n",
+                   v >> 20, card->aperSize >> 20);
+    else
+        Log_Printf("CONFIG_APER_SIZE: %lu MB (one aperture; the CPU sees two, AP0 and AP1)\n",
+                   v >> 20);
 
     v = Mmio_Read(card->mmio, R_BUS_CNTL);
     Log_Printf("BUS_CNTL: bus master %s (BUS_MASTER_DIS bit 6 = %ld)\n",
                (v & R_BUS_MASTER_DIS) ? (CONST_STRPTR)"DISABLED" : (CONST_STRPTR)"enabled",
                (LONG)((v & R_BUS_MASTER_DIS) ? 1 : 0));
-    Log_Printf("PCI command register 0x%04lx: I/O %s, memory %s, bus master %s\n",
-               card->cfgCommand, OnOff(card->cfgCommand & 1),
-               OnOff(card->cfgCommand & 2), OnOff(card->cfgCommand & 4));
+    if (card->vendor != 0)
+        Log_Printf("PCI command register 0x%04lx: I/O %s, memory %s, bus master %s\n",
+                   card->cfgCommand, OnOff(card->cfgCommand & 1),
+                   OnOff(card->cfgCommand & 2), OnOff(card->cfgCommand & 4));
 
     v = Mmio_Read(card->mmio, R_SURFACE_CNTL);
     Log_Printf("SURFACE_CNTL: AP0 swap 16bpp %s 32bpp %s; AP1 swap 16bpp %s 32bpp %s\n",

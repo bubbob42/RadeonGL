@@ -6,7 +6,8 @@
  * set-up, so it is MEASURED, not assumed (Mmio_DetectSwap): CONFIG_MEMSIZE
  * read both ways must give a whole number of megabytes, or, where no PC
  * BIOS set it (it reads 0), CONFIG_APER_0_BASE must equal BAR0's PCI
- * address. MEASURED on the A4000D (Mediator, Radeon.card 43.579,
+ * address, or (when the card came from P96 and its PCI address is not
+ * known) CONFIG_APER_SIZE must be a power of two. MEASURED on the A4000D (Mediator, Radeon.card 43.579,
  * 2026-11-02): native reads are right, no swap. Every read and write goes
  * through these helpers so the probes share one answer.
  *
@@ -38,11 +39,14 @@ void Mmio_Write(APTR base, ULONG off, ULONG value);
 #define MMIO_UNDECIDED  0
 #define MMIO_BY_MEMSIZE 1   /* CONFIG_MEMSIZE: a whole number of megabytes */
 #define MMIO_BY_APER    2   /* CONFIG_APER_0_BASE == BAR0's PCI address */
+#define MMIO_BY_APERSIZE 3  /* CONFIG_APER_SIZE a power of two one way only */
 
 /* Decide Mmio_Swap: from CONFIG_MEMSIZE, else from CONFIG_APER_0_BASE
- * against bar0_pci (BAR0's PCI address). Returns MMIO_*; *memsize gets the
- * memory size in bytes when CONFIG_MEMSIZE decided, else 0. Undecided
- * leaves the flag at its default. */
+ * against bar0_pci (BAR0's PCI address; 0 when unknown), else from
+ * CONFIG_APER_SIZE. Returns MMIO_*; *memsize gets the memory size in bytes
+ * when CONFIG_MEMSIZE decided, else 0. Undecided leaves the flag at its
+ * default. Per Picasso96 the registers read big-endian (no swap)
+ * while a bitmap of the board is locked; this checks it. */
 ULONG Mmio_DetectSwap(APTR base, ULONG bar0_pci, ULONG *memsize);
 
 #endif /* PROBE_MMIO_H */

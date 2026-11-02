@@ -38,6 +38,12 @@ BOOL R2Cp_InUse(const struct R2CpSaved *s)
     return (BOOL) ((s->csq_cntl >> R_CSQ_MODE_SHIFT) != 0);
 }
 
+LONG R2Cp_Reclaim(const struct R2Hw *hw, struct R2CpSaved *s, ULONG timeout_us, ULONG *reset)
+{
+    s->csq_cntl = R_CSQ_PRIDIS_INDDIS;
+    return R2Cp_Stop(hw, s, timeout_us, reset);
+}
+
 LONG R2Cp_WaitIdle(const struct R2Hw *hw, ULONG timeout_us)
 {
     ULONG start;

@@ -1,13 +1,20 @@
 /*
- * R200Info -- read-only report of a Radeon behind openpci.library:
- * how openpci maps it, who owns it, how its registers read from the 68k,
- * and the register values the RadeonGL back end's design hinges on
+ * R200Info -- read-only report of the Radeon under the Workbench screen:
+ * the board as Picasso96 hands it out, how its registers read from the
+ * 68k, and the register values the RadeonGL back end's design hinges on
  * (docs/concept-radeongl.md, section 11, probe 1).
  *
- * It never writes a register and never claims the card. Run it twice:
- * once with an idle Workbench, once while dragging a window around, to
- * see what Radeon.card changes (SAMPLES=2 INTERVAL=8 does both in one go:
- * drag during the pause).
+ * The card comes from Picasso96 (p96board.h): its register base is
+ * P96BMA_BOARDMEMIOBASE, read inside a lock of a small bitmap on the
+ * board, and every register is read inside such a lock, which keeps
+ * Radeon.card off the chip (Picasso96, 2026-11-02). With
+ * openpci.library present its view of the card (identity, BARs, owner) is
+ * reported beside it, read-only, the card never claimed.
+ *
+ * It never writes a register. Run it twice: once with an idle Workbench,
+ * once while dragging a window around, to see what Radeon.card changes
+ * (SAMPLES=2 INTERVAL=8 does both in one go: drag during the pause, when
+ * nothing is locked).
  *
  *   R200Info LOG/K,SAMPLES/N,INTERVAL/N
  */
@@ -20,12 +27,13 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+#include "p96board.h"
 #include "pcicard.h"
 #include "mmio.h"
 #include "r200probe.h"
 #include "plog.h"
 
-static const char ver[] = "$VER: R200Info 0.1 (02.11.2026)";
+static const char ver[] = "$VER: R200Info 0.2 (02.11.2026)";
 
 #define TEMPLATE "LOG/K,SAMPLES/N,INTERVAL/N"
 
@@ -57,13 +65,16 @@ static void ReportCpu(void)
 
 int main(void)
 {
+    static struct P96Board board;     /* zero: P96Board_Close is right before Open */
     struct RDArgs *rda;
     struct Args args;
     struct PciCard card;
+    struct PciCard pci;
     ULONG *prev;
     LONG samples;
     LONG interval;
     LONG i;
+    BOOL havePci;
     int rc;
 
     args.log = NULL;
@@ -85,30 +96,71 @@ int main(void)
     Log_Printf("%s -- read-only Radeon register report\n", ver + 6);
     ReportCpu();
 
-    rc = RETURN_OK;
-    if (!PciCard_Open(&card))
+    rc = RETURN_FAIL;
+    havePci = FALSE;
+    prev = NULL;
+    if (!P96Board_Open(&board, 4096))
+        goto out;
+    P96Board_Report(&board);
+    if (!P96Board_IsRadeon(&board) || board.memIoBase == NULL)
     {
-        rc = RETURN_FAIL;
+        Log_Printf("R200Info: the Workbench's board is not a Radeon: no registers read\n");
+        goto out;
     }
-    else
+    R200_CardFromP96(&card, &board);
+    /* openpci's view beside it: identity and BAR0's PCI address */
+    havePci = PciCard_Open(&pci);
+    if (havePci)
     {
-        PciCard_Report(&card);
-        R200_ReportEndian(&card);
-        prev = AllocVec(R200_RegisterCount() * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
-        for (i = 0; i < samples; i++)
+        PciCard_Report(&pci);
+        Log_Printf("P96's register base 0x%08lx %s openpci's BAR2 0x%08lx; memory base 0x%08lx %s BAR0 0x%08lx\n",
+                   (ULONG)card.mmio, card.mmio == pci.mmio ? (CONST_STRPTR)"==" : (CONST_STRPTR)"!=",
+                   (ULONG)pci.mmio, (ULONG)card.aper,
+                   card.aper == pci.aper ? (CONST_STRPTR)"==" : (CONST_STRPTR)"!=", (ULONG)pci.aper);
+        card.vendor = pci.vendor;
+        card.device = pci.device;
+        card.cfgCommand = pci.cfgCommand;
+        card.aperSize = pci.aperSize;
+        for (i = 0; i < 6; i++)
+            card.cfgBar[i] = pci.cfgBar[i];
+    }
+    if (!P96Board_Lock(&board))
+    {
+        Log_Printf("R200Info: the bitmap could not be locked on the board\n");
+        goto out;
+    }
+    R200_ReportEndian(&card);
+    P96Board_Unlock(&board);
+    prev = AllocVec(R200_RegisterCount() * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
+    for (i = 0; i < samples; i++)
+    {
+        if (i > 0)
         {
-            if (i > 0)
-            {
-                Log_Printf("\n(sample %ld of %ld in %ld s -- move a window now)\n",
-                           i + 1, samples, interval);
-                Delay(interval * 50);
-            }
-            R200_DumpRegisters(&card, prev, (BOOL)(i > 0));
+            Log_Printf("\n(sample %ld of %ld in %ld s -- move a window now)\n",
+                       i + 1, samples, interval);
+            Delay(interval * 50);
         }
-        R200_DecodeRegisters(&card);
-        FreeVec(prev);
-        PciCard_Close(&card);
+        if (!P96Board_Lock(&board))
+        {
+            Log_Printf("sample %ld: the bitmap is not on the board now\n", i + 1);
+            continue;
+        }
+        R200_DumpRegisters(&card, prev, (BOOL)(i > 0));
+        P96Board_Unlock(&board);
     }
+    if (P96Board_Lock(&board))
+    {
+        R200_DecodeRegisters(&card);
+        P96Board_Unlock(&board);
+    }
+    rc = RETURN_OK;
+
+out:
+    if (prev != NULL)
+        FreeVec(prev);
+    if (havePci)
+        PciCard_Close(&pci);
+    P96Board_Close(&board);
     Log_Printf("\nR200Info: done (rc %ld)\n", (LONG)rc);
     Log_Close();
     FreeArgs(rda);

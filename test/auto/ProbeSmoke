@@ -1,8 +1,11 @@
-; ProbeSmoke -- the probes (GCC and SAS/C builds, CPRing and Tri too) refuse cleanly where there is no PCI bridge:
-; FS-UAE has no openpci.library, so both must print the "not found" line,
-; write their log and exit with rc 20, touching nothing. (The real runs
-; happen on the A4000D; see docs/probes.md.)
-; LIMIT 120
+; ProbeSmoke -- the probes (GCC and SAS/C builds) where there is no Radeon:
+; FS-UAE's board is uaegfx. The probes find the board through Picasso96;
+; the Radeon ones must say it is not a Radeon, write their log and exit
+; with rc 20, touching nothing. BusBench measures the uaegfx block without
+; register tests. LockBench runs in full: its lock and rendering findings
+; are P96's own behaviour on this board. (The real runs happen on the
+; A4000D; see docs/probes.md.)
+; LIMIT 180
 FailAt 1000
 Wait 12
 Echo "=== machine ===" >DEV:Test/auto.log
@@ -33,6 +36,12 @@ DEV:Probe/C/Tri LOG=DEV:Test/probe-tri.log NOSHOW >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== Tri_sasc ===" >>DEV:Test/auto.log
 DEV:Probe/C/Tri_sasc LOG=DEV:Test/probe-tri-sasc.log NOSHOW >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== LockBench ===" >>DEV:Test/auto.log
+DEV:Probe/C/LockBench LOG=DEV:Test/probe-lockbench.log >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== LockBench_sasc ===" >>DEV:Test/auto.log
+DEV:Probe/C/LockBench_sasc LOG=DEV:Test/probe-lockbench-sasc.log >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== CxBreak (a name that does not run) ===" >>DEV:Test/auto.log
 DEV:Probe/C/CxBreak NoSuchCommodity >>DEV:Test/auto.log

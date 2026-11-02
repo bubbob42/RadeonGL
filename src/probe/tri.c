@@ -6,10 +6,15 @@
  * VRAM; the command processor runs it as CPRing showed it can. Then the
  * buffer is shown in a window on Workbench.
  *
- * One block of VRAM (scratch.h: a P96 bitmap 256 pixels wide, locked for
- * the whole GPU part, well under a second) holds the ring (16 KB), the
- * colour buffer (rows of the bitmap, so the window can show them), a Z16
- * buffer and the core's 64 KB heap, each 4 KB aligned.
+ * One block of VRAM (p96board.h: a friend bitmap of the Workbench screen,
+ * 256 pixels of 32 bits a row) holds the ring (16 KB), the colour buffer
+ * (rows of the bitmap, so the window can show them), a Z16 buffer and the
+ * core's 64 KB heap, each 4 KB aligned. The card is found through
+ * Picasso96, and everything that touches the chip -- the register checks,
+ * the CP, the draw, the read-back -- happens inside ONE lock of the block,
+ * which keeps Radeon.card off the chip (well under a second). Tri needs a
+ * 32-bit Workbench: the block takes the screen's format, and the window
+ * shows the colour buffer's rows as they are.
  *
  * Safety, in order:
  *  1. the core writes the stream into FAST RAM first; the packet checker
@@ -22,7 +27,8 @@
  *     engine is still busy, the 3D blocks SE, RE and PP are reset -- never
  *     the 2D engine or the render backend, which are Radeon.card's too;
  *  4. the CP registers, PP_TFACTOR_0 and SCRATCH_REG2 are put back as
- *     found. The 3D engine's state stays as the scene left it: Radeon.card
+ *     found (a CP found running, left by a run that crashed, is stopped
+ *     first and left stopped). The 3D engine's state stays as the scene left it: Radeon.card
  *     does not use it.
  * Eight pixels are read back through the aperture and compared with what
  * the host's reference rasteriser draws for the same stream (test_sim).
@@ -49,13 +55,13 @@
 #include <proto/graphics.h>
 #include <proto/Picasso96.h>
 
+#include "p96board.h"
 #include "pcicard.h"
 #include "mmio.h"
 #include "r200regs.h"
 #include "r200probe.h"
 #include "eclock.h"
 #include "plog.h"
-#include "scratch.h"
 #include "r2cs.h"
 #include "r2pm4.h"
 #include "r2ring.h"
@@ -65,7 +71,7 @@
 #include "triscene.h"
 #include "texscene.h"
 
-static const char ver[] = "$VER: Tri 0.1 (02.11.2026)";
+static const char ver[] = "$VER: Tri 0.2 (02.11.2026)";
 
 #define TEMPLATE "LOG/K,WAIT/N,NOSHOW/S,PPM/K,SCENE/K"
 
@@ -100,11 +106,14 @@ struct Args
 
 struct Ctx
 {
-    struct PciCard *card;
+    struct PciCard *card;   /* the bases P96 gave */
+    struct P96Board *board; /* the block */
     struct R2Hw hw;
     struct R2CpSaved saved;
-    struct Scratch scratch;
-    ULONG fb_start;
+    ULONG fb_start;         /* GPU address of video RAM's first byte */
+    ULONG apSize;           /* CONFIG_APER_SIZE: one aperture */
+    ULONG tf_orig;          /* PP_TFACTOR_0 and SCRATCH_REG2 as found */
+    ULONG scr_orig;
     ULONG clock_base;
     ULONG bpr;              /* bytes per row of the block (pitch of the colour buffer) */
     ULONG color_row;        /* the colour buffer's first row in the bitmap */
@@ -171,6 +180,13 @@ static ULONG Align4k(ULONG a)
     return (a + 4095UL) & ~4095UL;
 }
 
+/* The GPU address of a 68k address in the block: the CPU sees video RAM
+ * twice (apertures AP0 and AP1), the GPU once. */
+static ULONG Gpu(struct Ctx *c, ULONG cpu)
+{
+    return c->fb_start + (cpu - (ULONG)c->card->aper) % c->apSize;
+}
+
 static BOOL InSurface(struct Ctx *c, ULONG off, ULONG bytes)
 {
     ULONG n;
@@ -204,6 +220,54 @@ static BOOL Reset3D(struct Ctx *c)
 
 /* --- the GPU part, inside one lock of the block -------------------------------- */
 
+/* Inside the lock, before anything is written: the register byte order, a
+ * CP left running, where video RAM sits, PP_TFACTOR_0 for the canary.
+ * TRUE when the scene may go ahead; tf_orig and scr_orig are then set. */
+static BOOL Prepare(struct Ctx *c)
+{
+    ULONG v;
+    ULONG reset;
+    LONG e;
+
+    if (R200_ReportEndian(c->card) == MMIO_UNDECIDED)
+    {
+        Log_Printf("Tri: register byte order undecided: the card is not touched\n");
+        return FALSE;
+    }
+    R2Cp_Save(&c->hw, &c->saved);
+    if (R2Cp_InUse(&c->saved))
+    {
+        /* Radeon.card never runs the CP: a run that crashed left it on */
+        Log_Printf("the CP is RUNNING (CSQ_CNTL 0x%08lx): left over from a run that crashed\n",
+                   c->saved.csq_cntl);
+        e = R2Cp_Reclaim(&c->hw, &c->saved, TIMEOUT_US, &reset);
+        Log_Printf("  stopped: %ld%s\n", e,
+                   reset ? (CONST_STRPTR)" (the CP was soft-reset)" : (CONST_STRPTR)"");
+        if (e != R2_OK)
+            return FALSE;
+    }
+    v = HwRead(c, R_MC_FB_LOCATION);
+    c->fb_start = (v & 0xffffUL) << 16;
+    c->apSize = HwRead(c, R_CONFIG_APER_SIZE);
+    if (c->apSize == 0 || (c->apSize & (c->apSize - 1)) != 0)
+    {
+        Log_Printf("Tri: CONFIG_APER_SIZE 0x%08lx is not a power of two: nothing drawn\n",
+                   c->apSize);
+        return FALSE;
+    }
+    c->tf_orig = HwRead(c, R_PP_TFACTOR_0);
+    c->scr_orig = HwRead(c, FENCE_REG);
+    HwWrite(c, R_PP_TFACTOR_0, MMIO_TEST);
+    v = HwRead(c, R_PP_TFACTOR_0);
+    HwWrite(c, R_PP_TFACTOR_0, c->tf_orig);
+    if (v != MMIO_TEST)
+    {
+        Log_Printf("Tri: PP_TFACTOR_0 does not read back (0x%08lx): no canary, nothing drawn\n", v);
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static BOOL RenderScene(struct Ctx *c, ULONG *buf)
 {
     struct R2Cs bcs;
@@ -230,32 +294,38 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     ULONG reset;
     LONG e;
 
-    if (!Scratch_Lock(&c->scratch))
+    if (!P96Board_Lock(c->board))
     {
-        Log_Printf("the block could not be locked\n");
+        Log_Printf("the block is not on the board now: nothing drawn\n");
         return FALSE;
     }
-    mem = c->scratch.mem;
+    mem = (volatile ULONG *)c->board->mem;
+    c->bpr = c->board->bpr;
+    if (!Prepare(c))
+    {
+        P96Board_Unlock(c->board);
+        return FALSE;
+    }
 
     Log_Section("Layout");
     ring_cpu = (ULONG *)Align4k((ULONG)mem);
     color_cpu = Align4k((ULONG)ring_cpu + RING_BYTES);
     depth_cpu = Align4k(color_cpu + COLOR_BYTES);
     heap_cpu = Align4k(depth_cpu + DEPTH_BYTES);
-    ring_gpu = c->fb_start + ((ULONG)ring_cpu - (ULONG)c->card->aper);
+    ring_gpu = Gpu(c, (ULONG)ring_cpu);
     t.width = TRI_W;
     t.height = TRI_H;
-    t.color_gpu = c->fb_start + (color_cpu - (ULONG)c->card->aper);
+    t.color_gpu = Gpu(c, color_cpu);
     t.color_pitch = c->bpr / 4;
     t.color_format = R_COLOR_FORMAT_ARGB8888;
-    t.depth_gpu = c->fb_start + (depth_cpu - (ULONG)c->card->aper);
+    t.depth_gpu = Gpu(c, depth_cpu);
     t.depth_pitch = TRI_W;
     c->color_row = (color_cpu - (ULONG)mem) / c->bpr;
     Log_Printf("block 0x%08lx, %lu bytes a row\n", (ULONG)mem, c->bpr);
     Log_Printf("ring   GPU 0x%08lx\ncolour GPU 0x%08lx, pitch %lu, row %lu of the bitmap\n"
                "Z16    GPU 0x%08lx\nheap   GPU 0x%08lx, %lu bytes\n",
                ring_gpu, t.color_gpu, t.color_pitch, c->color_row, t.depth_gpu,
-               c->fb_start + (heap_cpu - (ULONG)c->card->aper), HEAP_BYTES);
+               Gpu(c, heap_cpu), HEAP_BYTES);
     if (heap_cpu + HEAP_BYTES > (ULONG)mem + BLOCK_BYTES
         || (color_cpu - (ULONG)mem) % c->bpr != 0 || c->bpr % 32 != 0 || c->bpr / 4 < TRI_W)
     {
@@ -275,7 +345,7 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     env.free = EnvFree;
     env.wait_idle = EnvIdle;
     env.env = NULL;
-    v = Core_Init(&core, &bcs, &env, &t, c->fb_start + (heap_cpu - (ULONG)c->card->aper),
+    v = Core_Init(&core, &bcs, &env, &t, Gpu(c, heap_cpu),
                   (ULONG *)heap_cpu, HEAP_BYTES);
     if (v != GL_NO_ERROR)
     {
@@ -300,7 +370,7 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     cfg.range[1].gpu = t.depth_gpu;
     cfg.range[1].size = DEPTH_BYTES;
     cfg.range[1].kinds = R2K_DEPTH;
-    cfg.range[2].gpu = c->fb_start + (heap_cpu - (ULONG)c->card->aper);
+    cfg.range[2].gpu = Gpu(c, heap_cpu);
     cfg.range[2].size = HEAP_BYTES;
     cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;
     cfg.nranges = 3;
@@ -426,7 +496,9 @@ stop:
                        HwRead(c, R_RBBM_STATUS));
     }
 unlock:
-    Scratch_Unlock(&c->scratch);
+    HwWrite(c, R_PP_TFACTOR_0, c->tf_orig);
+    HwWrite(c, FENCE_REG, c->scr_orig);
+    P96Board_Unlock(c->board);
     return c->drawn;
 }
 
@@ -483,7 +555,7 @@ static void Show(struct Ctx *c, LONG seconds)
         Log_Printf("the window did not open\n");
         return;
     }
-    BltBitMapRastPort(c->scratch.bm, 0, (WORD)c->color_row, win->RPort,
+    BltBitMapRastPort(c->board->bm, 0, (WORD)c->color_row, win->RPort,
                       win->BorderLeft, win->BorderTop, TRI_W, TRI_H, 0xc0);
     Log_Printf("shown in a window for up to %ld s (close it to end sooner)\n", seconds);
     done = FALSE;
@@ -502,17 +574,15 @@ static void Show(struct Ctx *c, LONG seconds)
 
 int main(void)
 {
+    static struct P96Board board;     /* zero: P96Board_Close is right before Open */
     struct RDArgs *rda;
     struct Args args;
     struct PciCard card;
     struct Ctx c;
     ULONG *buf;
-    ULONG tf_orig;
-    ULONG scr_orig;
-    ULONG v;
+    ULONG t0;
     ULONG i;
     ULONG bad;
-    BOOL opened;
     int rc;
 
     args.log = NULL;
@@ -531,11 +601,11 @@ int main(void)
     Log_Printf("%s -- the first picture from the R200\n", ver + 6);
 
     rc = RETURN_FAIL;
-    opened = FALSE;
     buf = NULL;
     for (i = 0; i < sizeof(c); i++)
         ((UBYTE *)&c)[i] = 0;
     c.card = &card;
+    c.board = &board;
     c.hw.read_reg = HwRead;
     c.hw.write_reg = HwWrite;
     c.hw.read_back = HwReadBack;
@@ -565,54 +635,35 @@ int main(void)
         goto out;
     }
     c.clock_base = Clock_Now();
-    if (!PciCard_Open(&card))
-        goto out;
-    opened = TRUE;
-    PciCard_Report(&card);
-    if (R200_ReportEndian(&card) == MMIO_UNDECIDED)
-    {
-        Log_Printf("Tri: register byte order undecided: the card is not touched\n");
-        goto out;
-    }
-    R2Cp_Save(&c.hw, &c.saved);
-    if (R2Cp_InUse(&c.saved))
-    {
-        Log_Printf("Tri: the CP is in use already (CSQ_CNTL 0x%08lx): not touched\n",
-                   c.saved.csq_cntl);
-        goto out;
-    }
-    v = HwRead(&c, R_MC_FB_LOCATION);
-    c.fb_start = (v & 0xffffUL) << 16;
-    tf_orig = HwRead(&c, R_PP_TFACTOR_0);
-    scr_orig = HwRead(&c, FENCE_REG);
-    HwWrite(&c, R_PP_TFACTOR_0, MMIO_TEST);
-    v = HwRead(&c, R_PP_TFACTOR_0);
-    HwWrite(&c, R_PP_TFACTOR_0, tf_orig);
-    if (v != MMIO_TEST)
-    {
-        Log_Printf("Tri: PP_TFACTOR_0 does not read back (0x%08lx): no canary, nothing drawn\n", v);
-        goto out;
-    }
-
     Log_Section("VRAM block");
+    if (!P96Board_Open(&board, BLOCK_BYTES))
+        goto out;
+    P96Board_Report(&board);
+    if (!P96Board_IsRadeon(&board) || board.memIoBase == NULL)
+    {
+        Log_Printf("Tri: the Workbench's board is not a Radeon: the card is not touched\n");
+        goto out;
+    }
+    if (board.bpp != 4)
+    {
+        Log_Printf("Tri: the Workbench has %lu bytes a pixel; Tri needs a 32-bit Workbench\n",
+                   board.bpp);
+        goto out;
+    }
+    R200_CardFromP96(&card, &board);
     buf = (ULONG *)AllocVec(STREAM_DW * 4, MEMF_ANY | MEMF_CLEAR);
     if (buf == NULL)
     {
         Log_Printf("Tri: no fast RAM for the stream\n");
         goto out;
     }
-    if (!Scratch_FromP96(&c.scratch, BLOCK_BYTES))
-    {
-        Log_Printf("Tri: no P96 bitmap on the board\n");
-        goto out;
-    }
-    c.bpr = p96GetBitMapAttr(c.scratch.bm, P96BMA_BYTESPERROW);
     if (args.ppm != NULL)
         c.rgb = (UBYTE *)AllocVec(TRI_W * TRI_H * 3, MEMF_ANY);
 
+    t0 = Clock_Now();
     RenderScene(&c, buf);
-    HwWrite(&c, R_PP_TFACTOR_0, tf_orig);
-    HwWrite(&c, FENCE_REG, scr_orig);
+    t0 = Clock_Us(Clock_Since(t0));
+    Log_Printf("\n(the board was locked for %lu ms)\n", t0 / 1000);
 
     Log_Section("Result");
     if (!c.drawn)
@@ -644,13 +695,11 @@ int main(void)
         Show(&c, (args.wait && *args.wait > 0) ? *args.wait : 20);
 
 out:
-    Scratch_Free(&c.scratch, &card);
+    P96Board_Close(&board);
     if (buf != NULL)
         FreeVec(buf);
     if (c.rgb != NULL)
         FreeVec(c.rgb);
-    if (opened)
-        PciCard_Close(&card);
     Clock_Close();
     Log_Printf("\nTri: done (rc %ld)\n", (LONG)rc);
     Log_Close();

@@ -979,6 +979,30 @@ static void test_cp(void)
     sv.csq_cntl = R_CSQ_PRIBM_INDBM;
     CHECK(R2Cp_InUse(&sv));
 
+    /* a CP left running by a crashed run: stopped, and stays stopped */
+    CpfReset();
+    cpf.reg[R_CP_CSQ_CNTL / 4] = R_CSQ_PRIBM_INDBM | 0x00010080UL;
+    cpf.reg[R_CP_CSQ_MODE / 4] = 0x00004D4DUL;
+    cpf.reg[R_CP_RB_BASE / 4] = 0x00456000UL;
+    R2Cp_Save(&cpf_hw, &sv);
+    CHECK(R2Cp_InUse(&sv));
+    CHECK_INT(R2Cp_Reclaim(&cpf_hw, &sv, 1000, &reset), R2_OK);
+    CHECK_INT(reset, 0);
+    CHECK(!R2Cp_InUse(&sv));
+    CHECK_HEX(cpf.reg[R_CP_CSQ_CNTL / 4], 0);
+    CHECK_INT(R2Cp_Start(&cpf_hw, 0x00123000UL, 4096, 0), R2_OK);
+    CHECK_INT(R2Cp_Stop(&cpf_hw, &sv, 1000, &reset), R2_OK);
+    CHECK_HEX(cpf.reg[R_CP_CSQ_CNTL / 4], 0);                /* stopped at the end too */
+    CHECK_HEX(cpf.reg[R_CP_RB_BASE / 4], 0x00456000UL);
+    CpfReset();
+    cpf.reg[R_CP_CSQ_CNTL / 4] = R_CSQ_PRIBM_INDBM;
+    R2Cp_Save(&cpf_hw, &sv);
+    cpf.busy = 1;
+    CHECK_INT(R2Cp_Reclaim(&cpf_hw, &sv, 500, &reset), R2_ETIMEOUT);
+    CHECK_INT(reset, 1);
+    CHECK_HEX(cpf.reg[R_CP_CSQ_CNTL / 4], 0);
+    cpf.busy = 0;
+
     /* stop with the engine stuck busy: bounded wait, then the CP alone is reset */
     CpfReset();
     R2Cp_Save(&cpf_hw, &sv);

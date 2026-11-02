@@ -3,8 +3,10 @@
  *
  * Radeon.card does not use the CP (MEASURED on the A4000D, 2026-11-02:
  * CP_CSQ_CNTL mode 0, the ring registers at their power-on garbage, and its
- * 2D path leaves them alone), so RadeonGL starts it itself, the way Linux
- * r100_cp_init does for a ring without write-back:
+ * 2D path leaves them alone; confirmed by its author the same day: it always
+ * writes the registers directly), so RadeonGL starts it itself, the way
+ * Linux r100_cp_init does for a ring without write-back. Every call here
+ * belongs inside a P96 bitmap lock, which keeps Radeon.card off the chip:
  *
  *  1. wait until the engine is idle (RBBM_STATUS: 64 free FIFO slots, not
  *     active);
@@ -57,8 +59,17 @@ struct R2CpSaved
 
 void R2Cp_Save(const struct R2Hw *hw, struct R2CpSaved *s);
 
-/* TRUE when someone runs the CP already (CSQ mode not 0). */
+/* TRUE when the CP runs already (CSQ mode not 0). */
 BOOL R2Cp_InUse(const struct R2CpSaved *s);
+
+/* A CP found running can only be one RadeonGL left behind when it crashed:
+ * Radeon.card never uses the CP (Picasso96, 2026-11-02), and the
+ * ring registers held power-on garbage on the A4000D. Stops it as
+ * R2Cp_Stop does (CSQ off, a bounded wait for idle, the CP alone
+ * soft-reset if the engine stays busy) and records the stopped CSQ in s,
+ * so that the R2Cp_Stop at the end leaves it stopped. R2_OK, or
+ * R2_ETIMEOUT with *reset set. */
+LONG R2Cp_Reclaim(const struct R2Hw *hw, struct R2CpSaved *s, ULONG timeout_us, ULONG *reset);
 
 /* Wait until RBBM_STATUS shows an empty command FIFO and an idle engine.
  * R2_OK or R2_ETIMEOUT. */

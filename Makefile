@@ -650,13 +650,16 @@ CORE_HDRS       := $(wildcard src/core/*.h)
 
 # --- Probes: the day-one tools for the real machine (docs/probes.md) --------
 # R200Info reads the Radeon's registers (never writes); BusBench measures
-# MMIO and aperture costs and AllocateDMAMemoryForBoard. Both bypass P96 as
-# far as possible (openpci for the card, P96 only as BusBench's fallback
-# scratch). GCC, -m68020 (the Mediator needs a 020 anyway). Binaries under
+# MMIO and aperture costs; LockBench measures what a P96 bitmap lock does.
+# The card comes from Picasso96 (p96board.c: a locked friend bitmap of the
+# Workbench screen, the bases from p96GetBitMapAttr), and every register
+# access happens inside such a lock (Picasso96, 2026-11-02;
+# LockBench). openpci only cross-checks.
+# GCC, -m68020 (the Mediator needs a 020 anyway). Binaries under
 # dist/Probe/C, IconX scripts beside them, icons on the desktop.
 P96_SDK ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
 P96_INC := $(P96_SDK)/Include
-PROBE_COMMON := mmio eclock plog pcicard r200probe scratch
+PROBE_COMMON := mmio eclock plog pcicard r200probe p96board
 PROBE_CFLAGS := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm -noixemul -m68020 \
                 -fomit-frame-pointer -Isdk/openpci/include -I$(P96_INC) -Isrc/r200
 PROBE_OBJS   := $(addprefix build/probe/,$(addsuffix .o,$(PROBE_COMMON)))
@@ -689,6 +692,10 @@ dist/Probe/C/R200Info: build/probe/r200info.o $(PROBE_OBJS)
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
 dist/Probe/C/BusBench: build/probe/busbench.o $(PROBE_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
+dist/Probe/C/LockBench: build/probe/lockbench.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
@@ -761,6 +768,10 @@ dist/Probe/C/BusBench_sasc: build/probe-sasc/busbench.o $(PROBE_SC_OBJS) | $(VAM
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/LockBench_sasc: build/probe-sasc/lockbench.o $(PROBE_SC_OBJS) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 dist/Probe/C/CxBreak_sasc: build/probe-sasc/cxbreak.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -782,8 +793,9 @@ dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o build/
 # builds; the _sasc builds sit beside them in C/.
 .PHONY: probes
 probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Probe/C/Tri dist/Probe/C/CxBreak \
+        dist/Probe/C/LockBench \
         dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
-        dist/Probe/C/CxBreak_sasc
+        dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -804,13 +816,20 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
 	@printf 'echo "It runs the command processor and the 3D engine for a moment; keep Workbench quiet."\n' >> dist/Probe/Tri
 	@printf 'DEV:Probe/C/Tri LOG=DEV:Probe/Tri.log\n' >> dist/Probe/Tri
 	@printf 'echo "Done. The report is DEV:Probe/Tri.log"\n' >> dist/Probe/Tri
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/LockBench
+	@printf 'echo "LockBench: what a P96 bitmap lock does. A small window flickers for a few seconds."\n' >> dist/Probe/LockBench
+	@printf 'echo "It reads Radeon registers inside locks and writes none. Keep Workbench quiet."\n' >> dist/Probe/LockBench
+	@printf 'DEV:Probe/C/LockBench LOG=DEV:Probe/LockBench.log\n' >> dist/Probe/LockBench
+	@printf 'echo "Done. The report is DEV:Probe/LockBench.log"\n' >> dist/Probe/LockBench
 	@cp icons/run.info dist/Probe/CPRing.info
 	@cp icons/run.info dist/Probe/Tri.info
+	@cp icons/run.info dist/Probe/LockBench.info
 	@touch dist/.backdrop
 	@grep -q '^Probe/R200Info$$' dist/.backdrop || printf 'Probe/R200Info\nProbe/BusBench\n' >> dist/.backdrop
 	@grep -q '^Probe/CPRing$$' dist/.backdrop || printf 'Probe/CPRing\n' >> dist/.backdrop
 	@grep -q '^Probe/Tri$$' dist/.backdrop || printf 'Probe/Tri\n' >> dist/.backdrop
-	@echo "probes: staged DEV:Probe/R200Info + BusBench + CPRing + Tri (scripts, icons, C/)"
+	@grep -q '^Probe/LockBench$$' dist/.backdrop || printf 'Probe/LockBench\n' >> dist/.backdrop
+	@echo "probes: staged DEV:Probe/R200Info + BusBench + CPRing + Tri + LockBench (scripts, icons, C/)"
 
 # --- minigl.library, census back end (docs/census.md) ------------------------
 # Draws nothing; counts what a dispatch-ABI-5 client asks for. The table is

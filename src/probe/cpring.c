@@ -3,9 +3,9 @@
  * (concept section 11, probe 3).
  *
  * Radeon.card does not use the CP (R200Info on the A4000D: CP_CSQ_CNTL mode
- * 0). CPRing loads the microcode, starts the CP on a 16 KB ring in a block
- * of VRAM (scratch.h: pinned openpci memory, else a P96 bitmap locked for
- * the run), and answers:
+ * 0; its author confirms it writes the registers directly). CPRing loads
+ * the microcode, starts the CP on a 16 KB ring in a block of video RAM (a
+ * friend bitmap of the Workbench screen, p96board.h), and answers:
  *
  *   - does the CP fetch and execute from a ring in VRAM through the
  *     Mediator, with bus mastering off and no write-back?
@@ -22,7 +22,13 @@
  * PP_TFACTOR_0 then holds the value is the byte order right, and only then
  * do the fences (ordinary packets) run. The 3D engine is never set up, the
  * 2D engine (Radeon.card's) never touched. On exit the CP registers,
- * PP_TFACTOR_0 and SCRATCH_REG2 are as found.
+ * PP_TFACTOR_0 and SCRATCH_REG2 are as found. A CP found running can only
+ * be one a crashed run left behind: it is stopped first (R2Cp_Reclaim).
+ *
+ * The card is found through Picasso96 (its register base from
+ * p96GetBitMapAttr), and the whole run, from saving the CP registers to
+ * putting them back, happens inside ONE lock of the block: P96 keeps off
+ * the chip meanwhile. That lock lasts a few tens of milliseconds.
  *
  * The ring code is the library's own (src/r200: r2cp.c starts the CP,
  * r2ring.c writes the ring, r2emit.c the fence).
@@ -37,19 +43,19 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 
+#include "p96board.h"
 #include "pcicard.h"
 #include "mmio.h"
 #include "r200regs.h"
 #include "r200probe.h"
 #include "eclock.h"
 #include "plog.h"
-#include "scratch.h"
 #include "r2cs.h"
 #include "r2pm4.h"
 #include "r2ring.h"
 #include "r2cp.h"
 
-static const char ver[] = "$VER: CPRing 0.1 (02.11.2026)";
+static const char ver[] = "$VER: CPRing 0.2 (02.11.2026)";
 
 #define TEMPLATE "LOG/K,FENCES/N,ONLYA/S"
 
@@ -71,11 +77,12 @@ struct Args
 
 struct Ctx
 {
-    struct PciCard *card;
+    struct PciCard *card;   /* the bases P96 gave */
+    struct P96Board *board; /* the block, locked for the whole run */
     struct R2Hw hw;
     struct R2CpSaved saved;
-    struct Scratch scratch;
-    ULONG fb_start;         /* GPU address of BAR0's first byte */
+    ULONG fb_start;         /* GPU address of video RAM's first byte */
+    ULONG apSize;           /* CONFIG_APER_SIZE: one aperture */
     ULONG clock_base;
     LONG fences;
 };
@@ -163,27 +170,21 @@ static BOOL Round(struct Ctx *c, ULONG flags, CONST_STRPTR title)
 
     Log_Section(title);
     right = FALSE;
-    if (!Scratch_Lock(&c->scratch))
-    {
-        Log_Printf("the VRAM block could not be locked: round skipped\n");
-        return FALSE;
-    }
-    mem = c->scratch.mem;
+    mem = (volatile ULONG *)c->board->mem;
     base = (ULONG *)(((ULONG)mem + 4095UL) & ~4095UL);
-    off = (ULONG)base - (ULONG)c->card->aper;
+    /* the video RAM offset: the CPU sees the memory twice (AP0, AP1) */
+    off = ((ULONG)base - (ULONG)c->card->aper) % c->apSize;
     gpu = c->fb_start + off;
     Log_Printf("ring: 68k 0x%08lx, VRAM offset 0x%08lx, GPU 0x%08lx, %lu dwords\n",
                (ULONG)base, off, gpu, RING_DW);
-    if ((ULONG)base + RING_DW * 4 > (ULONG)mem + BLOCK_BYTES || off >= c->card->aperSize)
+    if ((ULONG)base + RING_DW * 4 > (ULONG)mem + BLOCK_BYTES)
     {
         Log_Printf("the ring does not fit the block: round skipped\n");
-        Scratch_Unlock(&c->scratch);
         return FALSE;
     }
     if (InSurface(c, off, RING_DW * 4))
     {
         Log_Printf("the ring overlaps a swapping surface window: round skipped\n");
-        Scratch_Unlock(&c->scratch);
         return FALSE;
     }
     for (i = 0; i < RING_DW; i++)
@@ -195,7 +196,6 @@ static BOOL Round(struct Ctx *c, ULONG flags, CONST_STRPTR title)
     if (HwRead(c, R_PP_TFACTOR_0) != 0)
     {
         Log_Printf("PP_TFACTOR_0 does not clear: round skipped\n");
-        Scratch_Unlock(&c->scratch);
         return FALSE;
     }
 
@@ -289,23 +289,109 @@ stop:
                reset ? (CONST_STRPTR)" (engine stayed busy: the CP was soft-reset)"
                      : (CONST_STRPTR)"",
                HwRead(c, R_CP_CSQ_CNTL), HwRead(c, R_RBBM_STATUS));
-    Scratch_Unlock(&c->scratch);
     return right;
 }
 
-int main(void)
+/* Everything that touches the chip, inside one lock of the block. rc as
+ * main returns it. */
+static int Run(struct Ctx *c, BOOL onlya)
 {
-    struct RDArgs *rda;
-    struct Args args;
-    struct PciCard card;
-    struct Ctx c;
     ULONG tf_orig;
     ULONG scr_orig;
     ULONG v;
     ULONG bad;
-    BOOL opened;
+    ULONG reset;
+    LONG err;
     BOOL a;
     BOOL b;
+
+    if (R200_ReportEndian(c->card) == MMIO_UNDECIDED)
+    {
+        Log_Printf("CPRing: register byte order undecided: the CP is not touched\n");
+        return RETURN_FAIL;
+    }
+
+    Log_Section("Before");
+    R2Cp_Save(&c->hw, &c->saved);
+    Log_Printf("CSQ_CNTL 0x%08lx, CSQ_MODE 0x%08lx, RB_CNTL 0x%08lx, RB_BASE 0x%08lx,\n"
+               "RPTR_ADDR 0x%08lx, WPTR_DELAY 0x%08lx, SCRATCH_UMSK 0x%08lx\n",
+               c->saved.csq_cntl, c->saved.csq_mode, c->saved.rb_cntl, c->saved.rb_base,
+               c->saved.rb_rptr_addr, c->saved.wptr_delay, c->saved.scratch_umsk);
+    if (R2Cp_InUse(&c->saved))
+    {
+        /* Radeon.card never runs the CP: a run that crashed left it on */
+        Log_Printf("the CP is RUNNING (CSQ mode %lu): left over from a run that crashed\n",
+                   c->saved.csq_cntl >> R_CSQ_MODE_SHIFT);
+        err = R2Cp_Reclaim(&c->hw, &c->saved, TIMEOUT_US, &reset);
+        Log_Printf("  stopped: %ld%s; CSQ_CNTL 0x%08lx, RBBM_STATUS 0x%08lx\n", err,
+                   reset ? (CONST_STRPTR)" (the CP was soft-reset)" : (CONST_STRPTR)"",
+                   HwRead(c, R_CP_CSQ_CNTL), HwRead(c, R_RBBM_STATUS));
+        if (err != R2_OK)
+            return RETURN_FAIL;
+    }
+    v = HwRead(c, R_MC_FB_LOCATION);
+    c->fb_start = (v & 0xffffUL) << 16;
+    c->apSize = HwRead(c, R_CONFIG_APER_SIZE);
+    Log_Printf("MC_FB_LOCATION 0x%08lx: VRAM at GPU 0x%08lx; CONFIG_APER_SIZE %lu MB\n", v,
+               c->fb_start, c->apSize >> 20);
+    if (c->apSize == 0 || (c->apSize & (c->apSize - 1)) != 0)
+    {
+        Log_Printf("CPRing: CONFIG_APER_SIZE is not a power of two: the CP is not started\n");
+        return RETURN_FAIL;
+    }
+
+    /* the canary needs PP_TFACTOR_0 to read back what was written */
+    tf_orig = HwRead(c, R_PP_TFACTOR_0);
+    scr_orig = HwRead(c, FENCE_REG);
+    HwWrite(c, R_PP_TFACTOR_0, MMIO_TEST);
+    v = HwRead(c, R_PP_TFACTOR_0);
+    HwWrite(c, R_PP_TFACTOR_0, tf_orig);
+    Log_Printf("PP_TFACTOR_0 0x%08lx; written 0x%08lx over MMIO, read 0x%08lx\n",
+               tf_orig, MMIO_TEST, v);
+    if (v != MMIO_TEST)
+    {
+        Log_Printf("CPRing: PP_TFACTOR_0 does not read back: no canary, the CP is not started\n");
+        return RETURN_FAIL;
+    }
+
+    Log_Section("Microcode");
+    if (R2Cp_WaitIdle(&c->hw, TIMEOUT_US) != R2_OK)
+    {
+        Log_Printf("CPRing: the engine is not idle (RBBM_STATUS 0x%08lx): the CP is not started\n",
+                   HwRead(c, R_RBBM_STATUS));
+        return RETURN_FAIL;
+    }
+    R2Cp_LoadMicrocode(&c->hw, R2Cp_Microcode);
+    bad = R2Cp_CheckMicrocode(&c->hw, R2Cp_Microcode);
+    Log_Printf("loaded %lu words; read back through CP_ME_RAM_RADDR: %lu differ (diagnostic)\n",
+               (ULONG)R2CP_UCODE_WORDS, bad);
+
+    a = Round(c, 0, (CONST_STRPTR)"Round A: the 68k swaps (BUF_SWAP off)");
+    b = FALSE;
+    if (!onlya)
+        b = Round(c, R2CP_GPU_SWAP, (CONST_STRPTR)"Round B: the CP swaps (BUF_SWAP_32BIT)");
+
+    HwWrite(c, R_PP_TFACTOR_0, tf_orig);
+    HwWrite(c, FENCE_REG, scr_orig);
+    Log_Section("Result");
+    Log_Printf("byte order (a), the 68k swaps: %s\n",
+               a ? (CONST_STRPTR)"WORKS" : (CONST_STRPTR)"does not work");
+    if (!onlya)
+        Log_Printf("byte order (b), the CP swaps:  %s\n",
+                   b ? (CONST_STRPTR)"WORKS" : (CONST_STRPTR)"does not work");
+    Log_Printf("as found again: CSQ_CNTL 0x%08lx, PP_TFACTOR_0 0x%08lx, SCRATCH_REG2 0x%08lx\n",
+               HwRead(c, R_CP_CSQ_CNTL), HwRead(c, R_PP_TFACTOR_0), HwRead(c, FENCE_REG));
+    return (a || b) ? RETURN_OK : RETURN_WARN;
+}
+
+int main(void)
+{
+    static struct P96Board board;     /* zero: P96Board_Close is right before Open */
+    struct RDArgs *rda;
+    struct Args args;
+    struct PciCard card;
+    struct Ctx c;
+    ULONG t0;
     int rc;
 
     args.log = NULL;
@@ -322,19 +408,16 @@ int main(void)
     Log_Printf("%s -- the R200 command processor, first start\n", ver + 6);
 
     rc = RETURN_FAIL;
-    opened = FALSE;
     c.card = &card;
+    c.board = &board;
     c.hw.read_reg = HwRead;
     c.hw.write_reg = HwWrite;
     c.hw.read_back = HwReadBack;
     c.hw.clock_us = HwClock;
     c.hw.hw = &c;
     c.fences = (args.fences && *args.fences > 0) ? *args.fences : 200;
-    c.scratch.dma = NULL;
-    c.scratch.dmaSize = 0;
-    c.scratch.bm = NULL;
-    c.scratch.lock = 0;
-    c.scratch.mem = NULL;
+    c.fb_start = 0;
+    c.apSize = 0;
 
     if (!Clock_Open())
     {
@@ -342,87 +425,29 @@ int main(void)
         goto out;
     }
     c.clock_base = Clock_Now();
-    if (!PciCard_Open(&card))
-        goto out;
-    opened = TRUE;
-    PciCard_Report(&card);
-    if (R200_ReportEndian(&card) == MMIO_UNDECIDED)
-    {
-        Log_Printf("CPRing: register byte order undecided: the CP is not touched\n");
-        goto out;
-    }
-
-    Log_Section("Before");
-    R2Cp_Save(&c.hw, &c.saved);
-    Log_Printf("CSQ_CNTL 0x%08lx, CSQ_MODE 0x%08lx, RB_CNTL 0x%08lx, RB_BASE 0x%08lx,\n"
-               "RPTR_ADDR 0x%08lx, WPTR_DELAY 0x%08lx, SCRATCH_UMSK 0x%08lx\n",
-               c.saved.csq_cntl, c.saved.csq_mode, c.saved.rb_cntl, c.saved.rb_base,
-               c.saved.rb_rptr_addr, c.saved.wptr_delay, c.saved.scratch_umsk);
-    if (R2Cp_InUse(&c.saved))
-    {
-        Log_Printf("CPRing: the CP is in use already (CSQ mode %lu): not touched\n",
-                   c.saved.csq_cntl >> R_CSQ_MODE_SHIFT);
-        goto out;
-    }
-    v = HwRead(&c, R_MC_FB_LOCATION);
-    c.fb_start = (v & 0xffffUL) << 16;
-    Log_Printf("MC_FB_LOCATION 0x%08lx: VRAM at GPU 0x%08lx\n", v, c.fb_start);
-
-    /* the canary needs PP_TFACTOR_0 to read back what was written */
-    tf_orig = HwRead(&c, R_PP_TFACTOR_0);
-    scr_orig = HwRead(&c, FENCE_REG);
-    HwWrite(&c, R_PP_TFACTOR_0, MMIO_TEST);
-    v = HwRead(&c, R_PP_TFACTOR_0);
-    HwWrite(&c, R_PP_TFACTOR_0, tf_orig);
-    Log_Printf("PP_TFACTOR_0 0x%08lx; written 0x%08lx over MMIO, read 0x%08lx\n",
-               tf_orig, MMIO_TEST, v);
-    if (v != MMIO_TEST)
-    {
-        Log_Printf("CPRing: PP_TFACTOR_0 does not read back: no canary, the CP is not started\n");
-        goto out;
-    }
-
     Log_Section("VRAM block");
-    if (!Scratch_FromDma(&c.scratch, &card, BLOCK_BYTES)
-        && !Scratch_FromP96(&c.scratch, BLOCK_BYTES))
+    if (!P96Board_Open(&board, BLOCK_BYTES))
+        goto out;
+    P96Board_Report(&board);
+    if (!P96Board_IsRadeon(&board) || board.memIoBase == NULL)
     {
-        Log_Printf("CPRing: no VRAM block\n");
+        Log_Printf("CPRing: the Workbench's board is not a Radeon: the CP is not touched\n");
         goto out;
     }
-
-    Log_Section("Microcode");
-    if (R2Cp_WaitIdle(&c.hw, TIMEOUT_US) != R2_OK)
+    R200_CardFromP96(&card, &board);
+    if (!P96Board_Lock(&board))
     {
-        Log_Printf("CPRing: the engine is not idle (RBBM_STATUS 0x%08lx): the CP is not started\n",
-                   HwRead(&c, R_RBBM_STATUS));
+        Log_Printf("CPRing: the block is not on the board: the CP is not touched\n");
         goto out;
     }
-    R2Cp_LoadMicrocode(&c.hw, R2Cp_Microcode);
-    bad = R2Cp_CheckMicrocode(&c.hw, R2Cp_Microcode);
-    Log_Printf("loaded %lu words; read back through CP_ME_RAM_RADDR: %lu differ (diagnostic)\n",
-               (ULONG)R2CP_UCODE_WORDS, bad);
-
-    a = Round(&c, 0, (CONST_STRPTR)"Round A: the 68k swaps (BUF_SWAP off)");
-    b = FALSE;
-    if (!args.onlya)
-        b = Round(&c, R2CP_GPU_SWAP, (CONST_STRPTR)"Round B: the CP swaps (BUF_SWAP_32BIT)");
-
-    HwWrite(&c, R_PP_TFACTOR_0, tf_orig);
-    HwWrite(&c, FENCE_REG, scr_orig);
-    Log_Section("Result");
-    Log_Printf("byte order (a), the 68k swaps: %s\n",
-               a ? (CONST_STRPTR)"WORKS" : (CONST_STRPTR)"does not work");
-    if (!args.onlya)
-        Log_Printf("byte order (b), the CP swaps:  %s\n",
-                   b ? (CONST_STRPTR)"WORKS" : (CONST_STRPTR)"does not work");
-    Log_Printf("as found again: CSQ_CNTL 0x%08lx, PP_TFACTOR_0 0x%08lx, SCRATCH_REG2 0x%08lx\n",
-               HwRead(&c, R_CP_CSQ_CNTL), HwRead(&c, R_PP_TFACTOR_0), HwRead(&c, FENCE_REG));
-    rc = (a || b) ? RETURN_OK : RETURN_WARN;
+    t0 = Clock_Now();
+    rc = Run(&c, (BOOL)(args.onlya != 0));
+    t0 = Clock_Us(Clock_Since(t0));
+    P96Board_Unlock(&board);
+    Log_Printf("\n(the board was locked for %lu ms)\n", t0 / 1000);
 
 out:
-    Scratch_Free(&c.scratch, &card);
-    if (opened)
-        PciCard_Close(&card);
+    P96Board_Close(&board);
     Clock_Close();
     Log_Printf("\nCPRing: done (rc %ld)\n", (LONG)rc);
     Log_Close();

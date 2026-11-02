@@ -46,6 +46,15 @@ static BOOL PlausibleMemSize(ULONG v)
     return TRUE;
 }
 
+/* CONFIG_APER_SIZE: the size of one aperture, a power of two from 8 MB to
+ * 1 GB. 64 MB (0x04000000) reads 0x00000004 the wrong way round. */
+static BOOL PlausibleAperSize(ULONG v)
+{
+    if (v < (8UL << 20) || v > (1024UL << 20))
+        return FALSE;
+    return (BOOL)((v & (v - 1)) == 0);
+}
+
 ULONG Mmio_DetectSwap(APTR base, ULONG bar0_pci, ULONG *memsize)
 {
     ULONG raw;
@@ -79,6 +88,20 @@ ULONG Mmio_DetectSwap(APTR base, ULONG bar0_pci, ULONG *memsize)
     {
         Mmio_Swap = TRUE;
         return MMIO_BY_APER;
+    }
+    /* no PCI address known (the card came from P96, not from openpci):
+     * the aperture size */
+    raw = MMIO_RAW(base, R_CONFIG_APER_SIZE);
+    swapped = Mmio_Swap32(raw);
+    if (PlausibleAperSize(raw) && !PlausibleAperSize(swapped))
+    {
+        Mmio_Swap = FALSE;
+        return MMIO_BY_APERSIZE;
+    }
+    if (PlausibleAperSize(swapped) && !PlausibleAperSize(raw))
+    {
+        Mmio_Swap = TRUE;
+        return MMIO_BY_APERSIZE;
     }
     return MMIO_UNDECIDED;
 }

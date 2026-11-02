@@ -10,6 +10,14 @@
 #include <exec/types.h>
 
 #include "pcicard.h"
+#include "p96board.h"
+
+/* The record the functions below read, filled from the bases P96 gave
+ * (the card found through Picasso96, p96board.h): mmio, aper, bar1. The
+ * PCI identity and configuration fields stay 0; R200_ReportEndian then
+ * decides without BAR0's PCI address. Call after P96Board_Open. Every
+ * function below reads registers: call them inside a P96Board_Lock. */
+void R200_CardFromP96(struct PciCard *card, const struct P96Board *b);
 
 /* Decides and reports the register byte order (Mmio_DetectSwap: by
  * CONFIG_MEMSIZE, else by CONFIG_APER_0_BASE against BAR0), sets
