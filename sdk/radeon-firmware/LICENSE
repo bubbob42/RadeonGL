@@ -1,0 +1,34 @@
+radeon/R200_cp.bin -- the ATI R200 command processor (CP) microcode.
+
+Source: linux-firmware, radeon/R200_cp.bin
+  https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/radeon/R200_cp.bin
+  fetched 2026-11-02, 2048 bytes,
+  SHA-256 2b7b4bf988c3f7c69f98ea2ec6c4155fa85e2c9d5f5aee77912baaf50f5f7bac
+
+linux-firmware WHENCE, "Driver: radeon - ATI Radeon":
+  Licence: MIT
+  SPDX-License-Identifier: MIT
+  Copyright 2007-2009 Advanced Micro Devices, Inc.
+  Found in hex form in kernel source.
+
+The MIT licence:
+
+Copyright 2007-2009 Advanced Micro Devices, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.

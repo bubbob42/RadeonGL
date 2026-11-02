@@ -651,11 +651,29 @@ glquake glquake-data clean-glquake:
 # dist/Probe/C, IconX scripts beside them, icons on the desktop.
 P96_SDK ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
 P96_INC := $(P96_SDK)/Include
-PROBE_COMMON := mmio eclock plog pcicard r200probe
+PROBE_COMMON := mmio eclock plog pcicard r200probe scratch
 PROBE_CFLAGS := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm -noixemul -m68020 \
                 -fomit-frame-pointer -Isdk/openpci/include -I$(P96_INC) -Isrc/r200
 PROBE_OBJS   := $(addprefix build/probe/,$(addsuffix .o,$(PROBE_COMMON)))
-PROBE_HDRS   := $(wildcard src/probe/*.h) src/r200/r200reg.h
+PROBE_HDRS   := $(wildcard src/probe/*.h) $(wildcard src/r200/*.h)
+# CPRing runs the library's own ring code: src/r200 built with the probe flags
+PROBE_R200      := r2cs r2emit r2ring r2cp r2ucode
+PROBE_R200_OBJS := $(addprefix build/probe/r200/,$(addsuffix .o,$(PROBE_R200)))
+
+# the CP microcode table, from the pinned linux-firmware file
+src/r200/r2ucode.c: sdk/radeon-firmware/R200_cp.bin tools/gen_ucode.py
+	$(PYTHON) -I tools/gen_ucode.py $< $@
+
+build/probe/r200/%.o: src/r200/%.c $(PROBE_HDRS)
+	@mkdir -p build/probe/r200
+	$(GCC_CC) $(PROBE_CFLAGS) -c $< -o $@
+
+# r2emit's float code (the viewport, never called by a probe) as FPU
+# instructions: this toolchain's soft-float library lacks the int-to-float
+# routines (__floatsisf, __floatunsisf).
+build/probe/r200/r2emit.o: src/r200/r2emit.c $(PROBE_HDRS)
+	@mkdir -p build/probe/r200
+	$(GCC_CC) $(PROBE_CFLAGS) -m68881 -c $< -o $@
 
 build/probe/%.o: src/probe/%.c $(PROBE_HDRS)
 	@mkdir -p build/probe
@@ -669,11 +687,16 @@ dist/Probe/C/BusBench: build/probe/busbench.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+dist/Probe/C/CPRing: build/probe/cpring.o $(PROBE_OBJS) $(PROBE_R200_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 # SAS/C builds of the same sources: dist/Probe/C/<Tool>_sasc. The P96
 # headers are copied under build/ so vamos reaches them through proj:
 # (it spins on a symlink out of a volume -- Herald). One vamos at a time:
 # never run these with -j.
 PROBE_SC_OBJS  := $(addprefix build/probe-sasc/,$(addsuffix .o,$(PROBE_COMMON)))
+PROBE_SC_R200_OBJS := $(addprefix build/probe-sasc/r200/,$(addsuffix .o,$(PROBE_R200)))
 PROBE_SC_IDIRS := IDIR=include: IDIR=proj:src/probe/ IDIR=proj:src/r200/ IDIR=proj:sdk/openpci/include/ IDIR=proj:build/p96inc/
 
 build/p96inc/.copied:
@@ -686,6 +709,10 @@ build/probe-sasc/%.o: src/probe/%.c $(PROBE_HDRS) build/p96inc/.copied | $(VAMOS
 	@mkdir -p build/probe-sasc
 	$(VAMOS_SC) sc $(SC_OPTS) CPU=68020 OPTIMIZE NOLINK $(PROBE_SC_IDIRS) OBJNAME=proj:$@ proj:$<
 
+build/probe-sasc/r200/%.o: src/r200/%.c $(PROBE_HDRS) | $(VAMOSRC)
+	@mkdir -p build/probe-sasc/r200
+	$(VAMOS_SC) sc $(SC_OPTS) CPU=68020 OPTIMIZE NOLINK $(PROBE_SC_IDIRS) OBJNAME=proj:$@ proj:$<
+
 dist/Probe/C/R200Info_sasc: build/probe-sasc/r200info.o $(PROBE_SC_OBJS) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -694,11 +721,16 @@ dist/Probe/C/BusBench_sasc: build/probe-sasc/busbench.o $(PROBE_SC_OBJS) | $(VAM
 	@mkdir -p dist/Probe/C
 	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/CPRing_sasc: build/probe-sasc/cpring.o $(PROBE_SC_OBJS) $(PROBE_SC_R200_OBJS) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	$(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
+
 # The scripts write their report next to themselves (DEV:Probe/<Tool>.log),
 # where the host reads it from the share afterwards. They run the GCC
 # builds; the _sasc builds sit beside them in C/.
 .PHONY: probes
-probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc
+probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing \
+        dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -707,11 +739,18 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/R200Info_sasc d
 	@printf 'echo "BusBench: MMIO and aperture costs, 1 MB blocks (about a minute)."\n' >> dist/Probe/BusBench
 	@printf 'DEV:Probe/C/BusBench LOG=DEV:Probe/BusBench.log\n' >> dist/Probe/BusBench
 	@printf 'echo "Done. The report is DEV:Probe/BusBench.log"\n' >> dist/Probe/BusBench
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/CPRing
+	@printf 'echo "CPRing: starts the Radeon command processor (microcode, a ring in VRAM, fences)."\n' >> dist/Probe/CPRing
+	@printf 'echo "It writes CP registers and puts them back. A few seconds; keep Workbench quiet."\n' >> dist/Probe/CPRing
+	@printf 'DEV:Probe/C/CPRing LOG=DEV:Probe/CPRing.log\n' >> dist/Probe/CPRing
+	@printf 'echo "Done. The report is DEV:Probe/CPRing.log"\n' >> dist/Probe/CPRing
 	@cp icons/run.info dist/Probe/R200Info.info
 	@cp icons/run.info dist/Probe/BusBench.info
+	@cp icons/run.info dist/Probe/CPRing.info
 	@touch dist/.backdrop
 	@grep -q '^Probe/R200Info$$' dist/.backdrop || printf 'Probe/R200Info\nProbe/BusBench\n' >> dist/.backdrop
-	@echo "probes: staged DEV:Probe/R200Info + BusBench (scripts, icons, C/)"
+	@grep -q '^Probe/CPRing$$' dist/.backdrop || printf 'Probe/CPRing\n' >> dist/.backdrop
+	@echo "probes: staged DEV:Probe/R200Info + BusBench + CPRing (scripts, icons, C/)"
 
 # --- minigl.library, census back end (docs/census.md) ------------------------
 # Draws nothing; counts what a dispatch-ABI-5 client asks for. The table is
@@ -750,7 +789,7 @@ census-lib: $(CENSUS_LIB)
 # Pure C89 without OS calls: the library and the probes link it. `gmake test`
 # runs it on the Mac against test/host/shim (32-bit ULONG) and a simulated CP
 # (test/host/simcp.c); `gmake r200-objs` builds it with both Amiga compilers.
-R200_MODULES    := r2cs r2emit r2ring r2check
+R200_MODULES    := r2cs r2emit r2ring r2check r2cp r2ucode
 R200_HDRS       := $(wildcard src/r200/*.h)
 HOSTCC          ?= cc
 HOST_MOD_CFLAGS := -O2 -std=c89 -pedantic -Wall -Wextra -Werror -fno-strict-aliasing

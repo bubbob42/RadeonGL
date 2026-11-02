@@ -31,6 +31,7 @@
 #define R_CONFIG_XSTRAP         0x00e4
 #define R_CONFIG_BONDS          0x00e8
 #define R_RBBM_SOFT_RESET       0x00f0
+#define   R_SOFT_RESET_CP         (1UL << 0)
 #define R_CONFIG_MEMSIZE        0x00f8
 #define R_CONFIG_APER_0_BASE    0x0100
 #define R_CONFIG_APER_1_BASE    0x0104
@@ -58,19 +59,28 @@
 /* --- Command processor ---------------------------------------------------- */
 #define R_CP_RB_BASE            0x0700
 #define R_CP_RB_CNTL            0x0704
+#define   R_RB_BUFSZ_MASK         0x3fUL    /* ring = 2^(BUFSZ + 1) dwords */
+#define   R_RB_BLKSZ_SHIFT        8
 #define   R_BUF_SWAP_32BIT        (2UL << 16)
+#define   R_MAX_FETCH_SHIFT       18
 #define   R_RB_NO_UPDATE          (1UL << 27)
+#define   R_RB_RPTR_WR_ENA        (1UL << 31)
 #define R_CP_RB_RPTR_ADDR       0x070c
 #define R_CP_RB_RPTR            0x0710
 #define R_CP_RB_WPTR            0x0714
 #define R_CP_RB_WPTR_DELAY      0x0718
+#define R_CP_RB_RPTR_WR         0x071c
 #define R_CP_IB_BASE            0x0738
 #define R_CP_IB_BUFSZ           0x073c
 #define R_CP_CSQ_CNTL           0x0740
+#define   R_CSQ_MODE_SHIFT        28        /* 0 = CP off; 4 = PRIBM_INDBM */
+#define   R_CSQ_PRIDIS_INDDIS     (0UL << 28)
+#define   R_CSQ_PRIBM_INDBM       (4UL << 28)
 #define R_CP_CSQ_MODE           0x0744
 #define R_SCRATCH_UMSK          0x0770
 #define R_SCRATCH_ADDR          0x0774
 #define R_CP_ME_RAM_ADDR        0x07d4
+#define R_CP_ME_RAM_RADDR       0x07d8
 #define R_CP_ME_RAM_DATAH       0x07dc
 #define R_CP_ME_RAM_DATAL       0x07e0
 #define R_CP_CSQ_STAT           0x07f8
@@ -90,6 +100,7 @@
 
 /* --- Engine status, 2D state, sync ---------------------------------------- */
 #define R_RBBM_STATUS           0x0e40
+#define   R_RBBM_FIFOCNT_MASK     0x7fUL    /* free command FIFO slots, 64 = empty */
 #define   R_RBBM_ACTIVE           (1UL << 31)
 #define   R_CP_CMDSTRM_BUSY       (1UL << 16)
 #define R_DST_PITCH_OFFSET      0x142c

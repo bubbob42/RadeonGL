@@ -10,6 +10,7 @@
 #include "r2cs.h"
 #include "r2emit.h"
 #include "r2ring.h"
+#include "r2cp.h"
 #include "r2check.h"
 #include "r2pm4.h"
 #include "r200reg.h"
@@ -819,6 +820,185 @@ static void test_sizes(void)
            (unsigned long) Size(OneIndexed) * 4, (unsigned long) Size(OneFence) * 4);
 }
 
+/* --- CP start and stop (r2cp.c) ----------------------------------------------- */
+
+/* A register file with the microcode RAM behind CP_ME_RAM_*, an engine that
+ * is idle or stuck busy, a microsecond clock that advances per call, and a
+ * log of every write. */
+#define CPLOG 2048
+static struct
+{
+    ULONG reg[0x10000 / 4];
+    ULONG me[R2CP_UCODE_DWORDS];
+    ULONG me_addr;
+    ULONG me_raddr;
+    ULONG busy;
+    ULONG clock;
+    ULONG log_reg[CPLOG], log_val[CPLOG];
+    ULONG nlog;
+} cpf;
+
+static ULONG CpfRead(APTR hw, ULONG reg)
+{
+    (void) hw;
+    if (reg == R_RBBM_STATUS)
+        return cpf.busy ? (R_RBBM_ACTIVE | 12) : 64;
+    if (reg == R_CP_ME_RAM_DATAH)
+        return cpf.me[2 * (cpf.me_raddr & 0xff)];
+    if (reg == R_CP_ME_RAM_DATAL)
+        return cpf.me[2 * (cpf.me_raddr & 0xff) + 1];
+    return cpf.reg[reg / 4];
+}
+
+static void CpfWrite(APTR hw, ULONG reg, ULONG val)
+{
+    (void) hw;
+    if (cpf.nlog < CPLOG)
+    {
+        cpf.log_reg[cpf.nlog] = reg;
+        cpf.log_val[cpf.nlog] = val;
+        cpf.nlog++;
+    }
+    if (reg == R_CP_ME_RAM_ADDR)
+        cpf.me_addr = val;
+    else if (reg == R_CP_ME_RAM_RADDR)
+        cpf.me_raddr = val;
+    else if (reg == R_CP_ME_RAM_DATAH)
+        cpf.me[2 * (cpf.me_addr & 0xff)] = val;
+    else if (reg == R_CP_ME_RAM_DATAL)
+        cpf.me[2 * (cpf.me_addr++ & 0xff) + 1] = val;     /* DATAL steps the address */
+    else
+        cpf.reg[reg / 4] = val;
+}
+
+static ULONG CpfClock(APTR hw)
+{
+    (void) hw;
+    return cpf.clock++;
+}
+
+static ULONG CpfReadBack(APTR hw, volatile ULONG *p)
+{
+    (void) hw;
+    return *p;
+}
+
+static const struct R2Hw cpf_hw = { CpfRead, CpfWrite, CpfReadBack, CpfClock, NULL };
+
+static void CpfReset(void)
+{
+    memset(&cpf, 0, sizeof(cpf));
+}
+
+static void test_cp(void)
+{
+    static const ULONG want_start[][2] =
+    {
+        { R_CP_RB_CNTL,       0x0004090BUL | R_RB_NO_UPDATE },
+        { R_CP_RB_BASE,       0x00123000UL },
+        { R_CP_RB_CNTL,       0x0004090BUL | R_RB_RPTR_WR_ENA | R_RB_NO_UPDATE },
+        { R_CP_RB_RPTR_WR,    0 },
+        { R_CP_RB_WPTR,       0 },
+        { R_CP_RB_RPTR_ADDR,  0 },
+        { R_SCRATCH_UMSK,     0 },
+        { R_CP_RB_CNTL,       0x0004090BUL | R_RB_NO_UPDATE },
+        { R_CP_RB_WPTR_DELAY, 0 },
+        { R_CP_CSQ_MODE,      0x00004D4DUL },
+        { R_CP_CSQ_CNTL,      R_CSQ_PRIBM_INDBM }
+    };
+    struct R2CpSaved sv;
+    ULONG reset;
+    ULONG i;
+    ULONG same;
+
+    /* CP_RB_CNTL: 4096 dwords = 2^(11 + 1), 512-byte blocks, MAX_FETCH 1 */
+    CHECK_HEX(R2Cp_RbCntl(4096, 0), 0x0004090BUL);
+    CHECK_HEX(R2Cp_RbCntl(4096, R2CP_GPU_SWAP), 0x0004090BUL | R_BUF_SWAP_32BIT);
+    CHECK_HEX(R2Cp_RbCntl(1024, 0) & R_RB_BUFSZ_MASK, 9);
+    CHECK_HEX(R2Cp_RbCntl(1000, 0), 0);
+    CHECK_HEX(R2Cp_RbCntl(512, 0), 0);
+    CHECK_HEX(R2Cp_RbCntl(3072, 0), 0);
+
+    /* the microcode lands word for word, high half first */
+    CpfReset();
+    R2Cp_LoadMicrocode(&cpf_hw, R2Cp_Microcode);
+    CHECK_INT(cpf.nlog, 1 + R2CP_UCODE_DWORDS);
+    CHECK_HEX(cpf.log_reg[0], R_CP_ME_RAM_ADDR);
+    CHECK_HEX(cpf.log_reg[1], R_CP_ME_RAM_DATAH);
+    CHECK_HEX(cpf.log_reg[2], R_CP_ME_RAM_DATAL);
+    CHECK_HEX(cpf.log_val[1], 0x00000000UL);      /* word 0: (0, 0x21007000) */
+    CHECK_HEX(cpf.log_val[2], 0x21007000UL);
+    CHECK(memcmp(cpf.me, R2Cp_Microcode, sizeof(cpf.me)) == 0);
+    CHECK_INT(R2Cp_CheckMicrocode(&cpf_hw, R2Cp_Microcode), 0);
+    cpf.me[2 * 17 + 1] ^= 1;
+    cpf.me[2 * 200] ^= 0x100;
+    CHECK_INT(R2Cp_CheckMicrocode(&cpf_hw, R2Cp_Microcode), 2);
+
+    /* start: Linux r100_cp_init's writes, in its order */
+    CpfReset();
+    CHECK_INT(R2Cp_Start(&cpf_hw, 0x00123000UL, 4096, 0), R2_OK);
+    CHECK_INT(cpf.nlog, sizeof(want_start) / sizeof(want_start[0]));
+    same = 1;
+    for (i = 0; i < cpf.nlog && i < sizeof(want_start) / sizeof(want_start[0]); i++)
+        if (cpf.log_reg[i] != want_start[i][0] || cpf.log_val[i] != want_start[i][1])
+        {
+            printf("  start write %lu: reg 0x%04lx = 0x%08lx, want 0x%04lx = 0x%08lx\n",
+                   (unsigned long) i, (unsigned long) cpf.log_reg[i],
+                   (unsigned long) cpf.log_val[i], (unsigned long) want_start[i][0],
+                   (unsigned long) want_start[i][1]);
+            same = 0;
+        }
+    CHECK(same);
+    CHECK(cpf.clock >= 10);                      /* the 10 us before the CSQ */
+    CpfReset();
+    CHECK_INT(R2Cp_Start(&cpf_hw, 0x00123800UL, 4096, 0), R2_EARG);    /* not 4 KB aligned */
+    CHECK_INT(R2Cp_Start(&cpf_hw, 0x00123000UL, 3000, 0), R2_EARG);
+    CHECK_INT(cpf.nlog, 0);                      /* refused before any write */
+
+    /* save, in use, stop with an idle engine: everything as found */
+    CpfReset();
+    cpf.reg[R_CP_CSQ_CNTL / 4] = 0x02010080UL;   /* A4000D: mode 0, queue status bits */
+    cpf.reg[R_CP_CSQ_MODE / 4] = 0x00004D4DUL;
+    cpf.reg[R_CP_RB_BASE / 4] = 0xCDCDCDCCUL;
+    cpf.reg[R_CP_RB_CNTL / 4] = 0;
+    R2Cp_Save(&cpf_hw, &sv);
+    CHECK(!R2Cp_InUse(&sv));
+    CHECK_INT(R2Cp_Start(&cpf_hw, 0x00123000UL, 4096, R2CP_GPU_SWAP), R2_OK);
+    CHECK_HEX(cpf.reg[R_CP_RB_CNTL / 4], 0x0004090BUL | R_BUF_SWAP_32BIT | R_RB_NO_UPDATE);
+    CHECK_INT(R2Cp_Stop(&cpf_hw, &sv, 1000, &reset), R2_OK);
+    CHECK_INT(reset, 0);
+    CHECK_HEX(cpf.reg[R_CP_CSQ_CNTL / 4], 0);                /* mode 0, no status bits written */
+    CHECK_HEX(cpf.reg[R_CP_CSQ_MODE / 4], 0x00004D4DUL);
+    CHECK_HEX(cpf.reg[R_CP_RB_BASE / 4], 0xCDCDCDCCUL);
+    CHECK_HEX(cpf.reg[R_CP_RB_CNTL / 4], 0);
+    CHECK_HEX(cpf.reg[R_RBBM_SOFT_RESET / 4], 0);
+    for (i = 0, same = 0; i < cpf.nlog; i++)
+        if (cpf.log_reg[i] == R_RBBM_SOFT_RESET)
+            same++;
+    CHECK_INT(same, 0);                                       /* no reset when idle */
+    sv.csq_cntl = R_CSQ_PRIBM_INDBM;
+    CHECK(R2Cp_InUse(&sv));
+
+    /* stop with the engine stuck busy: bounded wait, then the CP alone is reset */
+    CpfReset();
+    R2Cp_Save(&cpf_hw, &sv);
+    cpf.busy = 1;
+    CHECK_INT(R2Cp_Stop(&cpf_hw, &sv, 500, &reset), R2_ETIMEOUT);
+    CHECK_INT(reset, 1);
+    CHECK(cpf.clock > 500 && cpf.clock < 1000);
+    for (i = 0, same = 0; i < cpf.nlog; i++)
+        if (cpf.log_reg[i] == R_RBBM_SOFT_RESET)
+        {
+            CHECK(cpf.log_val[i] == R_SOFT_RESET_CP || cpf.log_val[i] == 0);
+            same++;
+        }
+    CHECK_INT(same, 2);                                       /* set, then cleared */
+    CHECK_HEX(cpf.reg[R_RBBM_SOFT_RESET / 4], 0);
+    CHECK_INT(R2Cp_WaitIdle(&cpf_hw, 300), R2_ETIMEOUT);
+    cpf.busy = 0;
+    CHECK_INT(R2Cp_WaitIdle(&cpf_hw, 300), R2_OK);
+}
+
 int main(void)
 {
     test_headers();
@@ -840,5 +1020,6 @@ int main(void)
     test_ring_hang();
     test_ring_errors();
     test_sizes();
+    test_cp();
     return tk_done("test_r200");
 }

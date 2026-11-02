@@ -1,4 +1,4 @@
-; ProbeSmoke -- the probes (GCC and SAS/C builds) refuse cleanly where there is no PCI bridge:
+; ProbeSmoke -- the probes (GCC and SAS/C builds, CPRing too) refuse cleanly where there is no PCI bridge:
 ; FS-UAE has no openpci.library, so both must print the "not found" line,
 ; write their log and exit with rc 20, touching nothing. (The real runs
 ; happen on the A4000D; see docs/probes.md.)
@@ -20,6 +20,13 @@ DEV:Probe/C/R200Info_sasc LOG=DEV:Test/probe-r200info-sasc.log >>DEV:Test/auto.l
 Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== BusBench_sasc ===" >>DEV:Test/auto.log
 DEV:Probe/C/BusBench_sasc LOG=DEV:Test/probe-busbench-sasc.log >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== CPRing ===" >>DEV:Test/auto.log
+DEV:Probe/C/CPRing LOG=DEV:Test/probe-cpring.log >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/probe-cpring.log >>DEV:Test/auto.log
+Echo "=== CPRing_sasc ===" >>DEV:Test/auto.log
+DEV:Probe/C/CPRing_sasc LOG=DEV:Test/probe-cpring-sasc.log >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== IconX scripts (Execute) ===" >>DEV:Test/auto.log
 Execute DEV:Probe/R200Info >>DEV:Test/auto.log
