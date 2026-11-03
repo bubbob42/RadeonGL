@@ -178,6 +178,8 @@ void Hw_Forget(struct Core *c)
             c->hw_comb[u][i] = 0xffffffffUL;
     }
     c->hw_ppcntl = 0xffffffffUL;
+    c->hw_mv_ver = 0xffffffffUL;
+    c->hw_proj_ver = 0xffffffffUL;
 }
 
 static LONG EmitTexture(struct Core *c, ULONG u)
@@ -489,10 +491,13 @@ LONG Core_Validate(struct Core *c)
             R2E_Reg(cs, R_PP_CNTL, v[0]);
         }
     }
-    if (d & D_MATRIX)
+    if ((d & D_MATRIX) && (c->mv[c->mv_top].ver != c->hw_mv_ver
+                           || c->proj[c->proj_top].ver != c->hw_proj_ver))
     {
         Mat_Mul(mvp, c->proj[c->proj_top].m, c->mv[c->mv_top].m);
         R2E_Matrix(cs, R_VS_MATRIX_2_MVP, mvp);
+        c->hw_mv_ver = c->mv[c->mv_top].ver;
+        c->hw_proj_ver = c->proj[c->proj_top].ver;
     }
     c->dirty = d & D_VTXFMT;
     return cs->error;

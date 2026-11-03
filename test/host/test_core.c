@@ -227,6 +227,10 @@ static ULONG HeapV(ULONG gpu)
     return cs.swap ? R2Cs_Swap32(v) : v;
 }
 
+/* Where Collect starts: a frame's draws only, checked before the next
+ * frame may reuse what they read (test_ucache). */
+static ULONG collect_from;
+
 /* Every draw in the stream (immediate packets, and indexed draws from the
  * arrays in the heap), its vertices' x as ids. */
 static void Collect(void)
@@ -252,7 +256,7 @@ static void Collect(void)
     ngot = 0;
     packets_seen = 0;
     n = (ULONG) (cs.ptr - stream);
-    i = 0;
+    i = collect_from;
     while (i < n)
     {
         h = V(i);
@@ -838,9 +842,12 @@ static void test_bind_shadow(void)
 }
 
 /* The register state at every draw, as hashes: a register file (type-0
- * writes, data ports as their last value) hashed with the draw packet.
- * Returns the draws seen. */
+ * writes, data ports as their last value), the TCL's vector and scalar
+ * memory (the MVP lives there), and the draw packet. Returns the draws
+ * seen. */
 static ULONG regfile[0x4000 / 4];
+static ULONG vecmem[256 * 4];
+static ULONG scalmem[256];
 
 static ULONG DrawStates(ULONG *hash, ULONG max)
 {
@@ -853,7 +860,14 @@ static ULONG DrawStates(ULONG *hash, ULONG max)
     ULONG f;
     ULONG nd;
 
+    ULONG vaddr;
+    ULONG saddr;
+
     memset(regfile, 0, sizeof(regfile));
+    memset(vecmem, 0, sizeof(vecmem));
+    memset(scalmem, 0, sizeof(scalmem));
+    vaddr = 0;
+    saddr = 0;
     nd = 0;
     n = (ULONG) (cs.ptr - stream);
     for (i = 0; i < n; i += len)
@@ -865,7 +879,15 @@ static ULONG DrawStates(ULONG *hash, ULONG max)
             for (k = 0; k <= R2_PKT_COUNT(h); k++)
             {
                 reg = R2_PKT0_ONE_REG_WR(h) ? R2_PKT0_REG(h) : R2_PKT0_REG(h) + 4 * k;
-                if (reg < sizeof(regfile) / sizeof(regfile[0]) * 4)
+                if (reg == R_SE_TCL_VECTOR_INDX_REG)
+                    vaddr = (V(i + 1 + k) & 0xffffUL) * 4;
+                else if (reg == R_SE_TCL_VECTOR_DATA_REG)
+                    vecmem[vaddr++ % (sizeof(vecmem) / 4)] = V(i + 1 + k);
+                else if (reg == R_SE_TCL_SCALAR_INDX_REG)
+                    saddr = V(i + 1 + k) & 0xffffUL;
+                else if (reg == R_SE_TCL_SCALAR_DATA_REG)
+                    scalmem[saddr++ % (sizeof(scalmem) / 4)] = V(i + 1 + k);
+                else if (reg < sizeof(regfile) / sizeof(regfile[0]) * 4)
                     regfile[reg / 4] = V(i + 1 + k);
             }
         }
@@ -874,6 +896,10 @@ static ULONG DrawStates(ULONG *hash, ULONG max)
             f = 2166136261UL;
             for (k = 0; k < sizeof(regfile) / sizeof(regfile[0]); k++)
                 f = (f ^ regfile[k]) * 16777619UL;
+            for (k = 0; k < sizeof(vecmem) / 4; k++)
+                f = (f ^ vecmem[k]) * 16777619UL;
+            for (k = 0; k < sizeof(scalmem) / 4; k++)
+                f = (f ^ scalmem[k]) * 16777619UL;
             for (k = 0; k < len; k++)
                 f = (f ^ V(i + k)) * 16777619UL;
             hash[nd++] = f;
@@ -917,6 +943,28 @@ static void ShadowRun(ULONG no_shadow, ULONG seed)
     for (step = 0; step < 600; step++)
     {
         r = ShRand(&seed);
+        if ((r & 0x700) == 0x700)
+        {
+            /* the matrices, GLQuake's way: push, turn, draw later, pop */
+            switch (ShRand(&seed) % 6)
+            {
+                case 0: Core_PushMatrix(&core); break;
+                case 1: Core_PopMatrix(&core); break;
+                case 2: Core_Rotatef(&core, (float) (ShRand(&seed) % 360), 0.0f, 0.0f, 1.0f); break;
+                case 3: Core_Translatef(&core, 0.5f, (float) (ShRand(&seed) % 7), -1.0f); break;
+                case 4: Core_LoadIdentity(&core); break;
+                default:
+                    Core_MatrixMode(&core, GL_PROJECTION);
+                    if (ShRand(&seed) & 1)
+                        Core_PushMatrix(&core);
+                    else
+                        Core_PopMatrix(&core);
+                    Core_MatrixMode(&core, GL_MODELVIEW);
+                    break;
+            }
+            (void) Core_GetError(&core);    /* stack under/overflow: fine here */
+            continue;
+        }
         switch (r % 13)
         {
             case 0: case 1: case 2:
@@ -1078,6 +1126,55 @@ static void test_vertex_bits(void)
     start = (ULONG) (cs.ptr - stream);
     Core_VertexBits(&core, 0, 0, 0);
     CHECK_INT((ULONG) (cs.ptr - stream), start);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
+/* The MVP goes to the TCL only when its matrices differ from the ones
+ * there (versions: a push copies one, a pop brings the saved one back). */
+static void test_matrix_versions(void)
+{
+    ULONG at;
+
+    Fresh(1);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Draw1();
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK_HEX(RegSince(at, R_SE_TCL_VECTOR_DATA_REG), 0xdeadbeefUL);   /* unchanged */
+    /* push, change, pop without a draw: the world's MVP is still there */
+    Core_PushMatrix(&core);
+    Core_Rotatef(&core, 30.0f, 0.0f, 0.0f, 1.0f);
+    Core_PopMatrix(&core);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK_HEX(RegSince(at, R_SE_TCL_VECTOR_DATA_REG), 0xdeadbeefUL);
+    /* push, change, draw: the entity's goes out; pop, draw: the world's again */
+    Core_PushMatrix(&core);
+    Core_Rotatef(&core, 30.0f, 0.0f, 0.0f, 1.0f);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK(RegSince(at, R_SE_TCL_VECTOR_DATA_REG) != 0xdeadbeefUL);
+    Core_PopMatrix(&core);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK(RegSince(at, R_SE_TCL_VECTOR_DATA_REG) != 0xdeadbeefUL);
+    /* a projection change sends it */
+    Core_MatrixMode(&core, GL_PROJECTION);
+    Core_Rotatef(&core, 10.0f, 0.0f, 0.0f, 1.0f);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK(RegSince(at, R_SE_TCL_VECTOR_DATA_REG) != 0xdeadbeefUL);
+    /* a clear leaves the TCL's matrices alone: nothing again */
+    Core_Clear(&core, GL_COLOR_BUFFER_BIT);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK_HEX(RegSince(at, R_SE_TCL_VECTOR_DATA_REG), 0xdeadbeefUL);
+    /* a rebase (a dropped frame: the GPU never saw it) sends it */
+    Core_Rebase(&core, TEX_GPU, COLOR_GPU, DEPTH_GPU);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK(RegSince(at, R_SE_TCL_VECTOR_DATA_REG) != 0xdeadbeefUL);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 }
 
@@ -1327,6 +1424,7 @@ static void LkArrays(ULONG swap)
     ULONG k;
 
     Fresh(swap);
+    core.no_ucache = 1;             /* these tests are about the stream (test_ucache) */
     for (k = 0; k < LK_MAX; k++)
     {
         lk_pos[k * 3 + 0] = (float) k;
@@ -1508,6 +1606,38 @@ static void test_locked(void)
     Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
     CHECK_INT(core.stat_lock_draws, 0);
     CHECK(SameAsGl(GL_TRIANGLES, idx, 6));
+    /* an index below a lock that starts at 4 (checked while packed: the
+     * last pair, and an odd count's last index) */
+    for (swap = 0; swap < 2; swap++)
+    {
+        LkArrays(swap);
+        for (i = 0; i < 6; i++)
+            idx[i] = (UWORD) (4 + i);
+        idx[5] = 2;
+        Core_LockArrays(&core, 4, 8);
+        Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+        CHECK_INT(core.stat_lock_draws, 0);
+        CHECK(SameAsGl(GL_TRIANGLES, idx, 6));
+        cs.ptr = stream;
+        Fresh(swap);
+        LkArrays(swap);
+        idx[0] = 4; idx[1] = 5; idx[2] = 6; idx[3] = 12; idx[4] = 7;
+        Core_LockArrays(&core, 4, 8);
+        Core_DrawElements(&core, GL_POINTS, 5, GL_UNSIGNED_SHORT, idx);
+        Core_UnlockArrays(&core);
+        CHECK_INT(core.stat_lock_draws, 0);
+        idx[3] = 7; idx[4] = 3;
+        Core_LockArrays(&core, 4, 8);
+        Core_DrawElements(&core, GL_POINTS, 5, GL_UNSIGNED_SHORT, idx);
+        Core_UnlockArrays(&core);
+        CHECK_INT(core.stat_lock_draws, 0);
+        idx[4] = 11;
+        Core_LockArrays(&core, 4, 8);
+        Core_DrawElements(&core, GL_POINTS, 5, GL_UNSIGNED_SHORT, idx);
+        Core_UnlockArrays(&core);
+        CHECK_INT(core.stat_lock_draws, 1);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    }
     LkArrays(1);
     core.stream_size = 0;
     Core_LockArrays(&core, 0, 40);
@@ -1703,7 +1833,179 @@ static void test_packfast(void)
         CHECK(memcmp(pf_out[0], pf_out[1], pf_n * 4) == 0);
         CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
     }
+
+    /* GLQuake's world batches: x y z s0 t0 s1 t1 floats in 28-byte records,
+     * no colour array (the current colour), both units from the arrays */
+    for (swap = 0; swap < 2; swap++)
+    {
+        static float wb[40 * 7];
+
+        for (i = 0; i < 40 * 7; i++)
+            wb[i] = (float) i * 0.29f - 5.0f;
+        Fresh(swap);
+        Core_Color4ub(&core, 200, 150, 100, 50);
+        Core_VertexPointer(&core, 3, GL_FLOAT, 28, wb);
+        Core_TexCoordPointer(&core, 2, GL_FLOAT, 28, wb + 3);
+        Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+        Core_ClientActiveTexture(&core, GL_TEXTURE1_ARB);
+        Core_TexCoordPointer(&core, 2, GL_FLOAT, 28, wb + 5);
+        Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+        Core_ClientActiveTexture(&core, GL_TEXTURE0_ARB);
+        Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel);
+        Core_Enable(&core, GL_TEXTURE_2D, 1);
+        Core_ActiveTexture(&core, GL_TEXTURE1_ARB);
+        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+        Core_Enable(&core, GL_TEXTURE_2D, 1);
+        Core_ActiveTexture(&core, GL_TEXTURE0_ARB);
+        PfDraw(1, 0);
+        PfDraw(0, 1);
+        CHECK_INT(pf_n, 40 * 8);
+        CHECK(memcmp(pf_out[0], pf_out[1], pf_n * 4) == 0);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    }
     core.no_fast = 0;
+}
+
+/* The upload cache: a draw repeated in a later frame writes nothing and
+ * still draws its own vertices; new data is written; many distinct draws
+ * in one frame, more than the cache holds, never overwrite one another
+ * (an entry drawn in the current epoch is not evicted). GLQuake's model
+ * layout (x y z, A R G B bytes, one coordinate set): a layout the cache
+ * keys. */
+static UWORD uc_idx[40][96];
+static UWORD uc_all[40 * 96 * 2];
+static UBYTE uc_col[LK_MAX * 4];
+static float uc_st[LK_MAX * 2];
+
+static void UcSetup(void)
+{
+    static UBYTE texel[2 * 2 * 4];
+    ULONG k;
+
+    LkArrays(1);
+    core.no_ucache = 0;
+    for (k = 0; k < LK_MAX; k++)
+    {
+        uc_col[k * 4] = 255;
+        uc_col[k * 4 + 1] = (UBYTE) k;
+        uc_col[k * 4 + 2] = (UBYTE) (k >> 8);
+        uc_col[k * 4 + 3] = 7;
+        uc_st[k * 2] = (float) k * 0.5f;
+        uc_st[k * 2 + 1] = (float) (k & 15);
+    }
+    Core_ColorPointer(&core, 4, MGL_UBYTE_ARGB, 0, uc_col);
+    Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+    Core_TexCoordPointer(&core, 2, GL_FLOAT, 0, uc_st);
+    Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+}
+
+static void UcDraw(ULONG d, ULONG first, ULONG count)
+{
+    Core_LockArrays(&core, (LONG) first, (LONG) count);
+    Core_DrawElements(&core, GL_TRIANGLES, 96, GL_UNSIGNED_SHORT, uc_idx[d]);
+    Core_UnlockArrays(&core);
+}
+
+static void test_ucache(void)
+{
+    ULONG d;
+    ULONG i;
+    ULONG n;
+    ULONG written;
+    ULONG frame;
+
+    for (d = 0; d < 40; d++)
+        for (i = 0; i < 96; i++)
+            uc_idx[d][i] = (UWORD) (d * 250 + (i * 7 + d) % 250);
+
+    /* two frames of the same three draws: the second writes nothing */
+    UcSetup();
+    CHECK_INT(core.ucache_on, 1);
+    n = 0;
+    for (frame = 0; frame < 2; frame++)
+    {
+        written = core.stat_uc_written;
+        for (d = 0; d < 3; d++)
+        {
+            UcDraw(d, d * 250, 250);
+            for (i = 0; i < 96; i++)
+                uc_all[n++] = uc_idx[d][i];
+        }
+        if (frame == 1)
+            CHECK_INT(core.stat_uc_written, written);
+        Core_GpuIdle(&core);
+    }
+    CHECK_INT(core.stat_lock_draws, 6);
+    CHECK_INT(core.stat_uc_hits, 6);            /* 3 vertex ranges, 3 index lists */
+    CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+
+    /* new vertex data at the same place: written, drawn as it is now; a
+     * colour or a coordinate alone counts too */
+    for (i = 0; i < 250; i++)
+        lk_pos[i * 3 + 0] = (float) (i + 5000);
+    UcDraw(0, 0, 250);
+    CHECK_INT(core.stat_uc_hits, 7);            /* the indices only */
+    for (i = 0; i < 250; i++)
+        lk_pos[i * 3 + 0] = (float) i;
+    UcDraw(0, 0, 250);
+    CHECK_INT(core.stat_uc_hits, 9);            /* the old range is still there */
+    uc_col[100 * 4 + 2] ^= 0x40;
+    UcDraw(0, 0, 250);
+    CHECK_INT(core.stat_uc_hits, 10);
+    uc_st[17 * 2 + 1] += 1.0f;
+    UcDraw(0, 0, 250);
+    CHECK_INT(core.stat_uc_hits, 11);
+    /* the same indices against another lock: checked again, not a hit */
+    Core_LockArrays(&core, 0, 251);
+    Core_DrawElements(&core, GL_TRIANGLES, 96, GL_UNSIGNED_SHORT, uc_idx[0]);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_uc_hits, 11);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* more than the cache holds in one frame: 30 locks of 1000 vertices,
+     * 24 KB each (720 KB of 512; the rest goes to the stream, which does
+     * not wrap: a wrap is a flush, after which the host cannot check the
+     * earlier draws), three frames; every draw of a frame still draws its
+     * own, checked before the next frame may reuse the space */
+    UcSetup();
+    for (frame = 0; frame < 3; frame++)
+    {
+        collect_from = (ULONG) (cs.ptr - stream);
+        n = 0;
+        for (d = 0; d < 30; d++)
+        {
+            UcDraw(d, d * 250, 1000);
+            for (i = 0; i < 96; i++)
+                uc_all[n++] = uc_idx[d][i];
+        }
+        CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+        Core_GpuIdle(&core);
+    }
+    collect_from = 0;
+    CHECK_INT(core.stat_lock_draws, 90);
+    CHECK_INT(core.stat_stream_wraps, 0);
+    CHECK(core.stat_uc_misses > 0 && core.stat_uc_hits > 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* an index outside the lock on a miss: nothing enters the cache */
+    UcSetup();
+    uc_idx[39][5] = 20000;              /* the lock is 9750..9999 */
+    n = core.uq_n;
+    UcDraw(39, 39 * 250, 250);
+    CHECK_INT(core.stat_lock_draws, 0);
+    CHECK(core.uq_n <= n + 1);                  /* at most the vertex range */
+    UcDraw(39, 39 * 250, 250);
+    CHECK_INT(core.stat_lock_draws, 0);         /* and not a hit the second time */
+
+    /* a rebase forgets it all */
+    UcDraw(0, 0, 250);
+    Core_Rebase(&core, TEX_GPU, COLOR_GPU, DEPTH_GPU);
+    CHECK_INT(core.uq_n, 0);
 }
 
 /* A back end whose video RAM moves (P96 bitmaps): texels only between the
@@ -2032,6 +2334,7 @@ int main(void)
     test_bind_shadow();
     test_shadow_equivalence();
     test_vertex_bits();
+    test_matrix_versions();
     test_matrices();
     test_matrix_fast();
     test_arrays();
@@ -2039,6 +2342,7 @@ int main(void)
     test_present();
     test_vram_hooks();
     test_stream_direct();
+    test_ucache();
     test_packfast();
     test_frames_through_ring();
     (void) t;

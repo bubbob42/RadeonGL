@@ -111,10 +111,14 @@ struct CoreMat *Core_TopMatrix(struct Core *c, ULONG mode)
     return NULL;
 }
 
+/* The current matrix changed: a new version (the MVP upload compares
+ * versions, hwstate.c). */
 static void Changed(struct Core *c)
 {
-    if (c->matrix_mode != GL_TEXTURE)
-        c->dirty |= D_MATRIX;
+    if (c->matrix_mode == GL_TEXTURE)
+        return;
+    c->dirty |= D_MATRIX;
+    Core_TopMatrix(c, c->matrix_mode)->ver = ++c->mat_ver;
 }
 
 /* The current matrix of the mode, or NULL (an error raised) inside
@@ -242,7 +246,11 @@ void Core_PopMatrix(struct Core *c)
         return;
     }
     (*top)--;
-    Changed(c);
+    /* the saved matrix comes back with its own version: after GLQuake's
+     * push, entity, pop, the world's MVP is still in the TCL and is not
+     * sent again (MEASURED: 32 uploads a frame, half of them repeats) */
+    if (c->matrix_mode != GL_TEXTURE)
+        c->dirty |= D_MATRIX;
 }
 
 void Core_Translatef(struct Core *c, float x, float y, float z)

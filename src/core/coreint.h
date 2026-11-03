@@ -25,6 +25,9 @@ ULONG Vtx_HwPrim(ULONG mode);
  * eleven registers and a 148-byte frame). */
 void  Vtx_Split(struct Core *c);
 
+/* The upload cache forgets everything (array.c). */
+void  UCache_Clear(struct Core *c);
+
 /* The longest prefix of n vertices that is a whole primitive of mode. */
 ULONG Vtx_Whole(ULONG mode, ULONG n);
 

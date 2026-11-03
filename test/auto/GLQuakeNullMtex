@@ -1,0 +1,18 @@
+; GLQuakeNullMtex -- GLQuake's multitexture path (-extensions: the world in
+; one pass with two texture units, glMultiTexCoord2fARB) on the null card:
+; demo1 checker-clean, GL error 0. Frame 400 dumped for r200view.
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/nullx-#?
+Echo "=== demo1 -extensions ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 -extensions
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

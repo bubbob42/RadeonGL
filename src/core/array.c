@@ -313,6 +313,49 @@ static void PackXyzArgbSt(ULONG *out, const UBYTE *vp, ULONG vs, const UBYTE *cp
     }
 }
 
+/* GLQuake's world batches (gl_rsurf.c R_FlushWorldBatches), straight
+ * through: x y z floats, no colour array (col: the current colour, already
+ * byte-reversed), two coordinate sets of floats (texture, lightmap). */
+static void PackXyzCSt2(ULONG *out, const UBYTE *vp, ULONG vs, ULONG col, const UBYTE *t0,
+                        ULONG ts0, const UBYTE *t1, ULONG ts1, ULONG count)
+{
+    const ULONG *v;
+    ULONG b0, b1, b2;
+
+    while (count-- > 0)
+    {
+        v = (const ULONG *) (const void *) vp;
+        b0 = v[0];
+        b1 = v[1];
+        b2 = v[2];
+        R2_SWAPI(b0);
+        R2_SWAPI(b1);
+        R2_SWAPI(b2);
+        out[0] = b0;
+        out[1] = b1;
+        out[2] = b2;
+        out[3] = col;
+        v = (const ULONG *) (const void *) t0;
+        b0 = v[0];
+        b1 = v[1];
+        R2_SWAPI(b0);
+        R2_SWAPI(b1);
+        out[4] = b0;
+        out[5] = b1;
+        v = (const ULONG *) (const void *) t1;
+        b0 = v[0];
+        b1 = v[1];
+        R2_SWAPI(b0);
+        R2_SWAPI(b1);
+        out[6] = b0;
+        out[7] = b1;
+        out += 8;
+        vp += vs;
+        t0 += ts0;
+        t1 += ts1;
+    }
+}
+
 /* The locked range packed the fast way: float positions of 2 or 3
  * components, float texture coordinates of 2 or more, colours as bytes (or
  * none) -- what GLQuake's models use. Every dword moves as bits, through
@@ -372,6 +415,16 @@ static ULONG PackFast(struct Core *c, ULONG *out, ULONG first, ULONG count, ULON
          * tp/ts: SAS/C cannot see that loop set them, W317) */
         PackXyzArgbSt(out, vp, vs, cp, cs, Elem(&c->ta[0], first),
                       c->ta[0].stride ? c->ta[0].stride : c->ta[0].size * 4, count);
+        return 1;
+    }
+    if (swap && c->va.size == 3 && cp == NULL && units == 3 && c->ta[0].enabled
+        && c->ta[1].enabled)
+    {
+        R2_SWAPI(col);
+        PackXyzCSt2(out, vp, vs, col, Elem(&c->ta[0], first),
+                    c->ta[0].stride ? c->ta[0].stride : c->ta[0].size * 4,
+                    Elem(&c->ta[1], first), c->ta[1].stride ? c->ta[1].stride : c->ta[1].size * 4,
+                    count);
         return 1;
     }
     for (k = 0; k < count; k++)
@@ -444,6 +497,437 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
     return 1;
 }
 
+/* --- The upload cache ---------------------------------------------------------
+ *
+ * GLQuake rebuilds most of its locked ranges and index lists byte for byte
+ * every frame: MEASURED (FS-UAE, demo1), 75% of the locked uploads, 53% of
+ * their bytes, repeat one of the previous frame's. With the stream written
+ * in place (the null card, RadeonGLDirect=1), the SOURCE of a draw is
+ * hashed first: GLQuake's two layouts as the straight-through packers read
+ * them, and its 16-bit indices. Video RAM is written only for what the
+ * cache does not hold, and a draw it holds entirely needs no packing, no
+ * write and no heap lock. (MEASURED on the A4000D: packing everything into
+ * fast RAM first and hashing that cost more than the bus it saved.)
+ * Entries live in a ring in the heap, evicted oldest first, but never one
+ * drawn in the current epoch: the GPU has not read it yet. */
+
+#define UK_MODEL 0x4d4f4431UL   /* key seeds per kind */
+#define UK_WORLD 0x574f5231UL
+#define UK_IDX   0x49445831UL
+
+/* Two hashes mixed with x (a: FNV-1a style, b: rotate and add). */
+#define UMIX(a, b, x) ((a) = ((a) ^ (x)) * 16777619UL, (b) = (((b) << 5) | ((b) >> 27)) + (x))
+
+/* The source of the model packer (PackXyzArgbSt), into h[0], h[1]: a
+ * function of its own so the loop keeps everything in registers. */
+static void HashModels(const UBYTE *vp, ULONG vs, const UBYTE *cp, ULONG cs, const UBYTE *tp,
+                       ULONG ts, ULONG count, ULONG *h)
+{
+    const ULONG *v;
+    ULONG a;
+    ULONG b;
+    ULONG x;
+
+    a = h[0];
+    b = h[1];
+    while (count-- > 0)
+    {
+        v = (const ULONG *) (const void *) vp;
+        x = v[0]; UMIX(a, b, x);
+        x = v[1]; UMIX(a, b, x);
+        x = v[2]; UMIX(a, b, x);
+        x = LOAD_BE32(cp); UMIX(a, b, x);
+        v = (const ULONG *) (const void *) tp;
+        x = v[0]; UMIX(a, b, x);
+        x = v[1]; UMIX(a, b, x);
+        vp += vs;
+        cp += cs;
+        tp += ts;
+    }
+    h[0] = a;
+    h[1] = b;
+}
+
+/* The source of the world packer (PackXyzCSt2). */
+static void HashWorld(const UBYTE *vp, ULONG vs, const UBYTE *t0, ULONG ts0, const UBYTE *t1,
+                      ULONG ts1, ULONG count, ULONG *h)
+{
+    const ULONG *v;
+    ULONG a;
+    ULONG b;
+    ULONG x;
+
+    a = h[0];
+    b = h[1];
+    while (count-- > 0)
+    {
+        v = (const ULONG *) (const void *) vp;
+        x = v[0]; UMIX(a, b, x);
+        x = v[1]; UMIX(a, b, x);
+        x = v[2]; UMIX(a, b, x);
+        v = (const ULONG *) (const void *) t0;
+        x = v[0]; UMIX(a, b, x);
+        x = v[1]; UMIX(a, b, x);
+        v = (const ULONG *) (const void *) t1;
+        x = v[0]; UMIX(a, b, x);
+        x = v[1]; UMIX(a, b, x);
+        vp += vs;
+        t0 += ts0;
+        t1 += ts1;
+    }
+    h[0] = a;
+    h[1] = b;
+}
+
+/* 16-bit indices, two to a value. */
+static void HashIdx16(const UWORD *ix, ULONG n, ULONG *h)
+{
+    ULONG a;
+    ULONG b;
+    ULONG x;
+
+    a = h[0];
+    b = h[1];
+    for (; n >= 2; n -= 2, ix += 2)
+    {
+        x = ((ULONG) ix[1] << 16) | ix[0];
+        UMIX(a, b, x);
+    }
+    if (n != 0)
+    {
+        x = ix[0];
+        UMIX(a, b, x);
+    }
+    h[0] = a;
+    h[1] = b;
+}
+
+/* The key of the locked range's packed vertices: 1 in h[] for the layouts
+ * the straight-through packers take (the same tests as PackFast), 0 for
+ * the others (not cached). */
+static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, ULONG *h)
+{
+    const struct CoreArray *t0;
+    const struct CoreArray *t1;
+    ULONG col;
+
+    if (c->no_fast || !c->cs->swap || c->va.type != GL_FLOAT || c->va.size != 3)
+        return 0;
+    t0 = &c->ta[0];
+    t1 = &c->ta[1];
+    if (units == 1 && c->ca.enabled && c->ca.type == MGL_UBYTE_ARGB && t0->enabled
+        && t0->type == GL_FLOAT && t0->size >= 2)
+    {
+        h[0] = 2166136261UL ^ UK_MODEL;
+        h[1] = UK_MODEL ^ lcount;
+        HashModels(Elem(&c->va, first), c->va.stride ? c->va.stride : 12,
+                   Elem(&c->ca, first), c->ca.stride ? c->ca.stride : 4,
+                   Elem(t0, first), t0->stride ? t0->stride : t0->size * 4, lcount, h);
+        return 1;
+    }
+    if (units == 3 && !c->ca.enabled && t0->enabled && t1->enabled && t0->type == GL_FLOAT
+        && t1->type == GL_FLOAT && t0->size >= 2 && t1->size >= 2)
+    {
+        col = c->cur_color;
+        h[0] = 2166136261UL ^ UK_WORLD;
+        h[1] = UK_WORLD ^ lcount;
+        UMIX(h[0], h[1], col);
+        HashWorld(Elem(&c->va, first), c->va.stride ? c->va.stride : 12,
+                  Elem(t0, first), t0->stride ? t0->stride : t0->size * 4,
+                  Elem(t1, first), t1->stride ? t1->stride : t1->size * 4, lcount, h);
+        return 1;
+    }
+    return 0;
+}
+
+static ULONG USlot(ULONG h1, ULONG h2)
+{
+    return (h1 ^ (h1 >> 11) ^ (h2 >> 17)) & (CORE_USLOTS - 1);
+}
+
+static struct CoreUEntry *ULook(struct Core *c, ULONG h1, ULONG h2, ULONG ndw)
+{
+    struct CoreUEntry *e;
+    ULONG q;
+
+    q = c->uslot[USlot(h1, h2)];
+    if (q == 0)
+        return NULL;
+    e = &c->uq[q - 1];
+    return (e->h1 == h1 && e->h2 == h2 && e->ndw == ndw) ? e : NULL;
+}
+
+/* Drop the oldest entry; FALSE if the current epoch drew it. */
+static ULONG UPop(struct Core *c)
+{
+    struct CoreUEntry *e;
+
+    e = &c->uq[c->uq_head];
+    if (e->epoch == c->epoch)
+        return 0;
+    if (c->uslot[e->slot] == c->uq_head + 1)
+        c->uslot[e->slot] = 0;
+    c->uq_head = (c->uq_head + 1) % CORE_UQ;
+    c->uq_n--;
+    return 1;
+}
+
+/* Evict the oldest entries while they overlap [lo, hi) of the region (the
+ * ring allocates in order, so they are the ones in the way). */
+static ULONG UEvict(struct Core *c, ULONG lo, ULONG hi)
+{
+    struct CoreUEntry *e;
+
+    while (c->uq_n > 0)
+    {
+        e = &c->uq[c->uq_head];
+        if (!(e->pos < hi && e->pos + e->bytes > lo))
+            return 1;
+        if (!UPop(c))
+            return 0;
+    }
+    return 1;
+}
+
+/* Room for bytes in the region: its offset there, or ~0 (the stream then). */
+static ULONG UAlloc(struct Core *c, ULONG bytes)
+{
+    ULONG start;
+
+    if (bytes > c->ucache_size / 4)
+        return 0xffffffffUL;
+    if (c->uq_n == CORE_UQ && !UPop(c))
+        return 0xffffffffUL;
+    start = c->ucache_pos;
+    if (start + bytes > c->ucache_size)
+    {
+        if (!UEvict(c, start, c->ucache_size))
+            return 0xffffffffUL;
+        start = 0;
+    }
+    if (!UEvict(c, start, start + bytes))
+        return 0xffffffffUL;
+    c->ucache_pos = start + bytes;
+    return start;
+}
+
+static void UInsert(struct Core *c, const ULONG *h, ULONG ndw, ULONG pos, ULONG bytes)
+{
+    struct CoreUEntry *e;
+    ULONG q;
+
+    if (c->uq_n == CORE_UQ && !UPop(c))
+        return;
+    q = (c->uq_head + c->uq_n) % CORE_UQ;
+    e = &c->uq[q];
+    e->h1 = h[0];
+    e->h2 = h[1];
+    e->ndw = ndw;
+    e->pos = pos;
+    e->bytes = bytes;
+    e->epoch = c->epoch;
+    e->slot = USlot(h[0], h[1]);
+    c->uslot[e->slot] = (UWORD) (q + 1);
+    c->uq_n++;
+}
+
+void UCache_Clear(struct Core *c)
+{
+    ULONG i;
+
+    c->uq_head = 0;
+    c->uq_n = 0;
+    c->ucache_pos = 0;
+    for (i = 0; i < CORE_USLOTS; i++)
+        c->uslot[i] = 0;
+}
+
+/* n 16-bit indices rebased to the lock, two to a dword in stream order,
+ * each checked; FALSE if one is outside the lock. */
+static ULONG PackIdx16(struct Core *c, ULONG *p, const UWORD *ix16, ULONG n, ULONG first,
+                       ULONG lcount)
+{
+    ULONG i;
+    ULONG a;
+    ULONG b;
+    ULONG g;
+    ULONG bad;
+
+    bad = 0;
+    for (i = 0; i + 1 < n; i += 2)
+    {
+        a = (ULONG) ix16[i] - first;
+        b = (ULONG) ix16[i + 1] - first;
+        bad |= (a >= lcount) | (b >= lcount);
+        g = (b << 16) | (a & 0xffffUL);
+        if (c->cs->swap)
+            R2_SWAPI(g);
+        *p++ = g;
+    }
+    if (i < n)
+    {
+        a = (ULONG) ix16[i] - first;
+        bad |= (a >= lcount);
+        g = a & 0xffffUL;
+        if (c->cs->swap)
+            R2_SWAPI(g);
+        *p = g;
+    }
+    return (bad == 0) ? 1UL : 0UL;
+}
+
+/* DrawLocked through the cache (16-bit indices). FALSE: not drawn (the
+ * immediate way). */
+static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, ULONG first,
+                        ULONG lcount, ULONG units, ULONG vd)
+{
+    struct R2Aos aos;
+    struct CoreUEntry *e;
+    ULONG *heap;
+    ULONG *p;
+    ULONG vdw, idw, vbytes, ibytes;
+    ULONG vh[2], ih[2];
+    ULONG vkey;
+    ULONG vpos, ipos;           /* cache positions to fill, ~0: none */
+    ULONG voff, ioff;           /* heap offsets to write, ~0: nothing */
+    ULONG vgpu, igpu;
+    ULONG upload;
+    ULONG k;
+    float pos[4];
+
+    vdw = lcount * vd;
+    idw = (n + 1) / 2;
+    vbytes = (vdw * 4 + 31) & ~31UL;
+    ibytes = (idw * 4 + 31) & ~31UL;
+    upload = !LockCurrent(c, units);
+    /* the worst case in the stream decides a wrap now, before any lock and
+     * before the cache marks what this draw uses */
+    if (c->stream_pos + ibytes + (upload ? vbytes : 0) > c->stream_size)
+    {
+        StreamWrap(c);
+        upload = 1;
+    }
+
+    /* where the vertices are, or go */
+    vpos = 0xffffffffUL;
+    voff = 0xffffffffUL;
+    vgpu = c->lk_gpu;
+    if (upload)
+    {
+        vkey = VertexKey(c, first, lcount, units, vh);
+        e = vkey ? ULook(c, vh[0], vh[1], vdw) : NULL;
+        if (e != NULL)
+        {
+            e->epoch = c->epoch;
+            vgpu = c->heap.gpu + c->ucache_off + e->pos;
+            c->stat_uc_hits++;
+            c->stat_uc_saved += vdw * 4;
+        }
+        else
+        {
+            vpos = vkey ? UAlloc(c, vbytes) : 0xffffffffUL;
+            voff = (vpos != 0xffffffffUL) ? c->ucache_off + vpos : StreamAlloc(c, vbytes);
+            vgpu = c->heap.gpu + voff;
+            if (vkey)
+                c->stat_uc_misses++;
+        }
+    }
+
+    /* the indices: a hit was checked against this same lock already */
+    ih[0] = 2166136261UL ^ UK_IDX ^ first;
+    ih[1] = UK_IDX ^ lcount;
+    HashIdx16(ix16, n, ih);
+    ipos = 0xffffffffUL;
+    ioff = 0xffffffffUL;
+    e = ULook(c, ih[0], ih[1], idw);
+    if (e != NULL)
+    {
+        e->epoch = c->epoch;
+        igpu = c->heap.gpu + c->ucache_off + e->pos;
+        c->stat_uc_hits++;
+        c->stat_uc_saved += idw * 4;
+    }
+    else
+    {
+        ipos = UAlloc(c, ibytes);
+        ioff = (ipos != 0xffffffffUL) ? c->ucache_off + ipos : StreamAlloc(c, ibytes);
+        igpu = c->heap.gpu + ioff;
+        c->stat_uc_misses++;
+    }
+
+    /* what the cache does not hold, straight into video RAM: one lock */
+    if (voff != 0xffffffffUL || ioff != 0xffffffffUL)
+    {
+        heap = c->heap.cpu;
+        if (c->stream_direct)
+        {
+            heap = c->vram_begin(c->env.env);
+            if (heap == NULL)
+            {
+                c->stat_vram_lost++;
+                return 0;
+            }
+            c->heap.cpu = heap;
+        }
+        if (ioff != 0xffffffffUL && !PackIdx16(c, heap + ioff / 4, ix16, n, first, lcount))
+        {
+            /* an index outside the lock: nothing refers to what was
+             * written, nothing enters the cache, the immediate way draws */
+            if (c->stream_direct)
+                c->vram_end(c->env.env);
+            return 0;
+        }
+        if (voff != 0xffffffffUL)
+        {
+            p = heap + voff / 4;
+            if (!PackFast(c, p, first, lcount, units))
+                for (k = 0; k < lcount; k++)
+                {
+                    Fetch(c, first + k, pos);
+                    Pack(c, p + k * vd, units, pos);
+                }
+        }
+        if (c->stream_direct)
+            c->vram_end(c->env.env);    /* before anything that may flush */
+        if (vpos != 0xffffffffUL)
+        {
+            UInsert(c, vh, vdw, vpos, vbytes);
+            c->stat_uc_written += vdw * 4;
+        }
+        if (ipos != 0xffffffffUL)
+        {
+            UInsert(c, ih, idw, ipos, ibytes);
+            c->stat_uc_written += idw * 4;
+        }
+        c->stat_stream_bytes += ((voff != 0xffffffffUL) ? vdw * 4 : 0)
+                              + ((ioff != 0xffffffffUL) ? idw * 4 : 0);
+    }
+    if (upload)
+    {
+        c->lk_gpu = vgpu;
+        c->lk_valid = 1;
+        c->lk_units = units;
+        c->lk_color = c->cur_color;
+        for (k = 0; k < CORE_UNITS; k++)
+        {
+            c->lk_st[k][0] = c->cur_st[k][0];
+            c->lk_st[k][1] = c->cur_st[k][1];
+        }
+        c->stat_lock_uploads++;
+    }
+    Core_Validate(c);
+    Hw_VertexFormat(c, units);
+    Core_MarkTextures(c, units);
+    aos.comps = vd;
+    aos.stride = vd;
+    aos.gpu = vgpu;
+    R2E_LoadVbpntr(c->cs, 1, &aos);
+    R2E_DrawIndexed(c->cs, Vtx_HwPrim(mode) | R_VF_COLOR_ORDER_RGBA | R_VF_TCL_OUTPUT_VTX_ENABLE,
+                    n, igpu, lcount);
+    c->stat_lock_draws++;
+    return 1;
+}
+
 /* glDrawElements on locked arrays from VRAM. FALSE: not this way (the
  * caller draws through the immediate path). */
 static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, const void *idx)
@@ -467,6 +951,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     ULONG *base;
     ULONG *heap;
     const UWORD *ix16;
+    ULONG bad;
     float pos[4];
 
     if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP)
@@ -478,9 +963,10 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
         return 1;                   /* GL draws nothing */
     if (n > 0xffffUL || lcount > 0xffffUL)
         return 0;
-    if (type == GL_UNSIGNED_SHORT)
+    if (type == GL_UNSIGNED_SHORT && c->cs->swap)
+        ;                           /* checked while they are packed, below */
+    else if (type == GL_UNSIGNED_SHORT)
     {
-        /* GLQuake's indices: one loop without the type test */
         ix16 = (const UWORD *) idx;
         for (i = 0; i < n; i++)
             if ((ULONG) ix16[i] - first >= lcount)
@@ -499,6 +985,8 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     ibytes = (((n + 1) / 2) * 4 + 31) & ~31UL;
     if (vbytes + ibytes > c->stream_size)
         return 0;                   /* never fits: the general way */
+    if (c->ucache_on && !c->no_ucache && type == GL_UNSIGNED_SHORT)
+        return DrawCached(c, mode, n, (const UWORD *) idx, first, lcount, units, vd);
     upload = !LockCurrent(c, units);
     if (c->stream_pos + ibytes + (upload ? vbytes : 0) > c->stream_size)
     {
@@ -547,19 +1035,35 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     p = base + (off - c->stream_off) / 4;
     if (type == GL_UNSIGNED_SHORT && c->cs->swap)
     {
-        /* pairs, rebased, byte-reversed: a b as the GPU reads them */
+        /* GLQuake's indices, in one pass: pairs, rebased, byte-reversed (a
+         * b as the GPU reads them), each checked against the lock on the
+         * way (MEASURED on the A4000D: a separate check loop cost about
+         * as much as the packing). An index outside: nothing refers to
+         * what was written, and the immediate way draws instead. */
         ix16 = (const UWORD *) idx;
+        bad = 0;
         for (i = 0; i + 1 < n; i += 2)
         {
-            g = (((ULONG) ix16[i + 1] - first) << 16) | ((ULONG) ix16[i] - first);
+            a = (ULONG) ix16[i] - first;
+            b = (ULONG) ix16[i + 1] - first;
+            bad |= (a >= lcount) | (b >= lcount);
+            g = (b << 16) | (a & 0xffffUL);
             R2_SWAPI(g);
             *p++ = g;
         }
         if (i < n)
         {
-            g = (ULONG) ix16[i] - first;
+            a = (ULONG) ix16[i] - first;
+            bad |= (a >= lcount);
+            g = a & 0xffffUL;
             R2_SWAPI(g);
             *p = g;
+        }
+        if (bad)
+        {
+            if (c->stream_direct)
+                c->vram_end(c->env.env);
+            return 0;
         }
     }
     else

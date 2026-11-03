@@ -43,6 +43,20 @@
 #define CORE_T_DEPTH      8
 #define CORE_IMMD_VERTS   256     /* vertices reserved per glBegin; more are split */
 #define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
+#define CORE_UCACHE_BYTES (512UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
+#define CORE_UQ           256             /* cache entries, oldest first */
+#define CORE_USLOTS       256             /* their lookup table (a power of two) */
+
+/* One upload the cache holds: its key (two hashes of the packed dwords and
+ * their count, a kind folded into the second) and where it is. */
+struct CoreUEntry
+{
+    ULONG h1, h2, ndw;
+    ULONG pos;              /* offset in the cache region */
+    ULONG bytes;
+    ULONG epoch;            /* last drawn in: never evicted within it */
+    ULONG slot;
+};
 
 /* What the core needs from its host (the library or a test). */
 struct CoreEnv
@@ -157,6 +171,8 @@ struct CoreArray
 struct CoreMat
 {
     float m[16];            /* column-major, as GL keeps it */
+    ULONG ver;              /* new at every change; a push copies it, a pop
+                             * brings the saved one back */
 };
 
 struct Core
@@ -237,6 +253,9 @@ struct Core
     ULONG hw_tex[CORE_UNITS][7];    /* TXFILTER..TXPITCH, TXMULTI_CTL, TXOFFSET */
     ULONG hw_comb[CORE_UNITS][4];   /* TXCBLEND, TXCBLEND2, TXABLEND, TXABLEND2 */
     ULONG hw_ppcntl;
+    ULONG mat_ver;          /* the last matrix version handed out */
+    ULONG hw_mv_ver;        /* the modelview and projection versions whose */
+    ULONG hw_proj_ver;      /* product is in the TCL's MVP now (~0: none) */
 
     /* client arrays */
     struct CoreArray va, ca, ta[CORE_UNITS];
@@ -271,6 +290,16 @@ struct Core
     /* statistics for tests and the census */
     ULONG stat_prims, stat_verts, stat_splits, stat_state_emits, stat_idle_waits;
     ULONG stat_lock_uploads, stat_lock_draws, stat_stream_wraps;
+
+    /* The upload cache (array.c): locked ranges and index lists kept in
+     * video RAM across frames, used when the stream is written in place
+     * (ucache_on: no staging buffer). */
+    ULONG ucache_off, ucache_size, ucache_pos, ucache_on;
+    struct CoreUEntry uq[CORE_UQ];
+    ULONG uq_head, uq_n;
+    UWORD uslot[CORE_USLOTS];       /* uq index + 1, 0 = empty */
+    ULONG no_ucache;                /* tests, RadeonGLUploadCache=0 */
+    ULONG stat_uc_hits, stat_uc_misses, stat_uc_saved, stat_uc_written;
     ULONG stat_stream_bytes;    /* written into the stream (vertices + indices): bus bytes */
 };
 

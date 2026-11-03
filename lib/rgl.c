@@ -24,7 +24,10 @@
  * RadeonGLDirect=1 (the Radeon): the locked arrays' vertices
  * and indices are written straight into the texture heap in video RAM,
  * one short heap lock a draw, instead of staged in fast RAM and copied in
- * the flush's lock (core.h Core_SetVram).
+ * the flush's lock (core.h Core_SetVram). With the stream written in place
+ * (this, and always on the null card) the upload cache keeps repeated
+ * ranges and index lists in video RAM across frames (array.c);
+ * RadeonGLUploadCache=0 turns it off for A/B timing.
  *
  * Frame dump (null card only): with RadeonGLDump=N the null card records frame N (the core
  * re-emits its whole state at that frame's start, so the recording stands
@@ -187,6 +190,25 @@ static void PutU(BPTR f, ULONG v)
     Put(f, b + i);
 }
 
+/* The upload cache's line in both logs. */
+static void PutCache(BPTR f, const struct Core *c)
+{
+    Put(f, "upload cache: ");
+    if (!c->ucache_on)
+    {
+        Put(f, c->ucache_size ? "off (the stream is staged)\n" : "off (no room)\n");
+        return;
+    }
+    if (c->no_ucache)
+    {
+        Put(f, "off (RadeonGLUploadCache=0)\n");
+        return;
+    }
+    PutU(f, c->stat_uc_hits); Put(f, " hits, "); PutU(f, c->stat_uc_misses);
+    Put(f, " misses; bytes not written again: "); PutU(f, c->stat_uc_saved);
+    Put(f, ", written into it: "); PutU(f, c->stat_uc_written); Put(f, "\n");
+}
+
 static void PutX(BPTR f, ULONG v)
 {
     char b[11];
@@ -243,6 +265,7 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, "locked draws: "); PutU(f, r->core.stat_lock_draws); Put(f, ", uploads: ");
     PutU(f, r->core.stat_lock_uploads); Put(f, ", stream bytes: ");
     PutU(f, r->core.stat_stream_bytes); Put(f, "\n");
+    PutCache(f, &r->core);
     Put(f, "texture heap: "); PutU(f, k->heap_size >> 20);
     Put(f, k->b[CARD_HEAP].bpp == 4 ? " MB, a 32-bit bitmap" : " MB, in the screen's format");
     Put(f, " (sizes P96 kept off the board first: "); PutU(f, k->heap_offboard); Put(f, ")\n");
@@ -332,6 +355,7 @@ static void WriteLog(struct Rgl *r)
     Put(f, "idle waits: "); PutU(f, r->core.stat_idle_waits); Put(f, "\n");
     Put(f, "locked draws: "); PutU(f, r->core.stat_lock_draws); Put(f, "\n");
     Put(f, "locked uploads: "); PutU(f, r->core.stat_lock_uploads); Put(f, "\n");
+    PutCache(f, &r->core);
     Put(f, "stream wraps: "); PutU(f, r->core.stat_stream_wraps); Put(f, "\n");
     Put(f, "stream bytes: "); PutU(f, r->core.stat_stream_bytes);
     Put(f, r->no_lock ? " (locked arrays OFF: RadeonGLLocked=0)\n" : "\n");
@@ -601,6 +625,9 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         r->no_lock = 1;
         r->core.stream_size = 0;
     }
+    /* RadeonGLUploadCache=0: every locked upload written again (A/B) */
+    if (GetVar((STRPTR) "RadeonGLUploadCache", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
+        r->core.no_ucache = 1;
     if (!r->real)
         NullCardWindow(r);
     rgl = r;

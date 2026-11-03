@@ -1,0 +1,20 @@
+.KEY demo/A,extra/F
+.BRA {
+.KET }
+; RunNullX -- RunNull with extra GLQuake arguments (for instance
+; -extensions, which turns on GLQuake's multitexture path): timedemo
+; {demo} on the null card, logs DEV:Test/nullx-{demo}.log and
+; DEV:Test/nullx-{demo}-lib.log, a done marker at the end.
+FailAt 1000
+CD DEV:Quake
+SetEnv RadeonGLLog DEV:Test/nullx-{demo}-lib.log
+SetEnv RadeonGLDump 400
+SetEnv RadeonGLDumpFile DEV:Test/nullx-{demo}-f400.r2d
+Assign LIBS: DEV:Libs/RadeonGL ADD
+GLQuake {extra} -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/nullx-{demo}.log
+Echo "nullx {demo} rc=$RC" >>DEV:Test/nullx-{demo}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+UnSetEnv RadeonGLLog
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo >DEV:Test/nullx-{demo}.done done

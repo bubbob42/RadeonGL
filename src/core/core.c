@@ -44,6 +44,13 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     c->stream_off = Heap_Alloc(c, CORE_STREAM_BYTES, 32);
     c->stream_size = (c->stream_off != 0xffffffffUL) ? CORE_STREAM_BYTES : 0;
     c->stream_cpu = (c->stream_size != 0) ? heap_cpu + c->stream_off / 4 : NULL;
+    /* the upload cache: only beside a stream, and only if all of it fits */
+    if (c->stream_size != 0)
+    {
+        c->ucache_off = Heap_Alloc(c, CORE_UCACHE_BYTES, 32);
+        c->ucache_size = (c->ucache_off != 0xffffffffUL) ? CORE_UCACHE_BYTES : 0;
+        c->ucache_on = (c->ucache_size != 0) ? 1 : 0;   /* in place until Core_SetVram */
+    }
 
     /* GL's initial state */
     c->enables = EN_DITHER | EN_PERSPECTIVE;
@@ -70,6 +77,9 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     c->matrix_mode = GL_MODELVIEW;
     Ident(c->mv[0].m);
     Ident(c->proj[0].m);
+    c->mat_ver = 1;
+    c->mv[0].ver = 1;
+    c->proj[0].ver = 1;
     for (u = 0; u < CORE_UNITS; u++)
         Ident(c->texm[u][0].m);
     c->cur_color = 0xffffffffUL;
@@ -105,6 +115,8 @@ void Core_Free(struct Core *c)
         c->env.free(c->env.env, c->tex, CORE_MAX_TEX * sizeof(struct CoreTex *));
         c->tex = NULL;
     }
+    c->ucache_on = 0;
+    c->ucache_size = 0;
     Heap_FreeAll(c);
 }
 
@@ -122,6 +134,8 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
     c->vram_begin = begin;
     c->vram_end = end;
     c->stream_direct = (begin != NULL && staging == NULL) ? 1 : 0;
+    /* a staged stream is copied at the flush; the cache writes in place */
+    c->ucache_on = (c->ucache_size != 0 && staging == NULL) ? 1 : 0;
     if (staging != NULL && c->stream_size != 0)
         c->stream_cpu = staging;
 }
@@ -139,6 +153,7 @@ void Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gp
     c->target.depth_gpu = depth_gpu;
     c->dirty = D_ALL;
     Hw_Forget(c);
+    UCache_Clear(c);        /* a dropped frame's uploads may never have landed */
     Core_GpuIdle(c);
 }
 
