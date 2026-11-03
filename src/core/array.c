@@ -738,8 +738,43 @@ void UCache_Clear(struct Core *c)
     c->uq_head = 0;
     c->uq_n = 0;
     c->ucache_pos = 0;
+    c->udirty_n = 0;
+    c->udirty_all = 0;
     for (i = 0; i < CORE_USLOTS; i++)
         c->uslot[i] = 0;
+}
+
+/* Staged: bytes at pos of the region wait in ushadow for the back end. */
+static void UDirty(struct Core *c, ULONG pos, ULONG bytes)
+{
+    ULONG n;
+
+    n = c->udirty_n;
+    if (c->udirty_all)
+        return;
+    if (n > 0 && c->udirty_off[n - 1] + c->udirty_len[n - 1] == pos)
+    {
+        c->udirty_len[n - 1] += bytes;      /* the ring allocates in order */
+        return;
+    }
+    if (n == CORE_UDIRTY)
+    {
+        c->udirty_all = 1;
+        return;
+    }
+    c->udirty_off[n] = pos;
+    c->udirty_len[n] = bytes;
+    c->udirty_n = n + 1;
+}
+
+/* Where to write what goes to heap offset off (pos: its place in the
+ * cache region, ~0 for the stream): the mirror or the staging buffer when
+ * staged, else the heap (heap: as this moment has it). */
+static ULONG *UWhere(struct Core *c, ULONG *heap, ULONG off, ULONG pos)
+{
+    if (pos != 0xffffffffUL)
+        return c->ustaged ? c->ushadow + pos / 4 : heap + off / 4;
+    return c->stream_direct ? heap + off / 4 : c->stream_cpu + (off - c->stream_off) / 4;
 }
 
 /* n 16-bit indices rebased to the lock, two to a dword in stream order,
@@ -855,7 +890,8 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
         c->stat_uc_misses++;
     }
 
-    /* what the cache does not hold, straight into video RAM: one lock */
+    /* what the cache does not hold: into video RAM (one lock), or when
+     * staged into the mirror and the staging buffer (no lock) */
     if (voff != 0xffffffffUL || ioff != 0xffffffffUL)
     {
         heap = c->heap.cpu;
@@ -869,7 +905,8 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
             }
             c->heap.cpu = heap;
         }
-        if (ioff != 0xffffffffUL && !PackIdx16(c, heap + ioff / 4, ix16, n, first, lcount))
+        if (ioff != 0xffffffffUL
+            && !PackIdx16(c, UWhere(c, heap, ioff, ipos), ix16, n, first, lcount))
         {
             /* an index outside the lock: nothing refers to what was
              * written, nothing enters the cache, the immediate way draws */
@@ -879,7 +916,7 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
         }
         if (voff != 0xffffffffUL)
         {
-            p = heap + voff / 4;
+            p = UWhere(c, heap, voff, vpos);
             if (!PackFast(c, p, first, lcount, units))
                 for (k = 0; k < lcount; k++)
                 {
@@ -892,11 +929,15 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
         if (vpos != 0xffffffffUL)
         {
             UInsert(c, vh, vdw, vpos, vbytes);
+            if (c->ustaged)
+                UDirty(c, vpos, vbytes);
             c->stat_uc_written += vdw * 4;
         }
         if (ipos != 0xffffffffUL)
         {
             UInsert(c, ih, idw, ipos, ibytes);
+            if (c->ustaged)
+                UDirty(c, ipos, ibytes);
             c->stat_uc_written += idw * 4;
         }
         c->stat_stream_bytes += ((voff != 0xffffffffUL) ? vdw * 4 : 0)

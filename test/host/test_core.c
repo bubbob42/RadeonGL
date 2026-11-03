@@ -2175,6 +2175,65 @@ static void test_vram_hooks(void)
     (void) st;
 }
 
+/* The upload cache with a staged stream: no lock for it at all; new
+ * entries wait in the fast-RAM mirror, and the back end's flush copies the
+ * dirty ranges (here: what card.c does inside its lock). */
+static void HostFlushStaged(void)
+{
+    ULONG i;
+    ULONG r;
+
+    for (i = 0; i < core.stream_pos / 4; i++)
+        vram[core.stream_off / 4 + i] = staging[i];
+    if (core.udirty_all)
+        memcpy(&vram[core.ucache_off / 4], core.ushadow, core.ucache_size);
+    else
+        for (r = 0; r < core.udirty_n; r++)
+            memcpy(&vram[(core.ucache_off + core.udirty_off[r]) / 4],
+                   core.ushadow + core.udirty_off[r] / 4, core.udirty_len[r]);
+    Core_UCacheCopied(&core);
+}
+
+static void test_ucache_staged(void)
+{
+    ULONG d;
+    ULONG i;
+    ULONG n;
+    ULONG frame;
+
+    UcSetup();
+    /* a pattern where the cache will be: what the flush fails to copy
+     * shows (test_ucache left the same entries at the same places) */
+    memset(&vram[core.ucache_off / 4], 0x55, core.ucache_size);
+    vram_now = vram;
+    vram_begins = 0;
+    vram_ends = 0;
+    Core_SetVram(&core, HostVramBegin, HostVramEnd, staging);
+    CHECK_INT(core.ustaged, 1);
+    CHECK_INT(core.ucache_on, 1);
+    for (frame = 0; frame < 3; frame++)
+    {
+        collect_from = (ULONG) (cs.ptr - stream);
+        n = 0;
+        for (d = 0; d < 30; d++)
+        {
+            UcDraw(d, d * 250, 1000);
+            for (i = 0; i < 96; i++)
+                uc_all[n++] = uc_idx[d][i];
+        }
+        HostFlushStaged();
+        CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+        Core_GpuIdle(&core);
+    }
+    collect_from = 0;
+    CHECK_INT(vram_begins, 0);                  /* not one lock */
+    CHECK_INT(core.stat_lock_draws, 90);
+    CHECK_INT(core.stat_stream_wraps, 0);
+    CHECK(core.stat_uc_hits > 0 && core.stat_uc_misses > 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    vram_now = NULL;
+}
+
 static void test_frames_through_ring(void)
 {
     struct SimCp sim;
@@ -2343,6 +2402,7 @@ int main(void)
     test_vram_hooks();
     test_stream_direct();
     test_ucache();
+    test_ucache_staged();
     test_packfast();
     test_frames_through_ring();
     (void) t;

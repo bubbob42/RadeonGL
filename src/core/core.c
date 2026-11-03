@@ -115,9 +115,21 @@ void Core_Free(struct Core *c)
         c->env.free(c->env.env, c->tex, CORE_MAX_TEX * sizeof(struct CoreTex *));
         c->tex = NULL;
     }
+    if (c->ushadow != NULL)
+    {
+        c->env.free(c->env.env, c->ushadow, CORE_UCACHE_BYTES);
+        c->ushadow = NULL;
+    }
     c->ucache_on = 0;
+    c->ustaged = 0;
     c->ucache_size = 0;
     Heap_FreeAll(c);
+}
+
+void Core_UCacheCopied(struct Core *c)
+{
+    c->udirty_n = 0;
+    c->udirty_all = 0;
 }
 
 void Core_GpuIdle(struct Core *c)
@@ -134,8 +146,25 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
     c->vram_begin = begin;
     c->vram_end = end;
     c->stream_direct = (begin != NULL && staging == NULL) ? 1 : 0;
-    /* a staged stream is copied at the flush; the cache writes in place */
-    c->ucache_on = (c->ucache_size != 0 && staging == NULL) ? 1 : 0;
+    /* the upload cache: in place, or (a staged stream) through a fast-RAM
+     * mirror the back end copies at its flush */
+    c->ucache_on = 0;
+    c->ustaged = 0;
+    if (c->ucache_size != 0)
+    {
+        if (staging == NULL)
+            c->ucache_on = 1;
+        else
+        {
+            if (c->ushadow == NULL)
+                c->ushadow = (ULONG *) c->env.alloc(c->env.env, CORE_UCACHE_BYTES);
+            if (c->ushadow != NULL)
+            {
+                c->ucache_on = 1;
+                c->ustaged = 1;
+            }
+        }
+    }
     if (staging != NULL && c->stream_size != 0)
         c->stream_cpu = staging;
 }

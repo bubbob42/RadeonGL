@@ -45,6 +45,7 @@
 #define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
 #define CORE_UCACHE_BYTES (512UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
 #define CORE_UQ           256             /* cache entries, oldest first */
+#define CORE_UDIRTY       32              /* staged: ranges for the back end to copy */
 #define CORE_USLOTS       256             /* their lookup table (a power of two) */
 
 /* One upload the cache holds: its key (two hashes of the packed dwords and
@@ -292,9 +293,15 @@ struct Core
     ULONG stat_lock_uploads, stat_lock_draws, stat_stream_wraps;
 
     /* The upload cache (array.c): locked ranges and index lists kept in
-     * video RAM across frames, used when the stream is written in place
-     * (ucache_on: no staging buffer). */
+     * video RAM across frames. With a staged stream (ustaged) its new
+     * entries go into a fast-RAM mirror of the region, and the back end
+     * copies the dirty ranges at its flush, inside its one lock
+     * (Core_UCacheCopied). */
     ULONG ucache_off, ucache_size, ucache_pos, ucache_on;
+    ULONG ustaged;
+    ULONG *ushadow;                 /* CORE_UCACHE_BYTES of fast RAM, staged only */
+    ULONG udirty_off[CORE_UDIRTY], udirty_len[CORE_UDIRTY];  /* bytes in the region */
+    ULONG udirty_n, udirty_all;
     struct CoreUEntry uq[CORE_UQ];
     ULONG uq_head, uq_n;
     UWORD uslot[CORE_USLOTS];       /* uq index + 1, 0 = empty */
@@ -336,6 +343,10 @@ void  Core_GpuIdle(struct Core *c);
  * costs 18 us. */
 void  Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR env),
                    ULONG *staging);
+
+/* A staged back end copied the upload cache's dirty ranges (udirty_*, or
+ * all of ushadow when udirty_all) to the region in the heap: clear them. */
+void  Core_UCacheCopied(struct Core *c);
 
 /* The heap or the render target moved (P96 moved an unlocked bitmap): every
  * texture's GPU address follows the heap, the target takes its new

@@ -196,7 +196,7 @@ static void PutCache(BPTR f, const struct Core *c)
     Put(f, "upload cache: ");
     if (!c->ucache_on)
     {
-        Put(f, c->ucache_size ? "off (the stream is staged)\n" : "off (no room)\n");
+        Put(f, "off (no room)\n");
         return;
     }
     if (c->no_ucache)
@@ -204,6 +204,7 @@ static void PutCache(BPTR f, const struct Core *c)
         Put(f, "off (RadeonGLUploadCache=0)\n");
         return;
     }
+    Put(f, c->ustaged ? "(staged, copied at the flush) " : "(written in place) ");
     PutU(f, c->stat_uc_hits); Put(f, " hits, "); PutU(f, c->stat_uc_misses);
     Put(f, " misses; bytes not written again: "); PutU(f, c->stat_uc_saved);
     Put(f, ", written into it: "); PutU(f, c->stat_uc_written); Put(f, "\n");

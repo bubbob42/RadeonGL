@@ -315,6 +315,13 @@ static LONG Peek(APTR ctx, ULONG gpu, ULONG *val)
 
     k = (struct Card *) ctx;
     off = gpu - k->heap_gpu;
+    /* the upload cache's region: its mirror holds what the flush copies */
+    if (gpu >= k->heap_gpu && k->core->ustaged && off >= k->core->ucache_off
+        && off + 4 <= k->core->ucache_off + k->core->ucache_size)
+    {
+        *val = k->core->ushadow[(off - k->core->ucache_off) / 4];
+        return 0;
+    }
     if (gpu < k->heap_gpu || off < k->core->stream_off
         || off + 4 > k->core->stream_off + k->core->stream_size)
         return -1;
@@ -396,6 +403,31 @@ static LONG CopyCommands(struct Card *k, ULONG n)
         i += c;
     }
     return R2_OK;
+}
+
+/* The upload cache's dirty ranges from its fast-RAM mirror into the heap
+ * (staged stream; inside the flush's lock). */
+static void CopyUCache(struct Card *k)
+{
+    struct Core *c;
+    volatile ULONG *dst;
+    const ULONG *src;
+    ULONG r;
+    ULONG i;
+    ULONG off;
+    ULONG len;
+
+    c = k->core;
+    for (r = 0; r < (c->udirty_all ? 1UL : c->udirty_n); r++)
+    {
+        off = c->udirty_all ? 0 : c->udirty_off[r];
+        len = c->udirty_all ? c->ucache_size : c->udirty_len[r];
+        dst = (volatile ULONG *) (HeapCpu(k) + c->ucache_off + off);
+        src = c->ushadow + off / 4;
+        for (i = len / 4; i > 0; i--)
+            *dst++ = *src++;
+    }
+    Core_UCacheCopied(c);
 }
 
 /* --- the flush ------------------------------------------------------------------------ */
@@ -582,6 +614,9 @@ LONG Card_Flush(struct Card *k, BOOL present)
             *dst++ = *src++;
         k->copied = k->core->stream_pos;
     }
+    /* the upload cache's new entries, from its mirror */
+    if (k->core->ustaged && (k->core->udirty_n != 0 || k->core->udirty_all))
+        CopyUCache(k);
     e = CopyCommands(k, n);
     if (e == R2_OK)
         e = R2Ring_Fence(&k->ring, &seq);
