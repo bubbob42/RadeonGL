@@ -1,0 +1,138 @@
+Short:        minigl.library for R200 Radeons on P96
+Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
+Author:       marcus.gerards@googlemail.com (Marcus Gerards)
+Type:         driver/video
+Version:      0.4
+Architecture: m68k-amigaos >= 3.1
+Distribution: Aminet
+Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
+              Picasso96 3.6+ (Radeon.card); a 68040 or 68060 with FPU,
+              or a 68020/68030 with 68881/68882 (a second build);
+              AmigaOS 3.1+ (tested on 3.2).
+Kurz:         minigl.library fuer R200-Radeons an P96
+
+RadeonGL 0.4  --  3.11.2026
+
+
+WHAT IT IS
+
+A minigl.library that draws with the 3D engine of an ATI Radeon from the
+R200 family (8500, 9000, 9100, 9200, 9250) on a graphics card that
+Picasso96 drives. No Warp3D: it talks to the Radeon's command processor
+through Picasso96, while the Workbench keeps running.
+
+It is a minigl.library 29.1 with dispatch ABI 5, so programs built with
+the current MiniGL SDK open it like any other minigl.library 29.
+
+
+SOURCE CODE
+
+  https://github.com/bubbob42/RadeonGL
+
+The archive carries it too, in the drawer Source (no icon: Show All
+Files, or a Shell): the library, the Installer, the tools, the demos, the
+tests and the makefiles. Building needs m68k-amigaos-gcc, the Picasso96
+developer files and, for the probes, Thomas Richter's openpci68k.lha
+(Aminet driver/other); Source/README.md explains it.
+
+
+FEATURES
+
+  * Every GL primitive, in immediate mode and from vertex arrays (8-, 16-
+    and 32-bit indices)
+  * Compiled vertex arrays as indexed draws; an upload cache keeps what a
+    program sends again unchanged in the card's memory
+  * Transformation and rasterising on the Radeon, the full float matrix
+    stack
+  * Two texture units; RGB565, ARGB4444, I8, AI88 in up to 16 MB of card
+    memory; nearest, linear and mipmap filters; repeat and clamp;
+    MODULATE, REPLACE, DECAL (RGB), ADD
+  * Blending, alpha test, depth test, polygon offset, culling, scissor,
+    colour mask, flat and smooth shading, point size
+  * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048
+  * Every command list checked before the Radeon runs it (can be turned
+    off for speed); one Picasso96 lock a frame
+  * Installer, manuals in English and German, a card test, a card report
+    for bug reports, four demos
+
+
+NOT IMPLEMENTED YET
+
+100 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
+and more. A missing one sets GL_INVALID_OPERATION; the log names it.
+
+  * Lighting and materials, fog, display lists, texture coordinate
+    generation
+  * GL_BLEND and RGBA GL_DECAL texture environments; 32-bit textures are
+    stored with 16 bits
+  * Stencil and accumulation buffers, stipple, logic operations
+  * glReadPixels, glCopyTexImage2D, glPixelStorei, glDrawBuffer
+  * Double-precision calls, glArrayElement, interleaved arrays, colour
+    index, glBlendEquation, glLineWidth, glColorTable
+  * GLU and GLUT; MiniGL's own main loop; contexts in a window or bitmap
+  * One program at a time; textures beyond 16 MB are not swapped out
+
+
+GLQUAKE BENCHMARKS
+
+GLQuake for minigl.library (Frank Wille and Steffen Haeuser), its
+timedemos on the test machine (A4000D, 68060 at 50 MHz on a CyberStorm
+MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96), frames a second:
+
+    Demo   Screen       Check on  Check off  Direct  Direct, 8-bit LM
+    demo1  320 x 240        18.7       23.7    24.2              24.9
+    demo2  320 x 240           -       21.1       -              21.7
+    demo3  320 x 240           -       20.9       -              22.3
+    demo1  640 x 480           -       21.4       -              22.5
+    demo1  1280 x 720          -       18.4       -              19.8
+
+Check on: RadeonGL as installed. Check off: RadeonGLCheck=0. Direct:
+RadeonGLDirect=1 as well. 8-bit LM: 8-bit lightmaps, GLQuake started with
+-lm_LUMINANCE (id's own default; the Amiga port changed it to 16 bit).
+The 68060 sets the pace, not the Radeon. The 68020/68030 build on the
+same 68060: 16.8 / 22.1 / 23.2 (check on / off / direct, 8-bit LM).
+
+
+INSTALLATION
+
+Double-click Install. It keeps a minigl.library that is not RadeonGL's
+as LIBS:minigl.library.old. RadeonGL.guide explains going back.
+
+
+MADE WITH AI
+
+RadeonGL was made with the help of AI. Claude, an AI model by Anthropic,
+wrote most of its code, its tests and its manuals, working under the
+direction of Marcus Gerards, who made the design decisions. Every release
+was tested on real hardware.
+
+
+CREDITS
+
+  * Thomas Richter: Picasso96 3, its Radeon driver, openpci.library, and
+    his advice on using Picasso96 with the Radeon
+  * Alexander Kneer and Tobias Abt: Picasso96
+  * Hyperion Entertainment (Hans-Joerg and Thomas Frieden): MiniGL
+  * Steffen "MagicSN" Haeuser: minigl.library 29.1 and its SDK
+  * Frank Wille and Steffen Haeuser: GLQuake for minigl.library
+  * AMD: the R200 microcode
+  * ATI, VA Linux Systems, Precision Insight, The Weather Channel and
+    Tungsten Graphics, Red Hat and the authors of the Linux radeon and
+    Mesa r200 drivers: the public record of the R200
+  * amiga-gcc (Bebbo), amitools (Christian Vogelgsang), FS-UAE (Frode
+    Solheim), libnix, SAS/C, the AmigaOS 3.2 NDK: the tools
+
+
+LICENCE
+
+minigl.library contains MiniGL and is therefore under the Hyperion MiniGL
+Open Source License: AmigaOS only, and the source code of every change is
+published: see SOURCE CODE above. RadeonGL's own code is also under the
+MIT licence. The R200 microcode is AMD's (MIT). The licence texts are in
+the package (the installed drawer's Licences, and Source/LICENSE).
+
+
+HISTORY
+
+0.4 (3.11.2026)
+  - first release

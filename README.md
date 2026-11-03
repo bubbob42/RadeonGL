@@ -10,6 +10,13 @@ while the Workbench keeps running. It is a `minigl.library` 29.1 with the
 dispatch interface (ABI 5) of the current MiniGL SDK, so programs built
 with that SDK open it like any other `minigl.library` 29.
 
+## Download
+
+The binary release is in [`release/`](release): `RadeonGL.lha`, the
+package (Installer, manuals in English and German, card test, demos, the
+licences and the source), and `RadeonGL.readme`, what it is and what it
+needs.
+
 ## Features
 
 - **Drawing:** every GL primitive (points, lines, line strips and loops,
@@ -120,8 +127,8 @@ fetched from Aminet:
 | `gmake demos` | `dist/Demos/`: Spinner, Glow, Landscape, Showcase |
 | `gmake glsmoke probes` | GLSmoke (the card test), R200Info and the other probes |
 | `gmake test` | the host tests (the core, the packet layer, the R200 simulator) |
-| `gmake autotest T=<name>` | one FS-UAE test from `test/auto` (`docs/testing.md`) |
-| `gmake release-stage release-archive release-aminet release-drawer` | the release package: `dist/RadeonGL.lha`, the Aminet pair, `DEV:Release` |
+| `gmake autotest T=<name>` | one FS-UAE test from `test/auto` (the head of each test says what it checks) |
+| `gmake release-stage release-archive release-aminet release-drawer` | the release package: `dist/RadeonGL.lha`, the Aminet pair (copied to `release/`), `DEV:Release` |
 
 GLQuake, the program RadeonGL is measured with, is not part of this
 repository. Its source lives beside it (`GLQUAKE_DIR`, default
@@ -141,7 +148,6 @@ the game data (never committed).
 | `guide/` | the manuals (English, German) and the Aminet readme |
 | `test/` | host tests and FS-UAE tests |
 | `tools/` | build, packaging and analysis tools |
-| `docs/` | design notes, measurements, research |
 | `sdk/` | the MiniGL 29.1 SDK, the R200 microcode and other headers |
 
 ## Licence

@@ -1172,7 +1172,7 @@ dist/Test/ScreenInfo: test/amiga/screeninfo.c
 .PHONY: autotest
 autotest: $(AUTOTEST_CONFIG) dist/Test/Grab dist/Test/InputPoke dist/Test/ScreenInfo
 	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in test/auto>"; exit 2; }
-	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see docs/testing.md"; exit 2; }
+	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see tools/autotest.sh"; exit 2; }
 	@mkdir -p dist/Test
 	@cp test/auto/RunOne test/auto/RunCensus test/auto/RunNull test/auto/RunNullX test/auto/RunNullTime test/auto/RunAB test/auto/WaitDone test/auto/InstallClicks test/auto/InstallClicksMsg test/auto/InstallCheck test/auto/ShowDrawers.rexx dist/Test/
 	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
@@ -1453,8 +1453,12 @@ release-aminet: release-archive release-verify
 	@# was rendered from -- the same today and a bug away from not.
 	@$(PYTHON) tools/make_aminet_readme.py \
 		--check $(AMINETDIR)/$(PROJECT_NAME).readme
+	@# the binary release in the repository (the user, 2026-11-03): the same
+	@# two files, committed with the release
+	@mkdir -p release
+	cp $(AMINETDIR)/$(PROJECT_NAME).lha $(AMINETDIR)/$(PROJECT_NAME).readme release/
 	@echo ""
-	@echo "release-aminet: ready in $(AMINETDIR)/ -- NOT uploaded."
+	@echo "release-aminet: ready in $(AMINETDIR)/ and release/ -- NOT uploaded."
 	@ls -l $(AMINETDIR)/
 
 # --- Nothing private ships ---------------------------------------------------

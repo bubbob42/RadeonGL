@@ -52,3 +52,17 @@ reference/*.doc
 # Thomas Richter's openpci kit: it may travel only as his whole archive
 # (Aminet driver/other/openpci68k.lha); fetched locally, never committed
 /sdk/openpci/
+
+# Not part of the published repository (the user, 2026-11-03): design notes
+# and research, editor and assistant settings, and the starter template's
+# leftovers. They stay in the local checkout.
+/docs/
+/.claude/
+/.vscode/
+/CLAUDE.md
+/new_project.sh
+/setup-smb.sh
+/catalogs/
+# AHI and CyberGraphX headers: only GLQuake used them (../RadeonGL-GLQuake)
+/sdk/ahi/
+/sdk/cgx/

@@ -209,8 +209,6 @@ C.3 Not compiled into the library:
     - sdk/minigl-29.1: the MiniGL 29.1 client SDK, which the demos and the
       card test link (sdk/minigl-29.1/licences); in the repository and in
       the release archive's Source drawer;
-    - sdk/ahi and sdk/cgx (AHI and CyberGraphX headers, their README
-      files): in the repository only;
     - the openpci.library developer files (THOR-Software licence), which
       the hardware probes need: neither in the repository nor in the
       package. They may travel only as Thomas Richter's own archive (Aminet
