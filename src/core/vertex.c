@@ -319,10 +319,19 @@ void Core_Color4ub(struct Core *c, ULONG r, ULONG g, ULONG b, ULONG a)
 {
     c->cur_color = ((a & 0xff) << 24) | ((b & 0xff) << 16) | ((g & 0xff) << 8) | (r & 0xff);
     c->cur_colorf[0] = -1.0f;   /* the floats follow from cur_color when asked */
+    c->colorf_set = 0;
 }
 
 void Core_Color4f(struct Core *c, float r, float g, float b, float a)
 {
+    /* the same four floats as the last glColor4f (GLQuake: most of a
+     * glow's vertices, per surface colours): nothing to convert. Compared
+     * as bits, so without the FPU. */
+    if (c->colorf_set && R2_FBITS(r) == R2_FBITS(c->cur_colorf[0])
+        && R2_FBITS(g) == R2_FBITS(c->cur_colorf[1]) && R2_FBITS(b) == R2_FBITS(c->cur_colorf[2])
+        && R2_FBITS(a) == R2_FBITS(c->cur_colorf[3]))
+        return;
+    c->colorf_set = 1;
     c->cur_color = (Core_Unit255(a) << 24) | (Core_Unit255(b) << 16)
                  | (Core_Unit255(g) << 8) | Core_Unit255(r);
     c->cur_colorf[0] = r;

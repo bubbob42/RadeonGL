@@ -230,6 +230,7 @@ struct Core
     float cur_st[CORE_UNITS][2];
     ULONG cur_color;        /* packed as the GPU reads it: a << 24 | b << 16 | g << 8 | r */
     float cur_colorf[4];
+    ULONG colorf_set;       /* cur_colorf came from glColor4f as given (vertex.c) */
     float cur_normal[3];
 
     /* the open immediate packet (glBegin .. glEnd) */

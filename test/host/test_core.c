@@ -1178,6 +1178,36 @@ static void test_matrix_versions(void)
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 }
 
+/* glColor4f skips the conversion only for its own last floats: not after
+ * a glColor4ub, whatever the floats left behind. */
+static void test_color4f_repeat(void)
+{
+    float v[4];
+
+    Fresh(1);
+    Core_Color4f(&core, 1.0f, 0.5f, 0.0f, 1.0f);
+    CHECK_HEX(core.cur_color, 0xff0080ffUL);
+    Core_Color4f(&core, 1.0f, 0.5f, 0.0f, 1.0f);
+    CHECK_HEX(core.cur_color, 0xff0080ffUL);
+    Core_Color4ub(&core, 1, 2, 3, 4);
+    CHECK_HEX(core.cur_color, 0x04030201UL);
+    Core_Color4f(&core, 1.0f, 0.5f, 0.0f, 1.0f);       /* again after the ub */
+    CHECK_HEX(core.cur_color, 0xff0080ffUL);
+    Core_Color4ub(&core, 1, 2, 3, 4);
+    Core_GetFloatv(&core, GL_CURRENT_COLOR, v);        /* floats from the bytes */
+    Core_Color4f(&core, v[0], v[1], v[2], v[3]);
+    CHECK_HEX(core.cur_color, 0x04030201UL);
+    Core_Color4f(&core, 0.0f, 0.0f, 0.0f, 1.0f);
+    CHECK_HEX(core.cur_color, 0xff000000UL);
+    /* a glColor4ub leaves -1 in the first float: a glColor4f that happens
+     * to match what is left must still convert (-1 clamps to 0) */
+    Core_Color4f(&core, 1.0f, 0.5f, 0.0f, 1.0f);
+    Core_Color4ub(&core, 1, 2, 3, 4);
+    Core_Color4f(&core, -1.0f, 0.5f, 0.0f, 1.0f);
+    CHECK_HEX(core.cur_color, 0xff008000UL);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
 /* --- Matrices -------------------------------------------------------------------- */
 
 static int Near(float a, float b)
@@ -2394,6 +2424,7 @@ int main(void)
     test_shadow_equivalence();
     test_vertex_bits();
     test_matrix_versions();
+    test_color4f_repeat();
     test_matrices();
     test_matrix_fast();
     test_arrays();

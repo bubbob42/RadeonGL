@@ -152,7 +152,8 @@ static const UBYTE *Elem(const struct CoreArray *a, ULONG i)
 }
 
 /* The current attributes from the arrays; the position into pos[4]. */
-static void Fetch(struct Core *c, ULONG i, float *pos)
+/* Vertex i's colour and texture coordinates into the current ones. */
+static void FetchAttribs(struct Core *c, ULONG i)
 {
     const UBYTE *p;
     ULONG u;
@@ -176,9 +177,22 @@ static void Fetch(struct Core *c, ULONG i, float *pos)
         if (!c->ta[u].enabled)
             continue;
         p = Elem(&c->ta[u], i);
-        c->cur_st[u][0] = Comp(p, c->ta[u].type, 0);
-        c->cur_st[u][1] = c->ta[u].size >= 2 ? Comp(p, c->ta[u].type, 1) : 0.0f;
+        if (c->ta[u].type == GL_FLOAT && c->ta[u].size >= 2)
+            CORE_TEXCOORD_BITS(c, u, ((const ULONG *) (const void *) p)[0],
+                               ((const ULONG *) (const void *) p)[1]);
+        else
+        {
+            c->cur_st[u][0] = Comp(p, c->ta[u].type, 0);
+            c->cur_st[u][1] = c->ta[u].size >= 2 ? Comp(p, c->ta[u].type, 1) : 0.0f;
+        }
     }
+}
+
+static void Fetch(struct Core *c, ULONG i, float *pos)
+{
+    const UBYTE *p;
+
+    FetchAttribs(c, i);
     p = Elem(&c->va, i);
     pos[0] = Comp(p, c->va.type, 0);
     pos[1] = Comp(p, c->va.type, 1);
@@ -195,8 +209,17 @@ static void Fetch(struct Core *c, ULONG i, float *pos)
 /* The current attributes from the arrays, then the vertex. */
 static void ArrayVertex(struct Core *c, ULONG i)
 {
+    const ULONG *v;
     float pos[4];
 
+    if (c->va.type == GL_FLOAT && c->va.size == 3)
+    {
+        /* the positions as bits, without the FPU (GLQuake's glows) */
+        FetchAttribs(c, i);
+        v = (const ULONG *) (const void *) Elem(&c->va, i);
+        Core_VertexBits(c, v[0], v[1], v[2]);
+        return;
+    }
     Fetch(c, i, pos);
     Core_Vertex3f(c, pos[0], pos[1], pos[2]);
 }
