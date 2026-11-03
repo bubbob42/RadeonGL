@@ -704,6 +704,11 @@ dist/Probe/C/BmFit: build/probe/bmfit.o
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# MemBench: fast RAM's streaming rates per region (read, write, copy, MOVE16)
+dist/Probe/C/MemBench: build/probe/membench.o build/probe/eclock.o
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 # ExecMap: exec's functions by address (names the ROM in a PC profile)
 dist/Probe/C/ExecMap: build/probe/execmap.o
 	@mkdir -p dist/Probe/C
@@ -786,6 +791,10 @@ dist/Probe/C/BmFit_sasc: build/probe-sasc/bmfit.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/MemBench_sasc: build/probe-sasc/membench.o build/probe-sasc/eclock.o | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 dist/Probe/C/ExecMap_sasc: build/probe-sasc/execmap.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -811,10 +820,10 @@ dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o build/
 # builds; the _sasc builds sit beside them in C/.
 .PHONY: probes
 probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Probe/C/Tri dist/Probe/C/CxBreak \
-        dist/Probe/C/LockBench dist/Probe/C/BmFit dist/Probe/C/ExecMap \
+        dist/Probe/C/LockBench dist/Probe/C/BmFit dist/Probe/C/ExecMap dist/Probe/C/MemBench \
         dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
         dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc dist/Probe/C/BmFit_sasc \
-        dist/Probe/C/ExecMap_sasc
+        dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info

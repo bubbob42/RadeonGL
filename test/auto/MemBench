@@ -1,0 +1,14 @@
+; MemBench -- fast RAM's streaming rates per region, both builds: the
+; probe must run, list each fast region it measured and exit 0. The
+; figures are the emulator's.
+; LIMIT 180
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+DEV:Probe/C/MemBench >>DEV:Test/auto.log
+Echo "gcc rc=$RC" >>DEV:Test/auto.log
+DEV:Probe/C/MemBench_sasc >>DEV:Test/auto.log
+Echo "sasc rc=$RC" >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
