@@ -325,9 +325,12 @@ static void test_nop(void)
 
 static void test_immd(void)
 {
+    static ULONG big[0x4100];
     ULONG buf[64];
+    ULONG ref[14];
     struct R2Cs cs;
     ULONG *v;
+    ULONG i;
 
     R2Cs_InitBuffer(&cs, buf, 64, 0);
     v = R2E_ImmdOpen(&cs, 4, 3);
@@ -346,6 +349,36 @@ static void test_immd(void)
     R2Cs_InitBuffer(&cs, buf, 64, 0);
     v = R2E_ImmdOpen(&cs, 4, 3);
     CHECK_INT(R2E_ImmdClose(&cs, v + 5, TRI_CNTL), R2_EARG);    /* not whole vertices */
+    /* the largest packet still opens; 3 dwords x 0x1555 = 0x3fff */
+    R2Cs_InitBuffer(&cs, big, sizeof(big) / 4, 0);
+    CHECK(R2E_ImmdOpen(&cs, 3, R2E_IMMD_MAX_VERTS(3)) != NULL);
+    R2Cs_InitBuffer(&cs, big, sizeof(big) / 4, 0);
+    CHECK(R2E_ImmdOpen(&cs, 3, R2E_IMMD_MAX_VERTS(3) + 1) == NULL);
+    CHECK_INT(cs.error, R2_EARG);
+
+    /* R2E_ImmdCloseN: the count instead of the end pointer, the same packet */
+    R2Cs_InitBuffer(&cs, buf, 64, 1);
+    v = R2E_ImmdOpen(&cs, 4, 3);
+    for (i = 0; i < 12; i++)
+        v[i] = R2_OUT(&cs, i * 0x01010101UL);
+    CHECK_INT(R2E_ImmdClose(&cs, v + 12, TRI_CNTL), R2_OK);
+    for (i = 0; i < 14; i++)
+        ref[i] = buf[i];
+    R2Cs_InitBuffer(&cs, buf, 64, 1);
+    v = R2E_ImmdOpen(&cs, 4, 3);
+    for (i = 0; i < 12; i++)
+        v[i] = R2_OUT(&cs, i * 0x01010101UL);
+    CHECK_INT(R2E_ImmdCloseN(&cs, 3, TRI_CNTL), R2_OK);
+    CHECK(cs.ptr == buf + 14);
+    for (i = 0; i < 14; i++)
+        CHECK_HEX(buf[i], ref[i]);
+    v = R2E_ImmdOpen(&cs, 4, 3);
+    CHECK_INT(R2E_ImmdCloseN(&cs, 0, TRI_CNTL), R2_OK);
+    CHECK(cs.ptr == buf + 14);                  /* no vertex, no packet */
+    CHECK_INT(R2E_ImmdCloseN(&cs, 1, TRI_CNTL), R2_ESTATE);    /* none open */
+    R2Cs_InitBuffer(&cs, buf, 64, 0);
+    v = R2E_ImmdOpen(&cs, 4, 3);
+    CHECK_INT(R2E_ImmdCloseN(&cs, 20, TRI_CNTL), R2_EARG);     /* past the room */
 }
 
 static void test_arrays(void)

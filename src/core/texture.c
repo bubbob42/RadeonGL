@@ -74,14 +74,20 @@ struct CoreTex *Core_Texture(struct Core *c, ULONG unit)
     return t;
 }
 
-/* Every unit that has t bound must re-emit it. */
+/* Every unit that has t bound must re-emit it, TXOFFSET included even
+ * when the address stayed: the emission after a glTexImage2D wrote that
+ * register before the shadow registers (hwstate.c) existed, and whether
+ * the write is what drops the GPU's cached texels is not measured. */
 static void Touched(struct Core *c, const struct CoreTex *t)
 {
     ULONG u;
 
     for (u = 0; u < CORE_UNITS; u++)
         if (c->bound[u] == t->name)
+        {
             DIRTY_UNIT(c, u);
+            c->hw_tex[u][6] = 0xffffffffUL;
+        }
 }
 
 void Core_BindTexture(struct Core *c, ULONG target, ULONG name)
@@ -362,12 +368,47 @@ static ULONG Direct(ULONG src, ULONG base, const UBYTE *p, ULONG *texel)
 
 static ULONG Out(struct Core *c, ULONG g)
 {
-    return c->tex_swap ? R2Cs_Swap32(g) : g;
+    if (c->tex_swap)
+        R2_SWAPI(g);        /* in line on the 68k (r2cs.h) */
+    return g;
 }
 
 static ULONG In(struct Core *c, ULONG v)
 {
-    return c->tex_swap ? R2Cs_Swap32(v) : v;
+    if (c->tex_swap)
+        R2_SWAPI(v);
+    return v;
+}
+
+/* 16-bit source texels already in the storage layout (GLQuake's 4444
+ * lightmaps, every frame): two a dword, the generic path's dword without
+ * its per-texel work. A texel in slot 0 is the dword's low half. */
+static void WriteRow16(struct Core *c, ULONG *dst, ULONG first, ULONG w, const UBYTE *row)
+{
+    ULONG i;
+    ULONG texel;
+    const UBYTE *p;
+
+    i = 0;
+    if (first != 0)
+    {
+        /* the row starts in a dword's high half: keep the low one */
+        texel = ((ULONG) row[0] << 8) | row[1];
+        *dst = Out(c, (In(c, *dst) & 0x0000ffffUL) | (texel << 16));
+        dst++;
+        i = 1;
+    }
+    p = row + i * 2;
+    for (; i + 2 <= w; i += 2)
+    {
+        *dst++ = Out(c, ((ULONG) p[0] << 8) | p[1] | ((ULONG) p[2] << 24) | ((ULONG) p[3] << 16));
+        p += 4;
+    }
+    if (i < w)
+    {
+        texel = ((ULONG) p[0] << 8) | p[1];
+        *dst = Out(c, (In(c, *dst) & 0xffff0000UL) | texel);
+    }
 }
 
 /* Write w texels of one row: level l, row y, from column x. */
@@ -393,6 +434,12 @@ static void WriteRow(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG 
     byte0 = t->lofs[l] + y * t->pitch[l] + x * cpp;
     dst = c->heap.cpu + (t->gpu - c->heap.gpu + byte0) / 4;
     first = (byte0 & 3) / cpp;
+    if (cpp == 2 && bpp == 2
+        && ((src == SRC_4444 && t->base == GL_RGBA) || (src == SRC_565 && t->base == GL_RGB)))
+    {
+        WriteRow16(c, dst, first, w, row);
+        return;
+    }
     acc = 0;
     mask = 0;
     slot = first;

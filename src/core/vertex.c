@@ -75,7 +75,7 @@ static void Close(struct Core *c, ULONG n)
 {
     if (c->vbase == NULL)
         return;
-    R2E_ImmdClose(c->cs, c->vbase + n * c->vtx_dw, c->hwprim | CNTL_BITS);
+    R2E_ImmdCloseN(c->cs, n, c->hwprim | CNTL_BITS);
     if (n != 0)
     {
         c->stat_prims++;
@@ -83,9 +83,7 @@ static void Close(struct Core *c, ULONG n)
     }
 }
 
-/* The room is full in the middle of a primitive: close what can be drawn
- * now, reopen with what the rest needs. */
-static void Split(struct Core *c)
+void Vtx_Split(struct Core *c)
 {
     ULONG carry[4];     /* vertex indices to carry, or ~0 for the first vertex */
     ULONG save[4 * 8];
@@ -204,7 +202,8 @@ void Core_End(struct Core *c)
     c->vptr = NULL;
 }
 
-static void Emit(struct Core *c, float x, float y, float z)
+/* x, y, z: float bit patterns */
+static void Emit(struct Core *c, ULONG x, ULONG y, ULONG z)
 {
     ULONG *p;
     ULONG b0, b1, b2, b3;
@@ -215,15 +214,15 @@ static void Emit(struct Core *c, float x, float y, float z)
         return;
     if (p >= c->vlimit)
     {
-        Split(c);
+        Vtx_Split(c);
         p = c->vptr;
         if (p == NULL)
             return;
     }
-    /* the hot path: no calls (r2cs.h R2_FBITS, R2_SWAPI) */
-    b0 = R2_FBITS(x);
-    b1 = R2_FBITS(y);
-    b2 = R2_FBITS(z);
+    /* the hot path: no calls, no FPU (r2cs.h R2_FBITS, R2_SWAPI) */
+    b0 = x;
+    b1 = y;
+    b2 = z;
     b3 = c->cur_color;
     if (c->cs->swap)
     {
@@ -269,11 +268,18 @@ static void Emit(struct Core *c, float x, float y, float z)
     c->nverts++;
 }
 
-void Core_Vertex3f(struct Core *c, float x, float y, float z)
+void Core_VertexBits(struct Core *c, ULONG x, ULONG y, ULONG z)
 {
     if (!IN_BEGIN(c))
         return;         /* GL: undefined outside glBegin/glEnd; ignored */
     Emit(c, x, y, z);
+}
+
+void Core_Vertex3f(struct Core *c, float x, float y, float z)
+{
+    if (!IN_BEGIN(c))
+        return;
+    Emit(c, R2_FBITS(x), R2_FBITS(y), R2_FBITS(z));
 }
 
 void Core_Vertex4f(struct Core *c, float x, float y, float z, float w)
@@ -288,7 +294,7 @@ void Core_Vertex4f(struct Core *c, float x, float y, float z, float w)
         y /= w;
         z /= w;
     }
-    Emit(c, x, y, z);
+    Emit(c, R2_FBITS(x), R2_FBITS(y), R2_FBITS(z));
 }
 
 void Core_TexCoord2f(struct Core *c, float s, float t)

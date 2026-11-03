@@ -98,7 +98,7 @@ void Core_Clear(struct Core *c, ULONG mask)
     /* back to the client's state at the next draw */
     c->dirty |= D_VAP | D_VTXFMT | D_PPCNTL | D_COMBINE | D_RB3D | D_PLANEMASK
               | D_ZSTENCIL | D_SECNTL;
-    c->hw_units = 0xffffffffUL;
+    Hw_Forget(c);
 }
 
 void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y)
@@ -196,5 +196,5 @@ void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y)
 
     /* the next draw goes to the back buffer again, with the client's state */
     c->dirty |= D_INIT;
-    c->hw_units = 0xffffffffUL;
+    Hw_Forget(c);
 }

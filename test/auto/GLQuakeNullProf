@@ -1,0 +1,24 @@
+; GLQuakeNullProf -- GLQuakeNull1 with GLQuake's PC sampler on (the
+; variable QuakeProfile, glsmoke/pcprof.h): demo1 on the null card, the
+; timedemo's samples to DEV:Test/qprof-null.bin. On the Mac:
+;   python3 tools/profile.py dist/Test/qprof-null.bin --prog build/glquake/GLQuake.sym
+; The figures are the emulator's; the test proves the sampler runs and stops
+; cleanly inside GLQuake before it goes to a real machine.
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/null-#? DEV:Test/qprof-null.bin
+SetEnv QuakeProfile DEV:Test/qprof-null.bin
+Echo "=== demo1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNull demo1
+Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
+UnSetEnv QuakeProfile
+Type DEV:Test/null-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo1-lib.log >>DEV:Test/auto.log
+List DEV:Test/qprof-null.bin LFORMAT "profile file %l bytes" >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

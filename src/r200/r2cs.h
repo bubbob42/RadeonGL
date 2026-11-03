@@ -65,8 +65,24 @@ ULONG R2Cs_Swap32(ULONG v);
  * their 32-bit patterns). */
 ULONG R2Cs_FloatBits(float f);
 
-/* A value as it is stored in this stream. */
+/* A value as it is stored in this stream. On GCC for the 68k the swap is
+ * three register instructions in line (a call per dword was most of a
+ * state packet's cost on the 060); elsewhere the function. */
+#if defined(__GNUC__) && defined(__mc68000__)
+static __inline__ ULONG R2Cs_Out(ULONG swap, ULONG v)
+{
+    if (swap)
+        __asm__("rol.w #8,%0\n\tswap %0\n\trol.w #8,%0" : "+d" (v));
+    return v;
+}
+#define R2_OUT(cs, v)  R2Cs_Out((cs)->swap, (ULONG) (v))
+#else
 #define R2_OUT(cs, v)  ((cs)->swap ? R2Cs_Swap32((ULONG) (v)) : (ULONG) (v))
+#endif
+
+/* R2Cs_Room without the call when the room is there (n evaluated twice). */
+#define R2_ROOM(cs, n) (((cs)->error == R2_OK && (ULONG) ((cs)->end - (cs)->ptr) >= (ULONG) (n)) \
+                        ? (cs)->ptr : R2Cs_Room((cs), (n)))
 
 /* The hot path (one glVertex: 4 to 8 dwords) without calls.
  *

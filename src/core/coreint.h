@@ -19,6 +19,12 @@ void  Core_MarkTextures(struct Core *c, ULONG units);
 /* The R200 primitive for a GL mode (a line loop is drawn as a strip). */
 ULONG Vtx_HwPrim(ULONG mode);
 
+/* The open packet is full in the middle of a primitive: close what can be
+ * drawn, reopen with what the rest needs. Not static, so the compiler
+ * keeps it out of the per-vertex path (inlined, it made every vertex save
+ * eleven registers and a 148-byte frame). */
+void  Vtx_Split(struct Core *c);
+
 /* The longest prefix of n vertices that is a whole primitive of mode. */
 ULONG Vtx_Whole(ULONG mode, ULONG n);
 
@@ -35,6 +41,6 @@ struct CoreTex *Tex_Get(struct Core *c, ULONG name);
 #define IN_BEGIN(c) ((c)->prim != CORE_NO_PRIM)
 
 /* Mark everything a texture unit change can touch. */
-#define DIRTY_UNIT(c, u) ((c)->dirty |= (D_TEX0 << (u)) | D_COMBINE | D_PPCNTL | D_VTXFMT)
+#define DIRTY_UNIT(c, u) ((c)->dirty |= (D_TEX0 << (u)) | D_COMBINE | D_PPCNTL)
 
 #endif /* CORE_COREINT_H */

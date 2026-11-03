@@ -50,17 +50,25 @@ QFILES := chase cl_demo cl_input cl_main cl_parse cl_tent cmd common console \
           twfsound_cd snd_dma snd_mix snd_mem sys_amiga sys_amigaclip \
           snd_amiga snd_ahieff keys_amiga68k snd_paula snd_ahi net_bsdsocket \
           minigl_client_compat
+# RadeonGL: the PC sampler (glsmoke/pcprof.h), QuakeProfile
+QEXTRA   := pcprof
 QASFILES := in_amigamouse68k in_amigamousewin68k snd_int68k sys_amiga68k \
             snd_mixamiga68k common68k
 
-QOBJS := $(addprefix $(QOBJ)/,$(addsuffix .o,$(QFILES) $(QASFILES) mathlib68k))
+QOBJS := $(addprefix $(QOBJ)/,$(addsuffix .o,$(QFILES) $(QEXTRA) $(QASFILES) mathlib68k))
 
 .PHONY: glquake glquake-data clean-glquake
 
 glquake: $(QEXE)
 
+# Linked twice: stripped by the linker (-s), and with its symbols as
+# GLQuake.sym beside the objects for tools/profile.py --prog. Not strip -o
+# on the symbol copy: MEASURED 2026-11-03, that binary (80 KB smaller than
+# the -s link) hung in FS-UAE before the timedemo's first line.
 $(QEXE): $(QOBJS) $(SDK)/lib/libminigl.a | $(QOUT)
 	$(CC) -noixemul -m68060 -m68881 -s -o $@ $(QOBJS) \
+	    -L$(SDK)/lib -lminigl -lm -lamiga
+	$(CC) -noixemul -m68060 -m68881 -o $(QOBJ)/GLQuake.sym $(QOBJS) \
 	    -L$(SDK)/lib -lminigl -lm -lamiga
 
 # Every C object also depends on the forced-in compat header and on this file
@@ -72,6 +80,9 @@ $(QOBJ)/net_bsdsocket.o: $(QSRC)/net_bsdsocket.c $(QDEPS) | $(QOBJ)
 	$(CC) $(QCFLAGS) -D__NO_NET_API -c $< -o $@
 
 $(QOBJ)/%.o: $(QSRC)/%.c $(QDEPS) | $(QOBJ)
+	$(CC) $(QCFLAGS) -c $< -o $@
+
+$(QOBJ)/pcprof.o: glsmoke/pcprof.c glsmoke/pcprof.h $(QDEPS) | $(QOBJ)
 	$(CC) $(QCFLAGS) -c $< -o $@
 
 $(QOBJ)/mathlib68k.o: $(QSRC)/mathlib68k_gas.s | $(QOBJ)

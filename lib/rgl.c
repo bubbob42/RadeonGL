@@ -21,6 +21,11 @@
  * the ring unchecked (a timedemo times the emitter alone), the Radeon runs
  * each flush unchecked.
  *
+ * RadeonGLDirect=1 (the Radeon): the locked arrays' vertices
+ * and indices are written straight into the texture heap in video RAM,
+ * one short heap lock a draw, instead of staged in fast RAM and copied in
+ * the flush's lock (core.h Core_SetVram).
+ *
  * Frame dump (null card only): with RadeonGLDump=N the null card records frame N (the core
  * re-emits its whole state at that frame's start, so the recording stands
  * alone) and writes it with the texture heap to RadeonGLDumpFile (default
@@ -227,8 +232,11 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, "lock per flush: mean "); PutU(f, k->flushes ? k->lock_us_sum / k->flushes : 0);
     Put(f, " us, max "); PutU(f, k->lock_us_max); Put(f, " us; fence wait max ");
     PutU(f, k->fence_us_max); Put(f, " us\n");
-    Put(f, "heap locks for texture uploads: "); PutU(f, k->vram_locks);
-    Put(f, ", uploads lost (heap out of reach): "); PutU(f, r->core.stat_vram_lost); Put(f, "\n");
+    Put(f, "heap locks for texture uploads and the stream: "); PutU(f, k->vram_locks);
+    Put(f, ", writes lost (heap out of reach): "); PutU(f, r->core.stat_vram_lost); Put(f, "\n");
+    Put(f, "locked-array stream: ");
+    Put(f, r->core.stream_direct ? "into video RAM, a lock a draw\n"
+                                 : "staged in fast RAM, copied at the flush\n");
     Put(f, "CP resets: "); PutU(f, k->cp_resets); Put(f, "\n");
     Put(f, "idle waits (flushes for texture hazards and stream wraps): ");
     PutU(f, r->core.stat_idle_waits); Put(f, "\n");
@@ -241,7 +249,13 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, "texture heap used at the end: "); PutU(f, r->core.heap.used);
     Put(f, ", at most: "); PutU(f, r->core.heap.peak);
     Put(f, "; allocations refused: "); PutU(f, r->core.heap.fails); Put(f, "\n");
-    Put(f, "checker: "); Put(f, k->check ? "on" : "OFF (RadeonGLCheck=0)"); Put(f, "\n");
+    Put(f, "checker: "); Put(f, k->check ? "on" : "OFF (RadeonGLCheck=0)");
+    if (k->check)
+    {
+        Put(f, ", indexed draws checked by bounds only (stream in video RAM): ");
+        PutU(f, k->chk.index_unchecked);
+    }
+    Put(f, "\n");
     if (k->lost != 0)
     {
         Put(f, "CONTEXT LOST: ");
@@ -503,6 +517,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     ULONG res;
     LONG n;
     ULONG i;
+    ULONG staged;
     char flag[8];
 
     (void) offx;
@@ -569,7 +584,15 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     if (r->real)
     {
         Card_Attach(&r->rad, &r->core);
-        Core_SetVram(&r->core, EnvVramBegin, EnvVramEnd, r->rad.staging);
+        /* the locked-array stream: staged in fast RAM and copied inside the
+         * flush's lock (the default: one lock a frame), or with
+         * RadeonGLDirect=1 straight into video RAM, one short heap lock a
+         * locked draw (P96's data-bitmap pattern: lock, fill, unlock; the
+         * address fresh at every lock). The checker then checks the
+         * indices' bounds, not their values (card.c). */
+        staged = !(GetVar((STRPTR) "RadeonGLDirect", (STRPTR) flag, sizeof(flag), 0) > 0
+                   && flag[0] == '1');
+        Core_SetVram(&r->core, EnvVramBegin, EnvVramEnd, staged ? r->rad.staging : NULL);
     }
     /* RadeonGLLocked=0: locked arrays go the immediate way (A/B timing; a
      * way back if indexed draws misbehave on the card) */
@@ -647,7 +670,7 @@ void Hook_MGLSwitchDisplay(GLcontext context)
             r->card.rec_max = REC_DW;
             r->card.rec_n = 0;
             r->core.dirty |= D_INIT;
-            r->core.hw_units = 0xffffffffUL;
+            Hw_Forget(&r->core);
         }
         else if (r->frame == r->dump_frame && r->card.rec != NULL)
         {
@@ -768,31 +791,44 @@ void Hook_mglChooseZBufferDepth(int bits) { (void) bits; }
 void Hook_GLBegin(GLcontext context, GLenum mode) { (void) context; GUARD; Core_Begin(C, mode); NOTE("glBegin", mode); }
 void Hook_GLEnd(GLcontext context) { (void) context; GUARD; Core_End(C); }
 
+/* The per-vertex hooks move floats as bit patterns (core.h
+ * Core_VertexBits): GLQuake's 700 vertices and as many coordinates a frame
+ * then never touch the FPU. w == 1.0f exactly when its bits are
+ * 0x3f800000. */
+#define FB(f) R2_FBITS(f)
+#define FV(v, i) (((const ULONG *) (const void *) (v))[i])
+
 void Hook_GLVertex4f(GLcontext context, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
     (void) context; GUARD;
-    if (w == 1.0f)
-        Core_Vertex3f(C, x, y, z);
+    if (FB(w) == 0x3f800000UL)
+        Core_VertexBits(C, FB(x), FB(y), FB(z));
     else
         Core_Vertex4f(C, x, y, z, w);
 }
 
-void Hook_GLVertex2fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_Vertex3f(C, v[0], v[1], 0.0f); }
-void Hook_GLVertex3fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_Vertex3f(C, v[0], v[1], v[2]); }
+void Hook_GLVertex2fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_VertexBits(C, FV(v, 0), FV(v, 1), 0); }
+void Hook_GLVertex3fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_VertexBits(C, FV(v, 0), FV(v, 1), FV(v, 2)); }
 void Hook_GLVertex4fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_Vertex4f(C, v[0], v[1], v[2], v[3]); }
-void Hook_GLTexCoord2f(GLcontext context, GLfloat s, GLfloat t) { (void) context; GUARD; Core_TexCoord2f(C, s, t); }
-void Hook_GLTexCoord2fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_TexCoord2f(C, v[0], v[1]); }
+void Hook_GLTexCoord2f(GLcontext context, GLfloat s, GLfloat t) { (void) context; GUARD; CORE_TEXCOORD_BITS(C, 0, FB(s), FB(t)); }
+void Hook_GLTexCoord2fv(GLcontext context, GLfloat *v) { (void) context; GUARD; CORE_TEXCOORD_BITS(C, 0, FV(v, 0), FV(v, 1)); }
 
 void Hook_GLMultiTexCoord2fARB(GLcontext context, GLenum unit, GLfloat s, GLfloat t)
 {
     (void) context; GUARD;
-    Core_MultiTexCoord2f(C, unit, s, t);
+    if (unit - GL_TEXTURE0_ARB < CORE_UNITS)
+        CORE_TEXCOORD_BITS(C, unit - GL_TEXTURE0_ARB, FB(s), FB(t));
+    else
+        Core_MultiTexCoord2f(C, unit, s, t);    /* the error */
 }
 
 void Hook_GLMultiTexCoord2fvARB(GLcontext context, GLenum unit, GLfloat *v)
 {
     (void) context; GUARD;
-    Core_MultiTexCoord2f(C, unit, v[0], v[1]);
+    if (unit - GL_TEXTURE0_ARB < CORE_UNITS)
+        CORE_TEXCOORD_BITS(C, unit - GL_TEXTURE0_ARB, FV(v, 0), FV(v, 1));
+    else
+        Core_MultiTexCoord2f(C, unit, v[0], v[1]);
 }
 
 void Hook_GLColor4ub(GLcontext context, GLubyte red, GLubyte green, GLubyte blue, GLubyte alhpa)

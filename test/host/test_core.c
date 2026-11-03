@@ -28,6 +28,8 @@ static ULONG vram[TEX_SIZE / 4];
 static struct Core core;
 static struct R2Cs cs;
 static ULONG idle_waits;
+static ULONG vram_held;         /* a VRAM hook's lock is held now */
+static ULONG idle_in_lock;      /* idle waits (flushes) while one was */
 
 static APTR HostAlloc(APTR env, ULONG size)
 {
@@ -46,6 +48,8 @@ static LONG HostIdle(APTR env)
 {
     (void) env;
     idle_waits++;
+    if (vram_held)
+        idle_in_lock++;
     return 0;
 }
 
@@ -713,6 +717,370 @@ static void test_state(void)
     CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
 }
 
+/* The last value written to reg from stream index start on (0xdeadbeef if
+ * none). */
+static ULONG RegSince(ULONG start, ULONG reg)
+{
+    ULONG i;
+    ULONG n;
+    ULONG h;
+    ULONG k;
+    ULONG val;
+
+    val = 0xdeadbeefUL;
+    n = (ULONG) (cs.ptr - stream);
+    for (i = start; i < n; i += (R2_PKT_TYPE(h) == 2) ? 1 : 2 + R2_PKT_COUNT(h))
+    {
+        h = V(i);
+        if (R2_PKT_TYPE(h) != 0)
+            continue;
+        for (k = 0; k <= R2_PKT_COUNT(h); k++)
+            if ((R2_PKT0_ONE_REG_WR(h) ? R2_PKT0_REG(h) : R2_PKT0_REG(h) + 4 * k) == reg)
+                val = V(i + 1 + k);
+    }
+    return val;
+}
+
+/* The shadow registers: a bind sends what differs, the rest stays; a lost
+ * GPU state (clear, present) and a texture's new storage send it again. */
+static void test_bind_shadow(void)
+{
+    static UBYTE pix[32 * 16 * 4];
+    struct R2ChkState st;
+    ULONG at;
+    ULONG off1;
+    ULONG off2;
+    ULONG fmt3;
+
+    Fresh(1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, pix);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, pix);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 32, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, pix);
+    off1 = core.tex[1]->gpu;
+    off2 = core.tex[2]->gpu;
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Draw1();
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0), off1);
+
+    /* the same format and size: TXOFFSET alone, no vertex format */
+    at = (ULONG) (cs.ptr - stream);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+    Draw1();
+    CHECK_HEX(RegSince(at, R_PP_TXOFFSET_0), off2);
+    CHECK_HEX(RegSince(at, R_PP_TXFILTER_0), 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_PP_TXCBLEND_0), 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_PP_CNTL), 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_SE_VTX_FMT_0), 0xdeadbeefUL);
+    CHECK_INT((ULONG) (cs.ptr - stream) - at, 2 + 2 + 3 * 6);
+
+    /* another size and an alpha base: the format block and the combiner */
+    at = (ULONG) (cs.ptr - stream);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Draw1();
+    fmt3 = RegSince(at, R_PP_TXFORMAT_0);
+    CHECK(fmt3 != 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_PP_TXOFFSET_0), core.tex[3]->gpu);
+    CHECK(RegSince(at, R_PP_TXABLEND_0) != 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_SE_VTX_FMT_0), 0xdeadbeefUL);
+
+    /* back to 1: every texture register it differs in */
+    at = (ULONG) (cs.ptr - stream);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Draw1();
+    CHECK_HEX(RegSince(at, R_PP_TXOFFSET_0), off1);
+    CHECK(RegSince(at, R_PP_TXFORMAT_0) != 0xdeadbeefUL && RegSince(at, R_PP_TXFORMAT_0) != fmt3);
+
+    /* new storage of the bound texture at the same address: TXOFFSET again */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, pix);
+    CHECK_HEX(core.tex[1]->gpu, off1);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK_HEX(RegSince(at, R_PP_TXOFFSET_0), off1);
+    /* a sub-image: nothing (as before the shadows) */
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGB, GL_UNSIGNED_BYTE, pix);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK_INT((ULONG) (cs.ptr - stream) - at, 2 + 3 * 6);
+
+    /* off and on: PP_CNTL and the vertex format both ways, the texture stays */
+    at = (ULONG) (cs.ptr - stream);
+    Core_Enable(&core, GL_TEXTURE_2D, 0);
+    Draw1();
+    CHECK(!(RegSince(at, R_PP_CNTL) & R_TEX_0_ENABLE));
+    CHECK(RegSince(at, R_SE_VTX_FMT_1) == 0);
+    at = (ULONG) (cs.ptr - stream);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Draw1();
+    CHECK(RegSince(at, R_PP_CNTL) & R_TEX_0_ENABLE);
+    CHECK(RegSince(at, R_SE_VTX_FMT_1) != 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_PP_TXOFFSET_0), 0xdeadbeefUL);
+
+    /* a clear overwrites PP_CNTL and the combiner, not the texture */
+    Core_Clear(&core, GL_COLOR_BUFFER_BIT);
+    at = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK(RegSince(at, R_PP_CNTL) & R_TEX_0_ENABLE);
+    CHECK(RegSince(at, R_PP_TXCBLEND_0) != 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_SE_VAP_CNTL), R_VAP_TCL_ENABLE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
+    CHECK(RegSince(at, R_SE_VTX_FMT_1) != 0xdeadbeefUL);
+    CHECK_HEX(RegSince(at, R_PP_TXOFFSET_0), 0xdeadbeefUL);
+    /* nor did it break the next bind */
+    at = (ULONG) (cs.ptr - stream);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+    Draw1();
+    CHECK_HEX(RegSince(at, R_PP_TXOFFSET_0), off2);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
+/* The register state at every draw, as hashes: a register file (type-0
+ * writes, data ports as their last value) hashed with the draw packet.
+ * Returns the draws seen. */
+static ULONG regfile[0x4000 / 4];
+
+static ULONG DrawStates(ULONG *hash, ULONG max)
+{
+    ULONG i;
+    ULONG n;
+    ULONG h;
+    ULONG k;
+    ULONG reg;
+    ULONG len;
+    ULONG f;
+    ULONG nd;
+
+    memset(regfile, 0, sizeof(regfile));
+    nd = 0;
+    n = (ULONG) (cs.ptr - stream);
+    for (i = 0; i < n; i += len)
+    {
+        h = V(i);
+        len = (R2_PKT_TYPE(h) == 2) ? 1 : 2 + R2_PKT_COUNT(h);
+        if (R2_PKT_TYPE(h) == 0)
+        {
+            for (k = 0; k <= R2_PKT_COUNT(h); k++)
+            {
+                reg = R2_PKT0_ONE_REG_WR(h) ? R2_PKT0_REG(h) : R2_PKT0_REG(h) + 4 * k;
+                if (reg < sizeof(regfile) / sizeof(regfile[0]) * 4)
+                    regfile[reg / 4] = V(i + 1 + k);
+            }
+        }
+        else if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) != R2_OP_NOP && nd < max)
+        {
+            f = 2166136261UL;
+            for (k = 0; k < sizeof(regfile) / sizeof(regfile[0]); k++)
+                f = (f ^ regfile[k]) * 16777619UL;
+            for (k = 0; k < len; k++)
+                f = (f ^ V(i + k)) * 16777619UL;
+            hash[nd++] = f;
+        }
+    }
+    return nd;
+}
+
+static ULONG ShRand(ULONG *seed)
+{
+    *seed = *seed * 1103515245UL + 12345UL;
+    return (*seed >> 16) & 0x7fff;
+}
+
+/* A random GL sequence of binds, texture units, enables, environments,
+ * filters, uploads, clears and draws. */
+static void ShadowRun(ULONG no_shadow, ULONG seed)
+{
+    static UBYTE pix[32 * 32 * 4];
+    static const ULONG fmt[6] = { GL_RGB, GL_RGB, GL_RGBA, GL_LUMINANCE, GL_ALPHA,
+                                  MGL_UNSIGNED_SHORT_4_4_4_4 };
+    static const ULONG env[4] = { GL_MODULATE, GL_REPLACE, GL_DECAL, GL_ADD };
+    ULONG step;
+    ULONG r;
+    ULONG name;
+    ULONG sz;
+
+    Fresh(1);
+    core.no_shadow = no_shadow;
+    for (name = 1; name <= 8; name++)
+    {
+        Core_BindTexture(&core, GL_TEXTURE_2D, name);
+        sz = (name & 1) ? 16 : 32;
+        if (fmt[name % 6] == MGL_UNSIGNED_SHORT_4_4_4_4)
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, (LONG) sz, 16, 0, GL_RGBA,
+                            MGL_UNSIGNED_SHORT_4_4_4_4, pix);
+        else
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, (LONG) fmt[name % 6], (LONG) sz, 16, 0,
+                            fmt[name % 6], GL_UNSIGNED_BYTE, pix);
+    }
+    for (step = 0; step < 600; step++)
+    {
+        r = ShRand(&seed);
+        switch (r % 13)
+        {
+            case 0: case 1: case 2:
+                Core_BindTexture(&core, GL_TEXTURE_2D, 1 + ShRand(&seed) % 8);
+                break;
+            case 3:
+                Core_ActiveTexture(&core, GL_TEXTURE0_ARB + ShRand(&seed) % 2);
+                break;
+            case 4:
+                Core_Enable(&core, GL_TEXTURE_2D, ShRand(&seed) % 3 != 0);
+                break;
+            case 5:
+                Core_TexEnvi(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, (LONG) env[ShRand(&seed) % 4]);
+                break;
+            case 6:
+                Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                                   (ShRand(&seed) & 1) ? GL_LINEAR : GL_NEAREST);
+                break;
+            case 7:
+                if (core.bound[core.active_unit] != 0 && core.tex[core.bound[core.active_unit]]->base == GL_RGBA)
+                    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGBA,
+                                       MGL_UNSIGNED_SHORT_4_4_4_4, pix);
+                break;
+            case 8:
+                if (ShRand(&seed) % 4 == 0)
+                    Core_Clear(&core, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                else
+                    Core_Enable(&core, GL_BLEND, ShRand(&seed) & 1);
+                break;
+            case 9:
+                if (ShRand(&seed) % 8 == 0)
+                    Core_Rebase(&core, TEX_GPU, COLOR_GPU, DEPTH_GPU);
+                else
+                    Core_Enable(&core, GL_ALPHA_TEST, ShRand(&seed) & 1);
+                break;
+            default:
+                Core_Begin(&core, GL_TRIANGLE_FAN);
+                Core_MultiTexCoord2f(&core, GL_TEXTURE1_ARB, 0.5f, 0.5f);
+                Core_TexCoord2f(&core, 0.0f, 0.0f);
+                Core_Vertex3f(&core, 0, 0, 0);
+                Core_TexCoord2f(&core, 1.0f, 0.0f);
+                Core_Vertex3f(&core, 1, 0, 0);
+                Core_TexCoord2f(&core, 1.0f, 1.0f);
+                Core_Vertex3f(&core, 1, 1, 0);
+                Core_End(&core);
+                break;
+        }
+    }
+}
+
+static void test_shadow_equivalence(void)
+{
+    static ULONG with[4000];
+    static ULONG without[4000];
+    struct R2ChkState st;
+    ULONG nw;
+    ULONG nwo;
+    ULONG dw_with;
+    ULONG dw_without;
+    ULONG seed;
+    ULONG i;
+    int same;
+    int smaller;
+
+    same = 1;
+    smaller = 1;
+    for (seed = 1; seed <= 12; seed++)
+    {
+        ShadowRun(1, seed);
+        CHECK_INT(Checked(&st), R2CE_OK);
+        nwo = DrawStates(without, 4000);
+        dw_without = (ULONG) (cs.ptr - stream);
+        ShadowRun(0, seed);
+        CHECK_INT(Checked(&st), R2CE_OK);
+        nw = DrawStates(with, 4000);
+        dw_with = (ULONG) (cs.ptr - stream);
+        if (nw != nwo || nw < 50)
+            same = 0;
+        for (i = 0; i < nw && i < nwo; i++)
+            if (with[i] != without[i])
+            {
+                if (same)
+                    printf("  seed %lu: draw %lu differs\n", (unsigned long) seed, (unsigned long) i);
+                same = 0;
+            }
+        if (dw_with >= dw_without)
+            smaller = 0;
+    }
+    CHECK(same);
+    CHECK(smaller);
+    core.no_shadow = 0;
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
+/* The bit-pattern vertex path (the hooks' hot path) writes the stream the
+ * float path writes. */
+static void BitsDraw(ULONG bits)
+{
+    static const float xyz[5][3] = { { -0.5f, -0.5f, 0.0f }, { 0.5f, -0.5f, 0.25f },
+                                     { 0.6f, 0.4f, -0.75f }, { 0.0f, 0.6f, 1.0f },
+                                     { -0.6f, 0.4f, 0.5f } };
+    ULONG i;
+
+    Core_Begin(&core, GL_TRIANGLE_FAN);
+    for (i = 0; i < 5; i++)
+    {
+        if (bits)
+        {
+            CORE_TEXCOORD_BITS(&core, 0, R2_FBITS(xyz[i][1]), R2_FBITS(xyz[i][0]));
+            CORE_TEXCOORD_BITS(&core, 1, R2_FBITS(xyz[i][2]), R2_FBITS(xyz[i][1]));
+            Core_VertexBits(&core, R2_FBITS(xyz[i][0]), R2_FBITS(xyz[i][1]), R2_FBITS(xyz[i][2]));
+        }
+        else
+        {
+            Core_TexCoord2f(&core, xyz[i][1], xyz[i][0]);
+            Core_MultiTexCoord2f(&core, GL_TEXTURE1_ARB, xyz[i][2], xyz[i][1]);
+            Core_Vertex3f(&core, xyz[i][0], xyz[i][1], xyz[i][2]);
+        }
+    }
+    Core_End(&core);
+}
+
+static void test_vertex_bits(void)
+{
+    static ULONG a[400];
+    static UBYTE pix[16 * 16 * 3];
+    ULONG na;
+    ULONG nb;
+    ULONG i;
+    ULONG start;
+    int same;
+
+    Fresh(1);
+    Core_ActiveTexture(&core, GL_TEXTURE1_ARB);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, pix);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_ActiveTexture(&core, GL_TEXTURE0_ARB);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, pix);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    BitsDraw(0);                        /* the state goes out with the first */
+    start = (ULONG) (cs.ptr - stream);
+    BitsDraw(0);
+    na = (ULONG) (cs.ptr - stream) - start;
+    for (i = 0; i < na && i < 400; i++)
+        a[i] = stream[start + i];
+    start = (ULONG) (cs.ptr - stream);
+    BitsDraw(1);
+    nb = (ULONG) (cs.ptr - stream) - start;
+    CHECK_INT(nb, na);
+    CHECK_INT(na, 2 + 5 * 8);           /* xyz, colour, two coordinate sets */
+    same = 1;
+    for (i = 0; i < na && i < nb; i++)
+        if (stream[start + i] != a[i])
+            same = 0;
+    CHECK(same);
+    /* outside glBegin: ignored, as Core_Vertex3f */
+    start = (ULONG) (cs.ptr - stream);
+    Core_VertexBits(&core, 0, 0, 0);
+    CHECK_INT((ULONG) (cs.ptr - stream), start);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
 /* --- Matrices -------------------------------------------------------------------- */
 
 static int Near(float a, float b)
@@ -770,6 +1138,112 @@ static void test_matrices(void)
     Core_GetFloatv(&core, GL_MODELVIEW_MATRIX, m);
     CHECK(Near(m[12], 0.0f) && Near(m[0], 1.0f));
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
+/* The fast matrix paths (a unit-axis rotation, a translation, a scale
+ * touch only their columns) against the full multiply with the explicit
+ * matrix: the same products in the same order, so equal. */
+static void Explicit(float *t, ULONG op, float a, float b, float cc, float s, float co)
+{
+    ULONG i;
+
+    for (i = 0; i < 16; i++)
+        t[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+    switch (op)
+    {
+        case 0:                         /* rotation about x */
+            t[5] = co; t[6] = s; t[9] = -s; t[10] = co;
+            break;
+        case 1:                         /* about y */
+            t[0] = co; t[2] = -s; t[8] = s; t[10] = co;
+            break;
+        case 2:                         /* about z */
+            t[0] = co; t[1] = s; t[4] = -s; t[5] = co;
+            break;
+        case 3:                         /* translation */
+            t[12] = a; t[13] = b; t[14] = cc;
+            break;
+        default:                        /* scale */
+            t[0] = a; t[5] = b; t[10] = cc;
+            break;
+    }
+}
+
+static void test_matrix_fast(void)
+{
+    float start[16];
+    float fast[16];
+    float full[16];
+    float t[16];
+    ULONG op;
+    ULONG i;
+    ULONG round;
+    int same;
+    int near;
+    float ang;
+
+    Fresh(1);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    same = 1;
+    for (round = 0; round < 40; round++)
+    {
+        for (i = 0; i < 16; i++)
+            start[i] = (float) ((LONG) ((round * 37 + i * 11) % 23) - 11) * 0.37f;
+        ang = (float) round * 23.5f - 400.0f;
+        for (op = 0; op < 5; op++)
+        {
+            Core_LoadMatrixf(&core, start);
+            if (op < 3)
+                Core_Rotatef(&core, ang, op == 0 ? 1.0f : 0.0f, op == 1 ? 1.0f : 0.0f,
+                             op == 2 ? 1.0f : 0.0f);
+            else if (op == 3)
+                Core_Translatef(&core, ang * 0.01f, -1.5f, 2.25f);
+            else
+                Core_Scalef(&core, ang * 0.01f, -1.5f, 2.25f);
+            Core_GetFloatv(&core, GL_MODELVIEW_MATRIX, fast);
+            Explicit(t, op, ang * 0.01f, -1.5f, 2.25f, Core_Sin(ang), Core_Cos(ang));
+            Core_LoadMatrixf(&core, start);
+            Core_MultMatrixf(&core, t);
+            Core_GetFloatv(&core, GL_MODELVIEW_MATRIX, full);
+            for (i = 0; i < 16; i++)
+                if (fast[i] != full[i])
+                    same = 0;
+            if (op < 3)
+            {
+                /* RotateAxis takes the same path */
+                Core_LoadMatrixf(&core, start);
+                Core_RotateAxis(&core, Core_Sin(ang), Core_Cos(ang),
+                                (LONG) (op == 0 ? GLROT_100 : op == 1 ? GLROT_010 : GLROT_001));
+                Core_GetFloatv(&core, GL_MODELVIEW_MATRIX, fast);
+                for (i = 0; i < 16; i++)
+                    if (fast[i] != full[i])
+                        same = 0;
+            }
+        }
+    }
+    CHECK(same);
+    /* a non-unit axis is normalised, a negative unit axis takes the general
+     * path: both still the rotation */
+    Core_LoadIdentity(&core);
+    Core_Rotatef(&core, 30.0f, 0.0f, 0.0f, 2.0f);
+    Core_GetFloatv(&core, GL_MODELVIEW_MATRIX, fast);
+    Core_LoadIdentity(&core);
+    Core_Rotatef(&core, -30.0f, 0.0f, 0.0f, -1.0f);
+    Core_GetFloatv(&core, GL_MODELVIEW_MATRIX, full);
+    near = Near(fast[0], 0.8660254f) && Near(fast[1], 0.5f) && Near(fast[4], -0.5f);
+    for (i = 0; i < 16; i++)
+        if (!Near(fast[i], full[i]))
+            near = 0;
+    CHECK(near);
+    /* inside glBegin: an error, the matrix untouched */
+    Core_LoadIdentity(&core);
+    Core_Begin(&core, GL_TRIANGLES);
+    Core_Rotatef(&core, 30.0f, 0.0f, 0.0f, 1.0f);
+    Core_Translatef(&core, 1.0f, 0.0f, 0.0f);
+    Core_End(&core);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_OPERATION);
+    Core_GetFloatv(&core, GL_MODELVIEW_MATRIX, fast);
+    CHECK(fast[0] == 1.0f && fast[1] == 0.0f && fast[12] == 0.0f);
 }
 
 /* --- Clear, arrays, a GLQuake-shaped frame through the ring ---------------------- */
@@ -1090,6 +1564,148 @@ static void test_locked(void)
 static ULONG ring_mem[RING_DW];
 static ULONG ring_shadow[RING_DW];
 
+/* PackFast against the general way (Fetch + Pack): the same packed
+ * vertices, dword for dword, for every array layout it takes. */
+static ULONG pf_out[2][64 * 8];
+static ULONG pf_n;
+
+static void PfDraw(ULONG fast, ULONG which)
+{
+    static const UWORD idx[6] = { 0, 1, 2, 3, 4, 5 };
+    ULONG vd;
+
+    core.no_fast = fast ? 0 : 1;
+    Core_LockArrays(&core, 0, 40);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    vd = 4 + ((Core_UnitsOn(&core) & 1) ? 2 : 0) + ((Core_UnitsOn(&core) & 2) ? 2 : 0);
+    pf_n = 40 * vd;
+    memcpy(pf_out[which], &vram[(core.lk_gpu - TEX_GPU) / 4], pf_n * 4);
+}
+
+static void test_packfast(void)
+{
+    static float pos3[40 * 4];
+    static float st[40 * 3];
+    static UBYTE col[40 * 5];
+    static const ULONG ctypes[5] = { 0, MGL_UBYTE_ARGB, MGL_UBYTE_BGRA, GL_UNSIGNED_BYTE, GL_UNSIGNED_BYTE };
+    static const ULONG csizes[5] = { 0, 4, 4, 4, 3 };
+    UBYTE texel[2 * 2 * 4];
+    ULONG swap;
+    ULONG ci;
+    ULONG psize;
+    ULONG tmode;
+    ULONG bad;
+    ULONG cases;
+    ULONG i;
+
+    for (i = 0; i < 40 * 4; i++)
+        pos3[i] = (float) i * 0.25f - 7.0f;
+    for (i = 0; i < 40 * 3; i++)
+        st[i] = (float) i / 64.0f;
+    for (i = 0; i < 40 * 5; i++)
+        col[i] = (UBYTE) (i * 37 + 11);
+    for (i = 0; i < sizeof(texel); i++)
+        texel[i] = (UBYTE) (i * 29);
+    bad = 0;
+    cases = 0;
+    for (swap = 0; swap < 2; swap++)
+        for (ci = 0; ci < 5; ci++)
+            for (psize = 2; psize <= 3; psize++)
+                for (tmode = 0; tmode < 4; tmode++)
+                {
+                    /* tmode: 0 no texture; 1 unit 0 from an array; 2 unit 0
+                     * current st; 3 both units, unit 0 an array of 3 with a
+                     * padded stride, unit 1 current */
+                    Fresh(swap);
+                    Core_VertexPointer(&core, (LONG) psize, GL_FLOAT,
+                                       psize == 2 ? 16 : 0, pos3);
+                    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+                    if (ctypes[ci] != 0)
+                    {
+                        Core_ColorPointer(&core, (LONG) csizes[ci], ctypes[ci],
+                                          csizes[ci] == 3 ? 5 : 0, col);
+                        Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+                    }
+                    else
+                        Core_Color4ub(&core, 10, 20, 30, 40);
+                    if (tmode != 0)
+                    {
+                        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+                        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 2, 2, 0, GL_RGBA,
+                                        GL_UNSIGNED_BYTE, texel);
+                        Core_Enable(&core, GL_TEXTURE_2D, 1);
+                        Core_TexCoord2f(&core, 0.375f, 0.625f);
+                    }
+                    if (tmode == 1)
+                    {
+                        Core_TexCoordPointer(&core, 2, GL_FLOAT, 0, st);
+                        Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+                    }
+                    if (tmode == 3)
+                    {
+                        Core_TexCoordPointer(&core, 3, GL_FLOAT, 12, st);
+                        Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+                        Core_ActiveTexture(&core, GL_TEXTURE1_ARB);
+                        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+                        Core_Enable(&core, GL_TEXTURE_2D, 1);
+                        Core_MultiTexCoord2f(&core, GL_TEXTURE1_ARB, 0.125f, 0.875f);
+                        Core_ActiveTexture(&core, GL_TEXTURE0_ARB);
+                    }
+                    PfDraw(1, 0);
+                    PfDraw(0, 1);
+                    cases++;
+                    if (memcmp(pf_out[0], pf_out[1], pf_n * 4) != 0
+                        || Core_GetError(&core) != GL_NO_ERROR)
+                    {
+                        printf("  packfast: swap %lu colour %lu pos %lu tex %lu differs\n",
+                               (unsigned long) swap, (unsigned long) ci, (unsigned long) psize,
+                               (unsigned long) tmode);
+                        bad++;
+                    }
+                }
+    CHECK_INT(cases, 80);
+    CHECK_INT(bad, 0);
+
+    /* GLQuake's qglarray_t: x y z s t w floats and A R G B bytes in one
+     * 28-byte record (the straight-through path's case, interleaved) */
+    for (swap = 0; swap < 2; swap++)
+    {
+        static UBYTE il[40 * 28];
+        float f;
+
+        for (i = 0; i < 40 * 7; i++)
+        {
+            f = (float) i * 0.37f - 11.0f;
+            if (i % 7 == 6)
+            {
+                il[i * 4] = (UBYTE) (i * 13 + 1);
+                il[i * 4 + 1] = (UBYTE) (i * 7 + 2);
+                il[i * 4 + 2] = (UBYTE) (i * 5 + 3);
+                il[i * 4 + 3] = (UBYTE) (i * 3 + 4);
+            }
+            else
+                memcpy(&il[i * 4], &f, 4);
+        }
+        Fresh(swap);
+        Core_VertexPointer(&core, 3, GL_FLOAT, 28, il);
+        Core_TexCoordPointer(&core, 3, GL_FLOAT, 28, il + 12);
+        Core_ColorPointer(&core, 4, MGL_UBYTE_ARGB, 28, il + 24);
+        Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+        Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+        Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel);
+        Core_Enable(&core, GL_TEXTURE_2D, 1);
+        PfDraw(1, 0);
+        PfDraw(0, 1);
+        CHECK_INT(pf_n, 40 * 6);
+        CHECK(memcmp(pf_out[0], pf_out[1], pf_n * 4) == 0);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    }
+    core.no_fast = 0;
+}
+
 /* A back end whose video RAM moves (P96 bitmaps): texels only between the
  * vram hooks, at the address they return; the stream into staging; a
  * rebase moves textures and target. */
@@ -1103,6 +1719,7 @@ static ULONG *HostVramBegin(APTR env)
 {
     (void) env;
     vram_begins++;
+    vram_held = (vram_now != NULL);
     return vram_now;
 }
 
@@ -1110,6 +1727,67 @@ static void HostVramEnd(APTR env)
 {
     (void) env;
     vram_ends++;
+    vram_held = 0;
+}
+
+/* The stream written into the heap itself (no staging): one lock a locked
+ * draw, released before anything that may flush, the draw still what GL
+ * draws; out of reach, the immediate way. */
+static void test_stream_direct(void)
+{
+    static UWORD idx[3000];
+    ULONG i;
+    ULONG r;
+    ULONG draws;
+
+    LkArrays(1);
+    vram_now = vram;                    /* the heap Core_Init was given */
+    vram_begins = 0;
+    vram_ends = 0;
+    vram_held = 0;
+    idle_in_lock = 0;
+    Core_SetVram(&core, HostVramBegin, HostVramEnd, NULL);
+    CHECK_INT(core.stream_direct, 1);
+    for (i = 0; i < 3000; i++)
+        idx[i] = (UWORD) ((i * 7) % 300);
+    Core_LockArrays(&core, 0, 300);
+    Core_DrawElements(&core, GL_TRIANGLES, 300, GL_UNSIGNED_SHORT, idx);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 300));
+    CHECK_INT(core.stat_lock_draws, 1);
+    CHECK_INT(vram_begins, 1);
+    CHECK_INT(vram_ends, 1);
+    /* a second draw of the same lock: the indices only, one lock again */
+    Core_DrawElements(&core, GL_TRIANGLES, 30, GL_UNSIGNED_SHORT, idx);
+    CHECK_INT(core.stat_lock_uploads, 1);
+    CHECK_INT(vram_begins, 2);
+    Core_UnlockArrays(&core);
+    /* enough to wrap the stream: the wraps flush outside every lock */
+    for (r = 0; r < 60; r++)
+    {
+        Core_LockArrays(&core, 0, 3000);
+        Core_DrawElements(&core, GL_TRIANGLES, 3000, GL_UNSIGNED_SHORT, idx);
+        Core_UnlockArrays(&core);
+    }
+    CHECK(core.stat_stream_wraps > 0);
+    CHECK_INT(idle_in_lock, 0);
+    CHECK_INT(vram_begins, vram_ends);
+    CHECK_INT(vram_begins, 62);
+    /* the heap out of reach: counted, drawn the immediate way, no end */
+    LkArrays(1);
+    Core_SetVram(&core, HostVramBegin, HostVramEnd, NULL);
+    vram_begins = 0;
+    vram_ends = 0;
+    draws = core.stat_lock_draws;
+    vram_now = NULL;
+    Core_LockArrays(&core, 0, 300);
+    Core_DrawElements(&core, GL_TRIANGLES, 300, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_vram_lost, 1);
+    CHECK_INT(core.stat_lock_draws, draws);
+    CHECK_INT(vram_ends, vram_begins - 1);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 300));
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    vram_now = NULL;
 }
 
 static void test_vram_hooks(void)
@@ -1351,11 +2029,17 @@ int main(void)
     test_triangle();
     test_textures();
     test_state();
+    test_bind_shadow();
+    test_shadow_equivalence();
+    test_vertex_bits();
     test_matrices();
+    test_matrix_fast();
     test_arrays();
     test_locked();
     test_present();
     test_vram_hooks();
+    test_stream_direct();
+    test_packfast();
     test_frames_through_ring();
     (void) t;
     (void) e;

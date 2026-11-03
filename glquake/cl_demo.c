@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 void CL_FinishTimeDemo (void);
+void RGL_ProfStart (void);	/* RadeonGL: sys_amiga.c, QuakeProfile */
+void RGL_ProfStop (void);
 
 /*
 ==============================================================================
@@ -179,7 +181,10 @@ static int CL_GetDemoMessage (void)
 			// if this is the second frame, grab the real td_starttime
 			// so the bogus time on the first frame doesn't count
 			if (host_framecount == cls.td_startframe + 1)
+			{
 				cls.td_starttime = realtime;
+				RGL_ProfStart ();
+			}
 		}
 
 		else if ( /* cl.time > 0 && */ cl.time <= cl.mtime[0])
@@ -535,6 +540,7 @@ void CL_FinishTimeDemo (void)
 		time = 1;
 
 	Con_Printf ("%i frames %5.1f seconds %5.1f fps\n", frames, time, frames/time);
+	RGL_ProfStop ();
 
 	/* RadeonGL: -timedemoquit ends the program after the timedemo, so a
 	 * benchmark or census run needs nobody at the keyboard. "quit" only

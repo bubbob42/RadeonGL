@@ -230,6 +230,14 @@ struct Core
     /* the vertex format last emitted */
     ULONG hw_fmt0, hw_fmt1, hw_units;
 
+    /* Registers as last emitted, so a block is sent only when a value
+     * differs (a bind usually changes TXOFFSET and TXFORMAT alone). ~0 is
+     * never a real value: Hw_Forget sets it wherever the GPU's state is
+     * lost (init, present, clear, a dropped frame). */
+    ULONG hw_tex[CORE_UNITS][7];    /* TXFILTER..TXPITCH, TXMULTI_CTL, TXOFFSET */
+    ULONG hw_comb[CORE_UNITS][4];   /* TXCBLEND, TXCBLEND2, TXABLEND, TXABLEND2 */
+    ULONG hw_ppcntl;
+
     /* client arrays */
     struct CoreArray va, ca, ta[CORE_UNITS];
     LONG  lock_first, lock_count;   /* glLockArraysEXT, count 0 = none */
@@ -241,6 +249,7 @@ struct Core
     ULONG stream_pos;
     ULONG *stream_cpu;      /* where its dwords are written: the heap, or a
                              * back end's staging buffer (Core_SetVram) */
+    ULONG stream_direct;    /* written into the heap itself, inside vram_begin/end */
     ULONG stream_gen;       /* counts Core_GpuIdle: the stream restarted at 0 */
 
     /* Video RAM a back end reaches only for a moment (a P96 bitmap that
@@ -254,6 +263,8 @@ struct Core
     ULONG lk_valid;         /* the locked range is in the stream */
     ULONG lk_gpu;           /* where */
     ULONG lk_units;         /* with these texture sets */
+    ULONG no_fast;          /* tests: pack locked arrays the general way only */
+    ULONG no_shadow;        /* tests: forget the shadow registers at every validate */
     ULONG lk_color;         /* and these current values (for disabled arrays) */
     float lk_st[CORE_UNITS][2];
 
@@ -288,7 +299,12 @@ void  Core_GpuIdle(struct Core *c);
  * struct Core's vram_begin/vram_end (env as CoreEnv's), and a fast-RAM
  * staging buffer of CORE_STREAM_BYTES for the locked-array stream, which
  * the back end copies to the stream's place in the heap before the GPU
- * runs. staging NULL: the stream is written into the heap itself. */
+ * runs. staging NULL: the stream is written into the heap itself, one
+ * vram_begin/vram_end around each locked draw's vertices and indices (the
+ * GPU must be idle between the back end's flushes). MEASURED on the
+ * A4000D: a staged dword is written to fast RAM, read back and written
+ * across the bus, and fast RAM there streams at 13-16 MB/s; a lock pair
+ * costs 18 us. */
 void  Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR env),
                    ULONG *staging);
 
@@ -352,6 +368,14 @@ void Core_Vertex3f(struct Core *c, float x, float y, float z);
 void Core_Vertex4f(struct Core *c, float x, float y, float z, float w);
 void Core_TexCoord2f(struct Core *c, float s, float t);
 void Core_MultiTexCoord2f(struct Core *c, ULONG unit, float s, float t);
+
+/* The hot path as IEEE single bit patterns (r2cs.h R2_FBITS): a vertex
+ * that never passes through an FPU register. On the A4000D's 060 every
+ * FPU instruction the old path spent on moving floats around (load, store
+ * back for the next call) cost more than the integer work. */
+void Core_VertexBits(struct Core *c, ULONG x, ULONG y, ULONG z);
+#define CORE_TEXCOORD_BITS(c, u, s, t) \
+    (((ULONG *) (void *) (c)->cur_st[u])[0] = (s), ((ULONG *) (void *) (c)->cur_st[u])[1] = (t))
 void Core_Color4ub(struct Core *c, ULONG r, ULONG g, ULONG b, ULONG a);
 void Core_Color4f(struct Core *c, float r, float g, float b, float a);
 void Core_Normal3f(struct Core *c, float x, float y, float z);
@@ -411,6 +435,7 @@ const char *Core_GetString(struct Core *c, ULONG name);
 ULONG Hw_DepthFunc(ULONG glfunc);   /* GL compare function -> R200 0..7, ~0 if invalid */
 ULONG Hw_BlendFactor(ULONG glf);    /* GL blend factor -> R_BLEND_GL_*, 0 if invalid */
 void  Hw_VertexFormat(struct Core *c, ULONG units);   /* emit when it differs */
+void  Hw_Forget(struct Core *c);    /* the GPU's state is unknown: emit everything again */
 ULONG Core_UnitsOn(struct Core *c); /* units that texture the next draw */
 
 LONG  Heap_Init(struct CoreHeap *h, ULONG gpu, ULONG *cpu, ULONG size);

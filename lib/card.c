@@ -367,6 +367,7 @@ static LONG CopyCommands(struct Card *k, ULONG n)
     ULONG h;
     ULONG len;
     ULONG *p;
+    const ULONG *src;
     ULONG j;
 
     i = 0;
@@ -386,8 +387,11 @@ static LONG CopyCommands(struct Card *k, ULONG n)
         p = R2Cs_Room(&k->ring.cs, c);
         if (p == NULL)
             return k->ring.cs.error;
+        /* the source in a local: through k the compiler reloaded it for
+         * every dword (MEASURED in the A4000D's profile) */
+        src = k->cmd + i;
         for (j = 0; j < c; j++)
-            p[j] = k->cmd[i + j];
+            p[j] = src[j];
         k->ring.cs.ptr = p + c;
         i += c;
     }
@@ -400,6 +404,7 @@ LONG Card_Flush(struct Card *k, BOOL present)
 {
     struct CoreScreen s;
     volatile ULONG *dst;
+    const ULONG *src;
     ULONG color;
     ULONG depth;
     ULONG heap;
@@ -433,6 +438,10 @@ LONG Card_Flush(struct Card *k, BOOL present)
      * frame was built with; a frame whose bitmaps moved is dropped below */
     if (k->check && n != 0)
     {
+        /* a stream written straight into video RAM cannot be read here
+         * (outside the lock): the indices' declared bounds are checked, the
+         * values were checked by the core against the lock */
+        k->cfg.peek = k->core->stream_direct ? NULL : Peek;
         k->cfg.range[0].gpu = k->color_gpu;
         k->cfg.range[0].size = k->color_bytes;
         k->cfg.range[0].kinds = R2K_COLOR | R2K_TEXTURE;    /* the present reads it */
@@ -563,11 +572,14 @@ LONG Card_Flush(struct Card *k, BOOL present)
         k->gen = k->core->stream_gen;
         k->copied = 0;
     }
-    if (k->core->stream_pos > k->copied)
+    if (!k->core->stream_direct && k->core->stream_pos > k->copied)
     {
+        /* bounds and source in locals: through k (volatile stores in
+         * between) they were reloaded for every dword */
         dst = (volatile ULONG *) (HeapCpu(k) + k->core->stream_off + k->copied);
-        for (i = k->copied / 4; i < k->core->stream_pos / 4; i++)
-            *dst++ = k->staging[i];
+        src = k->staging + k->copied / 4;
+        for (i = (k->core->stream_pos - k->copied) / 4; i > 0; i--)
+            *dst++ = *src++;
         k->copied = k->core->stream_pos;
     }
     e = CopyCommands(k, n);

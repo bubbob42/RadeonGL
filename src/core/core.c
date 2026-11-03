@@ -86,7 +86,7 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
         c->ta[u].type = GL_FLOAT;
     }
     c->prim = CORE_NO_PRIM;
-    c->hw_units = 0xffffffffUL;
+    Hw_Forget(c);
     c->tex_swap = 1;
     c->epoch = 1;
     c->dirty = D_ALL;
@@ -121,6 +121,7 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
 {
     c->vram_begin = begin;
     c->vram_end = end;
+    c->stream_direct = (begin != NULL && staging == NULL) ? 1 : 0;
     if (staging != NULL && c->stream_size != 0)
         c->stream_cpu = staging;
 }
@@ -137,7 +138,7 @@ void Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gp
     c->target.color_gpu = color_gpu;
     c->target.depth_gpu = depth_gpu;
     c->dirty = D_ALL;
-    c->hw_units = 0xffffffffUL;
+    Hw_Forget(c);
     Core_GpuIdle(c);
 }
 
@@ -145,9 +146,10 @@ void Core_MarkTextures(struct Core *c, ULONG units)
 {
     ULONG u;
 
-    for (u = 0; u < CORE_UNITS; u++)
-        if (units & (1UL << u))
-            Core_Texture(c, u)->use_epoch = c->epoch;
+    /* a unit in units has a valid texture bound (Core_UnitsOn) */
+    for (u = 0; units != 0; u++, units >>= 1)
+        if (units & 1)
+            c->tex[c->bound[u]]->use_epoch = c->epoch;
 }
 
 /* The GPU may still read texture t (drawn in this epoch): wait until it

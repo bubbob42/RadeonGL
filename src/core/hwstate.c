@@ -164,10 +164,28 @@ static ULONG MaxLevel(const struct CoreTex *t)
     return l;
 }
 
+void Hw_Forget(struct Core *c)
+{
+    ULONG u;
+    ULONG i;
+
+    c->hw_units = 0xffffffffUL;
+    for (u = 0; u < CORE_UNITS; u++)
+    {
+        for (i = 0; i < 7; i++)
+            c->hw_tex[u][i] = 0xffffffffUL;
+        for (i = 0; i < 4; i++)
+            c->hw_comb[u][i] = 0xffffffffUL;
+    }
+    c->hw_ppcntl = 0xffffffffUL;
+}
+
 static LONG EmitTexture(struct Core *c, ULONG u)
 {
     struct CoreTex *t;
     struct R2Tex r;
+    ULONG *sh;
+    ULONG v[5];
 
     t = Core_Texture(c, u);
     if (t == NULL)
@@ -196,7 +214,29 @@ static LONG EmitTexture(struct Core *c, ULONG u)
     r.format_x = R_LOD_BIAS_CORRECTION;
     r.multi = 0;
     r.offset = t->gpu;
-    return R2E_Texture(c->cs, u, &r);
+    /* R2E_Texture's three packets, each only when it differs */
+    sh = c->hw_tex[u];
+    if (sh[0] != r.filter || sh[1] != r.format || sh[2] != r.format_x || sh[3] != r.size
+        || sh[4] != r.pitch)
+    {
+        v[0] = sh[0] = r.filter;
+        v[1] = sh[1] = r.format;
+        v[2] = sh[2] = r.format_x;
+        v[3] = sh[3] = r.size;
+        v[4] = sh[4] = r.pitch;
+        R2E_Regs(c->cs, R_PP_TXFILTER_0 + u * R_PP_TXUNIT_STRIDE, 5, v);
+    }
+    if (sh[5] != r.multi)
+    {
+        sh[5] = r.multi;
+        R2E_Reg(c->cs, R_PP_TXMULTI_CTL_0 + u * R_PP_TXUNIT_STRIDE, r.multi);
+    }
+    if (sh[6] != r.offset)
+    {
+        sh[6] = r.offset;
+        R2E_Reg(c->cs, R_PP_TXOFFSET_0 + u * R_PP_TXOFFSET_STRIDE, r.offset);
+    }
+    return c->cs->error;
 }
 
 /* What the texture contributes: colour unless an alpha-only base, alpha
@@ -263,6 +303,13 @@ static LONG EmitCombiner(struct Core *c, ULONG units)
         }
         else if (s != 0)
             continue;               /* stage disabled in PP_CNTL */
+        if (c->hw_comb[s][0] == cb && c->hw_comb[s][1] == out && c->hw_comb[s][2] == ab
+            && c->hw_comb[s][3] == out)
+            continue;
+        c->hw_comb[s][0] = cb;
+        c->hw_comb[s][1] = out;
+        c->hw_comb[s][2] = ab;
+        c->hw_comb[s][3] = out;
         e = R2E_Combiner(c->cs, s, cb, out, ab, out);
     }
     return e;
@@ -356,11 +403,14 @@ LONG Core_Validate(struct Core *c)
         return R2_OK;
     cs = c->cs;
     c->stat_state_emits++;
+    if (c->no_shadow)
+        Hw_Forget(c);
     if (d & D_INIT)
     {
         R2E_TclDefaults(cs);
         R2E_RasterDefaults(cs);
         d = D_ALL;                  /* the defaults overwrote every block */
+        Hw_Forget(c);
     }
     units = Core_UnitsOn(c);
     if (d & D_VAP)
@@ -431,7 +481,14 @@ LONG Core_Validate(struct Core *c)
     if (d & D_COMBINE)
         EmitCombiner(c, units);
     if (d & D_PPCNTL)
-        R2E_Reg(cs, R_PP_CNTL, PpCntl(c, units));
+    {
+        v[0] = PpCntl(c, units);
+        if (v[0] != c->hw_ppcntl)
+        {
+            c->hw_ppcntl = v[0];
+            R2E_Reg(cs, R_PP_CNTL, v[0]);
+        }
+    }
     if (d & D_MATRIX)
     {
         Mat_Mul(mvp, c->proj[c->proj_top].m, c->mv[c->mv_top].m);

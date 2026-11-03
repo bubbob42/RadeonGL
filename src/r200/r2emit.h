@@ -128,6 +128,10 @@ ULONG *R2E_ImmdOpen(struct R2Cs *cs, ULONG vtx_dw, ULONG max_verts);
  * vertex leaves no trace. */
 LONG R2E_ImmdClose(struct R2Cs *cs, ULONG *vend, ULONG cntl);
 
+/* The same for a caller that knows its vertex count (no division: a
+ * 32-bit DIVU costs 38 cycles on the 060, and glEnd paid two). */
+LONG R2E_ImmdCloseN(struct R2Cs *cs, ULONG nverts, ULONG cntl);
+
 /* Open, copy nverts vertices from data (host order) and close. */
 LONG R2E_Immd(struct R2Cs *cs, ULONG cntl, ULONG vtx_dw, ULONG nverts,
               const ULONG *data);

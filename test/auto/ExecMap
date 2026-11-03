@@ -1,0 +1,14 @@
+; ExecMap -- exec's functions by address (both builds): the read-only
+; probe that names ROM addresses in a PC profile. The log must list
+; exec's vectors, sorted, the same from the GCC and the SAS/C build.
+; LIMIT 120
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+DEV:Probe/C/ExecMap >DEV:Test/execmap-gcc.log
+Echo "gcc rc=$RC" >>DEV:Test/auto.log
+DEV:Probe/C/ExecMap_sasc >DEV:Test/execmap-sasc.log
+Echo "sasc rc=$RC" >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

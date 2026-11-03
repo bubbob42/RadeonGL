@@ -704,6 +704,11 @@ dist/Probe/C/BmFit: build/probe/bmfit.o
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# ExecMap: exec's functions by address (names the ROM in a PC profile)
+dist/Probe/C/ExecMap: build/probe/execmap.o
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 # CxBreak quits the Blanker / DPMSManager commodities before a test
 dist/Probe/C/CxBreak: build/probe/cxbreak.o
 	@mkdir -p dist/Probe/C
@@ -781,6 +786,10 @@ dist/Probe/C/BmFit_sasc: build/probe-sasc/bmfit.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/ExecMap_sasc: build/probe-sasc/execmap.o | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 dist/Probe/C/CxBreak_sasc: build/probe-sasc/cxbreak.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -802,9 +811,10 @@ dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o build/
 # builds; the _sasc builds sit beside them in C/.
 .PHONY: probes
 probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Probe/C/Tri dist/Probe/C/CxBreak \
-        dist/Probe/C/LockBench dist/Probe/C/BmFit \
+        dist/Probe/C/LockBench dist/Probe/C/BmFit dist/Probe/C/ExecMap \
         dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
-        dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc dist/Probe/C/BmFit_sasc
+        dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc dist/Probe/C/BmFit_sasc \
+        dist/Probe/C/ExecMap_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -880,8 +890,10 @@ census-lib: $(CENSUS_LIB)
 R200_MODULES    := r2cs r2emit r2ring r2check r2cp r2ucode
 R200_HDRS       := $(wildcard src/r200/*.h)
 HOSTCC          ?= cc
-HOST_MOD_CFLAGS := -O2 -std=c89 -pedantic -Wall -Wextra -Werror -fno-strict-aliasing
-HOST_TST_CFLAGS := -O2 -std=c99 -Wall -Wextra -Werror
+# -ffp-contract=off: the 68k FPU has no fused multiply-add, and the host
+# compiler fuses a * b + c by default (arm64), which rounds differently
+HOST_MOD_CFLAGS := -O2 -std=c89 -pedantic -Wall -Wextra -Werror -fno-strict-aliasing -ffp-contract=off
+HOST_TST_CFLAGS := -O2 -std=c99 -Wall -Wextra -Werror -ffp-contract=off
 HOST_INC        := -Itest/host/shim -Isrc/r200 -Itest/host
 HOST_R200_OBJS  := $(addprefix build/host/,$(addsuffix .o,$(R200_MODULES)))
 
@@ -913,6 +925,10 @@ build/host/triscene.o: src/probe/triscene.c src/probe/triscene.h $(CORE_HDRS) $(
 build/host/texscene.o: src/probe/texscene.c src/probe/texscene.h src/probe/triscene.h $(CORE_HDRS) $(R200_HDRS)
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -Isrc/core -c $< -o $@
+
+# GLBench's patterns on the host, for a native profiler (not part of `test`)
+build/host/bench_core: build/host/bench_core.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
+	$(HOSTCC) $^ -o $@
 
 build/host/test_core: build/host/test_core.o build/host/simcp.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
@@ -1001,7 +1017,8 @@ build/rgl/r2_%.o: src/r200/%.c $(R200_HDRS)
 
 $(RGL_LIB): $(RGL_OBJS)
 	@mkdir -p $(dir $@)
-	$(GCC_CC) -nostdlib -nostartfiles -nodefaultlibs -noixemul -m68060 -m68881 -o $@ $(RGL_OBJS) -lgcc
+	$(GCC_CC) -nostdlib -nostartfiles -nodefaultlibs -noixemul -m68060 -m68881 -o $@ $(RGL_OBJS) -lgcc \
+	    -Wl,-Map=build/rgl/minigl.map
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 .PHONY: rgl-lib
@@ -1020,8 +1037,16 @@ $(GLSMOKE): glsmoke/glsmoke.c
 	    -I$(MGL_SDK_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
+GLBENCH := dist/GLSmoke/GLBench
+
+$(GLBENCH): glsmoke/glbench.c glsmoke/pcprof.c glsmoke/pcprof.h
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -o $@ glsmoke/glbench.c glsmoke/pcprof.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLBENCH) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke

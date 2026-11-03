@@ -2,11 +2,19 @@
  * matrix.c -- matrix stacks and the GL matrix operations.
  *
  * Column-major as GL keeps them: element (row r, column c) is m[c * 4 + r].
- * One plain 4x4 multiply for everything (a few microseconds on the 060,
- * 10-13 matrix changes a GLQuake frame); MVP is formed when the matrix
- * block is emitted (hwstate.c). Trigonometry is float and needs no libm:
- * glRotatef(EXT) is called per entity, and MiniGLV3D's double sin/cos
- * there was measurable.
+ * A plain 4x4 multiply for the general case; MVP is formed when the
+ * matrix block is emitted (hwstate.c). Trigonometry is float and needs no
+ * libm: glRotatef(EXT) is called per entity, and MiniGLV3D's double
+ * sin/cos there was measurable.
+ *
+ * GLQuake turns every entity with glTranslatef and three glRotatef about
+ * the unit axes. On the 060 at 50 MHz an FDIV costs about 37 cycles, and
+ * the first Rotatef here spent 30 of them (a Newton square root, the
+ * sine's divisions): about 80 us a call. Now a unit axis needs no square
+ * root and no division, the sine multiplies by reciprocal constants, and a
+ * rotation about a unit axis or a translation changes only the columns it
+ * touches (M x R: two columns; M x T: the last), with the same products in
+ * the same order as the full multiply, so the result is the same.
  */
 
 #include "core.h"
@@ -21,8 +29,8 @@ static float SinCore(float x)
     float r;
 
     x2 = x * x;
-    r = x * (1.0f - x2 / 6.0f * (1.0f - x2 / 20.0f * (1.0f - x2 / 42.0f
-           * (1.0f - x2 / 72.0f * (1.0f - x2 / 110.0f)))));
+    r = x * (1.0f - x2 * (1.0f / 6.0f) * (1.0f - x2 * (1.0f / 20.0f) * (1.0f - x2 * (1.0f / 42.0f)
+           * (1.0f - x2 * (1.0f / 72.0f) * (1.0f - x2 * (1.0f / 110.0f))))));
     return r;
 }
 
@@ -32,7 +40,7 @@ float Core_Sin(float deg)
     LONG turns;
 
     /* reduce to [-180, 180) degrees, then fold to [-90, 90] */
-    turns = Core_Floor((deg + 180.0f) / 360.0f);
+    turns = Core_Floor((deg + 180.0f) * (1.0f / 360.0f));
     deg -= (float) turns * 360.0f;
     if (deg > 90.0f)
         deg = 180.0f - deg;
@@ -53,13 +61,20 @@ float Core_Cos(float deg)
 static float Sqrt(float v)
 {
     float x;
+#if !(defined(__GNUC__) && defined(__mc68000__) && defined(__HAVE_68881__))
     int i;
+#endif
 
     if (!(v > 0.0f))
         return 0.0f;
+#if defined(__GNUC__) && defined(__mc68000__) && defined(__HAVE_68881__)
+    /* FSQRT is in the 040's and the 060's FPU, no trap */
+    __asm__("fsqrt.x %1,%0" : "=f" (x) : "f" (v));
+#else
     x = v > 1.0f ? v : 1.0f;
     for (i = 0; i < 20; i++)
         x = 0.5f * (x + v / x);
+#endif
     return x;
 }
 
@@ -100,6 +115,18 @@ static void Changed(struct Core *c)
 {
     if (c->matrix_mode != GL_TEXTURE)
         c->dirty |= D_MATRIX;
+}
+
+/* The current matrix of the mode, or NULL (an error raised) inside
+ * glBegin. */
+static float *Current(struct Core *c)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return NULL;
+    }
+    return Core_TopMatrix(c, c->matrix_mode)->m;
 }
 
 /* current = current x m */
@@ -220,24 +247,73 @@ void Core_PopMatrix(struct Core *c)
 
 void Core_Translatef(struct Core *c, float x, float y, float z)
 {
-    float t[16];
+    float *m;
+    ULONG r;
 
-    Ident(t);
-    t[12] = x;
-    t[13] = y;
-    t[14] = z;
-    Mult(c, t);
+    /* M x T: column 3 = x c0 + y c1 + z c2 + c3, in Mat_Mul's order */
+    m = Current(c);
+    if (m == NULL)
+        return;
+    for (r = 0; r < 4; r++)
+        m[12 + r] = m[r] * x + m[4 + r] * y + m[8 + r] * z + m[12 + r];
+    Changed(c);
 }
 
 void Core_Scalef(struct Core *c, float x, float y, float z)
 {
-    float t[16];
+    float *m;
+    ULONG r;
 
-    Ident(t);
-    t[0] = x;
-    t[5] = y;
-    t[10] = z;
-    Mult(c, t);
+    m = Current(c);
+    if (m == NULL)
+        return;
+    for (r = 0; r < 4; r++)
+    {
+        m[r] *= x;
+        m[4 + r] *= y;
+        m[8 + r] *= z;
+    }
+    Changed(c);
+}
+
+/* m = m x R for R the rotation by (s, co) about a unit axis: columns a
+ * and b change (z: 0, 1; y: 2, 0; x: 1, 2), a = co a + s b, b = co b - s a.
+ * The full multiply forms the same sums (the other products are exact
+ * zeros). */
+static void Rot2(float *m, ULONG a, ULONG b, float s, float co)
+{
+    float *pa;
+    float *pb;
+    float va;
+    float vb;
+    ULONG r;
+
+    pa = m + a * 4;
+    pb = m + b * 4;
+    for (r = 0; r < 4; r++)
+    {
+        va = pa[r];
+        vb = pb[r];
+        pa[r] = va * co + vb * s;
+        pb[r] = vb * co - va * s;
+    }
+}
+
+/* A rotation about a unit axis: 0 (x), 1 (y), 2 (z). */
+static void RotUnit(struct Core *c, ULONG axis, float s, float co)
+{
+    float *m;
+
+    m = Current(c);
+    if (m == NULL)
+        return;
+    if (axis == 2)
+        Rot2(m, 0, 1, s, co);
+    else if (axis == 1)
+        Rot2(m, 2, 0, s, co);
+    else
+        Rot2(m, 1, 2, s, co);
+    Changed(c);
 }
 
 /* The rotation by (s, co) about the unit axis (x, y, z): GL's formula. */
@@ -266,35 +342,40 @@ void Core_Rotatef(struct Core *c, float angle, float x, float y, float z)
     float co;
 
     mag = x * x + y * y + z * z;
-    mag = Sqrt(mag);
     if (mag == 0.0f)
         return;
     s = Core_Sin(angle);
     co = Core_Cos(angle);
-    x /= mag;
-    y /= mag;
-    z /= mag;
+    if (mag == 1.0f && (x == 1.0f || y == 1.0f || z == 1.0f))
+    {
+        /* a unit axis (GLQuake's entities: always) */
+        RotUnit(c, (x == 1.0f) ? 0 : (y == 1.0f) ? 1 : 2, s, co);
+        return;
+    }
+    if (mag != 1.0f)
+    {
+        mag = 1.0f / Sqrt(mag);
+        x *= mag;
+        y *= mag;
+        z *= mag;
+    }
     RotMat(t, s, co, x, y, z);
     Mult(c, t);
 }
 
 void Core_RotateAxis(struct Core *c, float s, float co, LONG axis)
 {
-    float t[16];
-
     if (axis == (LONG) GLROT_001)
-        RotMat(t, s, co, 0.0f, 0.0f, 1.0f);
+        RotUnit(c, 2, s, co);
     else if (axis == (LONG) GLROT_010)
-        RotMat(t, s, co, 0.0f, 1.0f, 0.0f);
+        RotUnit(c, 1, s, co);
     else if (axis == (LONG) GLROT_100)
-        RotMat(t, s, co, 1.0f, 0.0f, 0.0f);
+        RotUnit(c, 0, s, co);
     else
     {
         /* only the single-axis selectors exist (MiniGLV3D refuses the rest too) */
         Core_Error(c, GL_INVALID_ENUM);
-        return;
     }
-    Mult(c, t);
 }
 
 void Core_RotateAxisDeg(struct Core *c, float angle, LONG axis)

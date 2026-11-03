@@ -251,6 +251,181 @@ static void Pack(struct Core *c, ULONG *p, ULONG units, const float *pos)
     }
 }
 
+/* A colour array element as the packed vertex's colour dword (cur_color's
+ * layout: R in the low byte, then G, B, A). */
+static ULONG ColorBits(ULONG type, ULONG size, const UBYTE *p)
+{
+    if (type == MGL_UBYTE_ARGB)         /* A R G B in memory (GLQuake's models) */
+        return ((ULONG) p[0] << 24) | ((ULONG) p[3] << 16) | ((ULONG) p[2] << 8) | p[1];
+    if (type == MGL_UBYTE_BGRA)         /* B G R A */
+        return ((ULONG) p[3] << 24) | ((ULONG) p[0] << 16) | ((ULONG) p[1] << 8) | p[2];
+    return ((size == 4 ? (ULONG) p[3] : 255UL) << 24) | ((ULONG) p[2] << 16)
+           | ((ULONG) p[1] << 8) | p[0];
+}
+
+/* A big-endian longword at p (the 68k's own load; byte by byte elsewhere,
+ * so the host tests read what the 68k reads). */
+#if defined(__GNUC__) && defined(__mc68000__)
+#define LOAD_BE32(p) (*(const ULONG *) (const void *) (p))
+#else
+#define LOAD_BE32(p) (((ULONG) (p)[0] << 24) | ((ULONG) (p)[1] << 16) | ((ULONG) (p)[2] << 8) \
+                      | (ULONG) (p)[3])
+#endif
+
+/* GLQuake's models, straight through: a byte-swapped stream, x y z
+ * floats, A R G B colour bytes, one coordinate set of floats. The colour
+ * dword the GPU reads (a << 24 | b << 16 | g << 8 | r), byte-reversed, is
+ * the source longword rotated left by 8. Few enough values for registers:
+ * MEASURED on the A4000D, the general loop below kept its pointers on the
+ * stack and walked the units for every vertex. */
+static void PackXyzArgbSt(ULONG *out, const UBYTE *vp, ULONG vs, const UBYTE *cp, ULONG cs,
+                          const UBYTE *tp, ULONG ts, ULONG count)
+{
+    const ULONG *v;
+    const ULONG *t;
+    ULONG b0, b1, b2, b3;
+
+    while (count-- > 0)
+    {
+        v = (const ULONG *) (const void *) vp;
+        t = (const ULONG *) (const void *) tp;
+        b0 = v[0];
+        b1 = v[1];
+        b2 = v[2];
+        R2_SWAPI(b0);
+        R2_SWAPI(b1);
+        R2_SWAPI(b2);
+        out[0] = b0;
+        out[1] = b1;
+        out[2] = b2;
+        b3 = LOAD_BE32(cp);
+        out[3] = (b3 << 8) | (b3 >> 24);
+        b0 = t[0];
+        b1 = t[1];
+        R2_SWAPI(b0);
+        R2_SWAPI(b1);
+        out[4] = b0;
+        out[5] = b1;
+        out += 6;
+        vp += vs;
+        cp += cs;
+        tp += ts;
+    }
+}
+
+/* The locked range packed the fast way: float positions of 2 or 3
+ * components, float texture coordinates of 2 or more, colours as bytes (or
+ * none) -- what GLQuake's models use. Every dword moves as bits, through
+ * integer registers only. MEASURED on the A4000D: the general way (Fetch:
+ * each component through Comp to a float, the colour through
+ * Core_Color4ub, then Pack) was 88% of a locked draw. FALSE: other arrays
+ * (the caller packs through Fetch). */
+static ULONG PackFast(struct Core *c, ULONG *out, ULONG first, ULONG count, ULONG units)
+{
+    const UBYTE *vp;
+    const UBYTE *cp;
+    const UBYTE *tp[CORE_UNITS];
+    const ULONG *v;
+    const ULONG *t;
+    ULONG vs;
+    ULONG cs;
+    ULONG ts[CORE_UNITS];
+    ULONG st[CORE_UNITS][2];
+    ULONG col;
+    ULONG swap;
+    ULONG b0, b1, b2, b3;
+    ULONG k;
+    ULONG u;
+    ULONG n;
+
+    if (c->no_fast || c->va.type != GL_FLOAT || c->va.size > 3)
+        return 0;
+    if (c->ca.enabled && c->ca.type != MGL_UBYTE_ARGB && c->ca.type != MGL_UBYTE_BGRA
+        && c->ca.type != GL_UNSIGNED_BYTE)
+        return 0;
+    for (u = 0; u < CORE_UNITS; u++)
+    {
+        tp[u] = NULL;
+        ts[u] = 0;
+        if (!(units & (1UL << u)))
+            continue;
+        if (c->ta[u].enabled)
+        {
+            if (c->ta[u].type != GL_FLOAT || c->ta[u].size < 2)
+                return 0;
+            tp[u] = Elem(&c->ta[u], first);
+            ts[u] = c->ta[u].stride ? c->ta[u].stride : c->ta[u].size * 4;
+        }
+        st[u][0] = R2_FBITS(c->cur_st[u][0]);
+        st[u][1] = R2_FBITS(c->cur_st[u][1]);
+    }
+    vp = Elem(&c->va, first);
+    vs = c->va.stride ? c->va.stride : c->va.size * 4;
+    cp = c->ca.enabled ? Elem(&c->ca, first) : NULL;
+    cs = c->ca.enabled ? (c->ca.stride ? c->ca.stride : c->ca.size * TypeSize(c->ca.type)) : 0;
+    col = c->cur_color;
+    swap = c->cs->swap;
+    if (swap && c->va.size == 3 && cp != NULL && c->ca.type == MGL_UBYTE_ARGB && units == 1
+        && c->ta[0].enabled)
+    {
+        /* unit 0's array, as the loop above found it (not read back from
+         * tp/ts: SAS/C cannot see that loop set them, W317) */
+        PackXyzArgbSt(out, vp, vs, cp, cs, Elem(&c->ta[0], first),
+                      c->ta[0].stride ? c->ta[0].stride : c->ta[0].size * 4, count);
+        return 1;
+    }
+    for (k = 0; k < count; k++)
+    {
+        v = (const ULONG *) vp;
+        b0 = v[0];
+        b1 = v[1];
+        b2 = (c->va.size == 3) ? v[2] : 0;
+        b3 = (cp != NULL) ? ColorBits(c->ca.type, c->ca.size, cp) : col;
+        if (swap)
+        {
+            R2_SWAPI(b0);
+            R2_SWAPI(b1);
+            R2_SWAPI(b2);
+            R2_SWAPI(b3);
+        }
+        out[0] = b0;
+        out[1] = b1;
+        out[2] = b2;
+        out[3] = b3;
+        n = 4;
+        for (u = 0; u < CORE_UNITS; u++)
+        {
+            if (!(units & (1UL << u)))
+                continue;
+            if (tp[u] != NULL)
+            {
+                t = (const ULONG *) tp[u];
+                b0 = t[0];
+                b1 = t[1];
+                tp[u] += ts[u];
+            }
+            else
+            {
+                b0 = st[u][0];
+                b1 = st[u][1];
+            }
+            if (swap)
+            {
+                R2_SWAPI(b0);
+                R2_SWAPI(b1);
+            }
+            out[n] = b0;
+            out[n + 1] = b1;
+            n += 2;
+        }
+        out += n;
+        vp += vs;
+        if (cp != NULL)
+            cp += cs;
+    }
+    return 1;
+}
+
 /* The locked range in the stream still holds what a draw with units would
  * write: the same texture sets and, for each attribute without an array,
  * the same current value. */
@@ -289,6 +464,9 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     ULONG a;
     ULONG b;
     ULONG g;
+    ULONG *base;
+    ULONG *heap;
+    const UWORD *ix16;
     float pos[4];
 
     if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP)
@@ -300,12 +478,21 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
         return 1;                   /* GL draws nothing */
     if (n > 0xffffUL || lcount > 0xffffUL)
         return 0;
-    for (i = 0; i < n; i++)
+    if (type == GL_UNSIGNED_SHORT)
     {
-        k = Index(type, idx, (LONG) i);
-        if (k < first || k >= first + lcount)
-            return 0;               /* outside the lock: the general way */
+        /* GLQuake's indices: one loop without the type test */
+        ix16 = (const UWORD *) idx;
+        for (i = 0; i < n; i++)
+            if ((ULONG) ix16[i] - first >= lcount)
+                return 0;           /* outside the lock: the general way */
     }
+    else
+        for (i = 0; i < n; i++)
+        {
+            k = Index(type, idx, (LONG) i);
+            if (k < first || k >= first + lcount)
+                return 0;
+        }
     units = Core_UnitsOn(c);
     vd = 4 + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);
     vbytes = (lcount * vd * 4 + 31) & ~31UL;
@@ -315,18 +502,33 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     upload = !LockCurrent(c, units);
     if (c->stream_pos + ibytes + (upload ? vbytes : 0) > c->stream_size)
     {
-        StreamWrap(c);
+        StreamWrap(c);              /* may flush: before any lock */
         upload = 1;
+    }
+    /* where the stream's dwords go: the staging buffer, or the heap itself
+     * for this moment (Core_SetVram) */
+    base = c->stream_cpu;
+    if (c->stream_direct)
+    {
+        heap = c->vram_begin(c->env.env);
+        if (heap == NULL)
+        {
+            c->stat_vram_lost++;
+            return 0;               /* out of reach: the immediate way */
+        }
+        c->heap.cpu = heap;
+        base = heap + c->stream_off / 4;
     }
     if (upload)
     {
         off = StreamAlloc(c, vbytes);
-        p = c->stream_cpu + (off - c->stream_off) / 4;
-        for (k = 0; k < lcount; k++)
-        {
-            Fetch(c, first + k, pos);
-            Pack(c, p + k * vd, units, pos);
-        }
+        p = base + (off - c->stream_off) / 4;
+        if (!PackFast(c, p, first, lcount, units))
+            for (k = 0; k < lcount; k++)
+            {
+                Fetch(c, first + k, pos);
+                Pack(c, p + k * vd, units, pos);
+            }
         c->lk_gpu = c->heap.gpu + off;
         c->lk_valid = 1;
         c->lk_units = units;
@@ -342,16 +544,36 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     /* indices rebased to the lock, two to a dword, the first in the low
      * half as the GPU reads it (Mesa EMIT_TWO_ELTS) */
     off = StreamAlloc(c, ibytes);
-    p = c->stream_cpu + (off - c->stream_off) / 4;
-    for (i = 0; i < n; i += 2)
+    p = base + (off - c->stream_off) / 4;
+    if (type == GL_UNSIGNED_SHORT && c->cs->swap)
     {
-        a = Index(type, idx, (LONG) i) - first;
-        b = (i + 1 < n) ? Index(type, idx, (LONG) i + 1) - first : 0;
-        g = (b << 16) | a;
-        if (c->cs->swap)
+        /* pairs, rebased, byte-reversed: a b as the GPU reads them */
+        ix16 = (const UWORD *) idx;
+        for (i = 0; i + 1 < n; i += 2)
+        {
+            g = (((ULONG) ix16[i + 1] - first) << 16) | ((ULONG) ix16[i] - first);
             R2_SWAPI(g);
-        p[i / 2] = g;
+            *p++ = g;
+        }
+        if (i < n)
+        {
+            g = (ULONG) ix16[i] - first;
+            R2_SWAPI(g);
+            *p = g;
+        }
     }
+    else
+        for (i = 0; i < n; i += 2)
+        {
+            a = Index(type, idx, (LONG) i) - first;
+            b = (i + 1 < n) ? Index(type, idx, (LONG) i + 1) - first : 0;
+            g = (b << 16) | a;
+            if (c->cs->swap)
+                R2_SWAPI(g);
+            p[i / 2] = g;
+        }
+    if (c->stream_direct)
+        c->vram_end(c->env.env);    /* before anything that may flush */
     Core_Validate(c);
     Hw_VertexFormat(c, units);
     Core_MarkTextures(c, units);

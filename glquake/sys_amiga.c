@@ -294,10 +294,43 @@ static int sw_rc;
 static int sw_on;
 static jmp_buf sw_quit;
 
+/* RadeonGL addition: a PC profile of the timedemo frames. With the
+ * variable QuakeProfile set to a file name, a sampler (glsmoke/pcprof.h)
+ * records where the time goes from the timedemo's second frame (loading
+ * done) to its end; tools/profile.py reads the file with
+ * --prog build/glquake/GLQuake.sym. Every 5 ms, at most 12,000 samples:
+ * a minute of demo1 on the A4000D. */
+#include "../glsmoke/pcprof.h"
+
+static char rgl_prof_path[256];
+static ULONG rgl_prof_lib;
+
+int main (int argc, char *argv[]);
+
+void RGL_ProfStart(void)
+{
+	if (rgl_prof_lib != 0 || !MiniGLDispatch)
+		return;
+	if (GetVar("QuakeProfile", rgl_prof_path, sizeof(rgl_prof_path), 0) <= 0)
+		return;
+	rgl_prof_lib = (ULONG) MiniGLDispatch->GLTexCoord2f;
+	if (!PcProf_Start(5000, 12000, 64))
+		rgl_prof_lib = 0;
+}
+
+void RGL_ProfStop(void)
+{
+	if (rgl_prof_lib == 0)
+		return;
+	PcProf_Stop(rgl_prof_path, rgl_prof_lib, (ULONG) main);
+	rgl_prof_lib = 0;
+}
+
 static void cleanup(int rc)
 {
 	int i;
 
+	RGL_ProfStop();
 	if(prevent_crash)
 		Host_Shutdown();
 

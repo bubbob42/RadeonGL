@@ -22,7 +22,7 @@ LONG R2E_Reg(struct R2Cs *cs, ULONG reg, ULONG val)
 {
     ULONG *p;
 
-    p = R2Cs_Room(cs, 2);
+    p = R2_ROOM(cs, 2);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, R2_PKT0(reg, 0));
@@ -38,7 +38,7 @@ static LONG RegsPkt(struct R2Cs *cs, ULONG header, ULONG n, const ULONG *vals)
 
     if (n == 0 || n > MAX_PAYLOAD)
         return Fail(cs, R2_EARG);
-    p = R2Cs_Room(cs, n + 1);
+    p = R2_ROOM(cs, n + 1);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, header);
@@ -70,7 +70,7 @@ LONG R2E_Nop(struct R2Cs *cs, ULONG ndw, ULONG skip_ok)
 
     if (ndw == 0)
         return R2_OK;
-    p = R2Cs_Room(cs, ndw);
+    p = R2_ROOM(cs, ndw);
     if (p == NULL)
         return cs->error;
     if (!skip_ok || ndw == 1)
@@ -109,7 +109,7 @@ LONG R2E_Vectors(struct R2Cs *cs, ULONG addr, ULONG n, const ULONG *vals)
 
     if (n == 0 || (n & 3) != 0 || n > MAX_PAYLOAD)
         return Fail(cs, R2_EARG);
-    p = R2Cs_Room(cs, 5 + n);
+    p = R2_ROOM(cs, 5 + n);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, R2_PKT0(R_SE_TCL_STATE_FLUSH, 0));
@@ -130,7 +130,7 @@ LONG R2E_Scalars(struct R2Cs *cs, ULONG addr, ULONG n, const ULONG *vals)
 
     if (n == 0 || n > MAX_PAYLOAD)
         return Fail(cs, R2_EARG);
-    p = R2Cs_Room(cs, 3 + n);
+    p = R2_ROOM(cs, 3 + n);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, R2_PKT0(R_SE_TCL_SCALAR_INDX_REG, 0));
@@ -401,12 +401,14 @@ ULONG *R2E_ImmdOpen(struct R2Cs *cs, ULONG vtx_dw, ULONG max_verts)
         Fail(cs, R2_ESTATE);
         return NULL;
     }
-    if (vtx_dw == 0 || max_verts == 0 || max_verts > R2E_IMMD_MAX_VERTS(vtx_dw))
+    /* max_verts <= R2E_IMMD_MAX_VERTS(vtx_dw) without the division */
+    if (vtx_dw == 0 || max_verts == 0 || vtx_dw > 0x3fffUL || max_verts > 0x3fffUL
+        || vtx_dw * max_verts > 0x3fffUL)
     {
         Fail(cs, R2_EARG);
         return NULL;
     }
-    p = R2Cs_Room(cs, 2 + vtx_dw * max_verts);
+    p = R2_ROOM(cs, 2 + vtx_dw * max_verts);
     if (p == NULL)
         return NULL;
     cs->immd = p;
@@ -414,11 +416,24 @@ ULONG *R2E_ImmdOpen(struct R2Cs *cs, ULONG vtx_dw, ULONG max_verts)
     return p + 2;
 }
 
+/* The header and control dword of the open packet, nverts vertices of
+ * ndw dwords in all (checked by the callers). */
+static LONG ImmdHeader(struct R2Cs *cs, ULONG *p, ULONG ndw, ULONG nverts, ULONG cntl)
+{
+    if (ndw == 0)
+        return R2_OK;                           /* cs->ptr is still p */
+    /* count = payload - 1 = the vertex dwords (Linux: immd_dwords = count) */
+    p[0] = R2_OUT(cs, R2_PKT3(R2_OP_3D_DRAW_IMMD_2, ndw));
+    p[1] = R2_OUT(cs, (cntl & ~(R_VF_PRIM_WALK_MASK | 0xffff0000UL))
+                      | R_VF_PRIM_WALK_RING | (nverts << R_VF_VERTEX_NUMBER_SHIFT));
+    cs->ptr = p + 2 + ndw;
+    return R2_OK;
+}
+
 LONG R2E_ImmdClose(struct R2Cs *cs, ULONG *vend, ULONG cntl)
 {
     ULONG *p;
     ULONG ndw;
-    ULONG nverts;
 
     p = cs->immd;
     if (p == NULL)
@@ -431,15 +446,26 @@ LONG R2E_ImmdClose(struct R2Cs *cs, ULONG *vend, ULONG cntl)
     ndw = (ULONG) (vend - (p + 2));
     if (ndw % cs->immd_vtx != 0 || ndw > R2_PKT_MAX_COUNT)
         return Fail(cs, R2_EARG);
-    if (ndw == 0)
-        return R2_OK;                           /* cs->ptr is still p */
-    nverts = ndw / cs->immd_vtx;
-    /* count = payload - 1 = the vertex dwords (Linux: immd_dwords = count) */
-    p[0] = R2_OUT(cs, R2_PKT3(R2_OP_3D_DRAW_IMMD_2, ndw));
-    p[1] = R2_OUT(cs, (cntl & ~(R_VF_PRIM_WALK_MASK | 0xffff0000UL))
-                      | R_VF_PRIM_WALK_RING | (nverts << R_VF_VERTEX_NUMBER_SHIFT));
-    cs->ptr = vend;
-    return R2_OK;
+    return ImmdHeader(cs, p, ndw, ndw / cs->immd_vtx, cntl);
+}
+
+LONG R2E_ImmdCloseN(struct R2Cs *cs, ULONG nverts, ULONG cntl)
+{
+    ULONG *p;
+    ULONG ndw;
+
+    p = cs->immd;
+    if (p == NULL)
+        return Fail(cs, R2_ESTATE);
+    cs->immd = NULL;
+    if (cs->error != R2_OK)
+        return cs->error;
+    if (nverts > R2_PKT_MAX_COUNT)
+        return Fail(cs, R2_EARG);
+    ndw = nverts * cs->immd_vtx;
+    if (ndw > R2_PKT_MAX_COUNT || p + 2 + ndw > cs->end)
+        return Fail(cs, R2_EARG);
+    return ImmdHeader(cs, p, ndw, nverts, cntl);
 }
 
 LONG R2E_Immd(struct R2Cs *cs, ULONG cntl, ULONG vtx_dw, ULONG nverts,
@@ -473,7 +499,7 @@ LONG R2E_LoadVbpntr(struct R2Cs *cs, ULONG n, const struct R2Aos *aos)
     /* payload: the count, then per pair an attribute dword and two
      * addresses, an odd last array one attribute dword and one address */
     sz = 1 + (n >> 1) * 3 + (n & 1) * 2;
-    p = R2Cs_Room(cs, 1 + sz);
+    p = R2_ROOM(cs, 1 + sz);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, R2_PKT3(R2_OP_3D_LOAD_VBPNTR, sz - 1));
@@ -501,7 +527,7 @@ LONG R2E_DrawVbuf(struct R2Cs *cs, ULONG cntl, ULONG nverts)
 
     if (nverts == 0 || nverts > 0xffffUL)
         return Fail(cs, R2_EARG);
-    p = R2Cs_Room(cs, 2);
+    p = R2_ROOM(cs, 2);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, R2_PKT3(R2_OP_3D_DRAW_VBUF_2, 0));
@@ -520,7 +546,7 @@ LONG R2E_DrawIndexed(struct R2Cs *cs, ULONG cntl, ULONG nidx, ULONG idx_gpu,
         return Fail(cs, R2_EARG);
     if (cntl & R_VF_INDEX_SZ_4)
         return Fail(cs, R2_EARG);               /* 16-bit indices only */
-    p = R2Cs_Room(cs, 8);
+    p = R2_ROOM(cs, 8);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, R2_PKT0(R_SE_VF_MAX_VTX_INDX, 0));
@@ -540,7 +566,7 @@ LONG R2E_Fence(struct R2Cs *cs, ULONG scratch_reg, ULONG seq)
 {
     ULONG *p;
 
-    p = R2Cs_Room(cs, R2E_FENCE_DWORDS);
+    p = R2_ROOM(cs, R2E_FENCE_DWORDS);
     if (p == NULL)
         return cs->error;
     p[0] = R2_OUT(cs, R2_PKT0(R_RB3D_DSTCACHE_CTLSTAT, 0));
