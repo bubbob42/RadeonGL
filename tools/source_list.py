@@ -8,7 +8,8 @@ ignored), as far as it exists and builds the library, the tools, the demos
 and the Installer:
 
     the Makefile, LICENSE, README.md, .vamosrc.in, lib/ src/ demos/
-    install/ guide/ tools/ test/ glsmoke/ icons/ catalogs/ fsuae/*.in,
+    install/ guide/ tools/ test/ glsmoke/ icons/ catalogs/ glquake-bench/
+    fsuae/*.in,
     sdk/minigl-29.1 (the MiniGL SDK: Hyperion licence) and
     sdk/radeon-firmware (AMD's microcode, MIT)
 
@@ -35,7 +36,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FILES = ("Makefile", "LICENSE", "README.md", ".vamosrc.in")
 DIRS = ("lib/", "src/", "demos/", "install/", "guide/", "tools/", "test/", "glsmoke/",
-        "icons/", "catalogs/", "sdk/minigl-29.1/", "sdk/radeon-firmware/")
+        "icons/", "catalogs/", "glquake-bench/", "sdk/minigl-29.1/", "sdk/radeon-firmware/")
 
 
 def wanted(path):

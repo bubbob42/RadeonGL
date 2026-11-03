@@ -47,8 +47,9 @@ void Mmio_Write(APTR base, ULONG off, ULONG value);
  * from CONFIG_MEMSIZE, else from CONFIG_APER_0_BASE against bar0_pci
  * (BAR0's PCI address; 0 when unknown), else from CONFIG_APER_SIZE.
  * Returns MMIO_*; *memsize gets the memory size in bytes when it reads as
- * one, else 0. Undecided leaves the flag at its default (no swap). Per Picasso96 the registers read big-endian (no swap)
- * while a bitmap of the board is locked; this checks it. */
+ * one, else 0. Undecided leaves the flag at its default (no swap). The
+ * registers read big-endian (no swap) while a bitmap of the board is
+ * locked (MEASURED on the A4000D); this checks it. */
 ULONG Mmio_DetectSwap(APTR base, ULONG bar0_pci, ULONG *memsize);
 
 #endif /* PROBE_MMIO_H */

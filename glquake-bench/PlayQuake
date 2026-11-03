@@ -1,0 +1,21 @@
+; PlayQuake -- GLQuake on the Radeon through RadeonGL, with sound and LAN
+; play, at the fastest RadeonGL settings (README.md beside this script):
+;   RadeonGLCheck 0    the command check off
+;   RadeonGLDirect 1   the vertex stream straight into video RAM
+;   -lm_LUMINANCE      8-bit lightmaps (id's own default)
+;   320 x 240          GLQuake's default screen
+; Sound: Paula through GLQuake's own DMA driver; for AHI add -ahi below.
+; LAN: UDP through the running TCP/IP stack's bsdsocket.library.
+; Put it in the GLQuake drawer, beside glquake and id1, and double-click
+; it, or CD there and Execute PlayQuake. Anything after the name goes to
+; GLQuake as well:  Execute PlayQuake +timedemo demo1
+.KEY ARGS/F
+.BRA {
+.KET }
+FailAt 21
+Stack 1000000
+Set RadeonGLCheck 0
+Set RadeonGLDirect 1
+glquake -nocdaudio -lm_LUMINANCE {ARGS}
+UnSet RadeonGLCheck
+UnSet RadeonGLDirect

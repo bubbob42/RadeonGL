@@ -6,7 +6,7 @@
 #include "r200regs.h"
 
 /* no swap until decided: registers read native inside a lock (MEASURED on
- * the A4000D, and what Picasso96 says) */
+ * the A4000D) */
 BOOL Mmio_Swap = FALSE;
 
 ULONG Mmio_Swap32(ULONG v)

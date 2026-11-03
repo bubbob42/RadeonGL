@@ -1,12 +1,13 @@
 /*
  * LockBench -- what a Picasso96 bitmap lock does, measured.
  *
- * The measurements (2026-11-02) and the other reading of the Picasso96API disagree about the one thing the back end's design
- * hangs on (LockBench):
+ * Two readings of a Picasso96 bitmap lock disagree about the one thing
+ * the back end's design hangs on:
  *
  *   one:   while a bitmap of the board is locked, P96 keeps off the chip,
- *            so Intuition cannot render and the GUI waits;
- *   other: a lock a lock does not stop rendering; it blocks only reorganisations of video RAM.
+ *          so Intuition cannot render and the GUI waits;
+ *   other: a lock blocks only reorganisations of video RAM, and rendering
+ *          goes on.
  *
  * LockBench answers it on the running system:
  *

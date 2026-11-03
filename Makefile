@@ -643,7 +643,7 @@ push: all
 # its flags never mix with the project's. NOT part of this repository (the
 # user, 2026-11-03: the repo holds the library, the installer, the tools and
 # the demos): its source lives beside it, GLQUAKE_DIR. `glquake-data` copies
-# the id1 paks from QUAKE_ID1 (default: the Quake data drawer) into
+# the id1 paks from QUAKE_ID1 (a drawer with the Quake data) into
 # dist/Quake/id1 -- 54 MB, never committed. See $(GLQUAKE_DIR)/README.md.
 GLQUAKE_DIR ?= ../RadeonGL-GLQuake
 .PHONY: glquake glquake-data clean-glquake
@@ -661,8 +661,8 @@ CORE_HDRS       := $(wildcard src/core/*.h)
 # MMIO and aperture costs; LockBench measures what a P96 bitmap lock does.
 # The card comes from Picasso96 (p96board.c: a locked friend bitmap of the
 # Workbench screen, the bases from p96GetBitMapAttr), and every register
-# access happens inside such a lock (Picasso96, 2026-11-02;
-# LockBench). openpci only cross-checks.
+# access happens inside such a lock (measured: LockBench). openpci only
+# cross-checks.
 # GCC, -m68020 (the Mediator needs a 020 anyway). Binaries under
 # dist/Probe/C, IconX scripts beside them, icons on the desktop.
 P96_SDK ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop

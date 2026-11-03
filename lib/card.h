@@ -1,7 +1,7 @@
 /*
  * card.h -- the Radeon behind minigl.library (docs/design-card-backend.md).
  *
- * The rules (Picasso96, 2026-11-02; measured by the probes):
+ * The rules (measured by the probes):
  *  - the card comes through Picasso96: the GL screen's board, a locked
  *    bitmap's p96GetBitMapAttr bases, P96's chip name and the chip's own
  *    PCI mirror say it is an R200-family Radeon;

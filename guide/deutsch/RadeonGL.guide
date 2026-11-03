@@ -306,10 +306,10 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
 
 @{b}Geschwindigkeit@{ub}
 
-GLQuake für die minigl.library, von Frank Wille und Steffen Häuser: seine
-Timedemos (alle Bilder) auf dem Testrechner (A4000D, 68060 bei 50 MHz auf
-einer CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96),
-Bilder pro Sekunde:
+GLQuake für die minigl.library, von Frank Wille, Steffen Häuser und
+Dennis Boon: seine Timedemos (alle Bilder) auf dem Testrechner (A4000D,
+68060 bei 50 MHz auf einer CyberStorm MK II, Mediator, Radeon 9200,
+AmigaOS 3.2, Picasso96), Bilder pro Sekunde:
 
     Demo   Bildschirm   Prüfung an  Prüfung aus  Direkt  Direkt, 8-Bit-LT
     demo1  320 x 240          18,7         23,7    24,2              24,9
@@ -528,9 +528,9 @@ Hardware getestet.
     * Hyperion Entertainment (Hans-Jörg und Thomas Frieden): MiniGL.
     * Steffen "MagicSN" Häuser: die minigl.library 29.1, ihre Hülle,
       ihre Dispatch-Schnittstelle und ihr SDK.
-    * Frank Wille und Steffen Häuser: GLQuake für die minigl.library,
-      nach Quake von id Software -- das Programm, mit dem RadeonGL
-      entwickelt und gemessen wurde.
+    * Frank Wille, Steffen Häuser und Dennis Boon: GLQuake für die
+      minigl.library, nach Quake von id Software -- das Programm, mit
+      dem RadeonGL entwickelt und gemessen wurde.
     * Advanced Micro Devices: der R200-Mikrocode.
     * ATI Technologies, VA Linux Systems, Precision Insight, The Weather
       Channel und Tungsten Graphics, Red Hat und die Autoren der Treiber

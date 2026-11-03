@@ -68,10 +68,10 @@ sets GL_INVALID_OPERATION; the library's log names every such call.
 
 ## GLQuake benchmarks
 
-GLQuake for `minigl.library`, by Frank Wille and Steffen Häuser: its
-timedemos (all frames) on the test machine: an A4000D, 68060 at 50 MHz on a
-CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96. Frames a
-second:
+GLQuake for `minigl.library`, by Frank Wille, Steffen Häuser and Dennis
+Boon: its timedemos (all frames) on the test machine: an A4000D, 68060 at
+50 MHz on a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2,
+Picasso96. Frames a second:
 
 | Demo | Screen | Check on | Check off | Direct | Direct, 8-bit lightmaps |
 |---|---|---:|---:|---:|---:|
@@ -131,7 +131,10 @@ fetched from Aminet:
 | `gmake release-stage release-archive release-aminet release-drawer` | the release package: `dist/RadeonGL.lha`, the Aminet pair (copied to `release/`), `DEV:Release` |
 
 GLQuake, the program RadeonGL is measured with, is not part of this
-repository. Its source lives beside it (`GLQUAKE_DIR`, default
+repository. To play it on RadeonGL, or to run its benchmarks, see
+[`glquake-bench/`](glquake-bench): start scripts with sound and LAN, where
+to get GLQuake, how to install it. For development, GLQuake's source lives
+beside this repository (`GLQUAKE_DIR`, default
 `../RadeonGL-GLQuake`); `gmake glquake glquake-data` builds it and copies
 the game data (never committed).
 
@@ -144,6 +147,7 @@ the game data (never committed).
 | `src/r200/` | the R200 layer: packets, emitter, ring, command processor, checker |
 | `src/probe/` | the hardware probes (R200Info, BusBench, ...) |
 | `demos/` | the demonstrators |
+| `glquake-bench/` | start scripts for GLQuake on RadeonGL, and how to install it |
 | `install/` | the Installer script and the drawer's scripts |
 | `guide/` | the manuals (English, German) and the Aminet readme |
 | `test/` | host tests and FS-UAE tests |
@@ -176,8 +180,8 @@ was tested on real hardware.
 - **Hyperion Entertainment (Hans-Jörg and Thomas Frieden):** MiniGL.
 - **Steffen "MagicSN" Häuser:** `minigl.library` 29.1, its shell, its
   dispatch interface and its SDK.
-- **Frank Wille and Steffen Häuser:** GLQuake for `minigl.library`, after
-  id Software's Quake.
+- **Frank Wille, Steffen Häuser and Dennis Boon:** GLQuake for
+  `minigl.library`, after id Software's Quake.
 - **Advanced Micro Devices:** the R200 microcode.
 - **ATI Technologies, VA Linux Systems, Precision Insight, The Weather
   Channel and Tungsten Graphics, Red Hat**, and the authors of the Linux

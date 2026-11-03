@@ -75,9 +75,10 @@ and more. A missing one sets GL_INVALID_OPERATION; the log names it.
 
 GLQUAKE BENCHMARKS
 
-GLQuake for minigl.library (Frank Wille and Steffen Haeuser), its
-timedemos on the test machine (A4000D, 68060 at 50 MHz on a CyberStorm
-MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96), frames a second:
+GLQuake for minigl.library (Frank Wille, Steffen Haeuser and Dennis
+Boon), its timedemos on the test machine (A4000D, 68060 at 50 MHz on a
+CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96), frames
+a second:
 
     Demo   Screen       Check on  Check off  Direct  Direct, 8-bit LM
     demo1  320 x 240        18.7       23.7    24.2              24.9
@@ -114,7 +115,8 @@ CREDITS
   * Alexander Kneer and Tobias Abt: Picasso96
   * Hyperion Entertainment (Hans-Joerg and Thomas Frieden): MiniGL
   * Steffen "MagicSN" Haeuser: minigl.library 29.1 and its SDK
-  * Frank Wille and Steffen Haeuser: GLQuake for minigl.library
+  * Frank Wille, Steffen Haeuser and Dennis Boon: GLQuake for
+    minigl.library
   * AMD: the R200 microcode
   * ATI, VA Linux Systems, Precision Insight, The Weather Channel and
     Tungsten Graphics, Red Hat and the authors of the Linux radeon and

@@ -288,10 +288,10 @@ that is not set means the default.
 
 @{b}Speed@{ub}
 
-GLQuake for minigl.library, by Frank Wille and Steffen Häuser: its
-timedemos (all frames) on the test machine (A4000D, 68060 at 50 MHz on a
-CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96), frames
-a second:
+GLQuake for minigl.library, by Frank Wille, Steffen Häuser and Dennis
+Boon: its timedemos (all frames) on the test machine (A4000D, 68060 at 50
+MHz on a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2,
+Picasso96), frames a second:
 
     Demo   Screen       Check on  Check off  Direct  Direct, 8-bit LM
     demo1  320 x 240        18.7       23.7    24.2              24.9
@@ -498,9 +498,9 @@ was tested on real hardware.
     * Hyperion Entertainment (Hans-Jörg and Thomas Frieden): MiniGL.
     * Steffen "MagicSN" Häuser: minigl.library 29.1, its shell, its
       dispatch interface and its SDK.
-    * Frank Wille and Steffen Häuser: GLQuake for minigl.library, after
-      id Software's Quake -- the program RadeonGL was made and measured
-      with.
+    * Frank Wille, Steffen Häuser and Dennis Boon: GLQuake for
+      minigl.library, after id Software's Quake -- the program RadeonGL
+      was made and measured with.
     * Advanced Micro Devices: the R200 microcode.
     * ATI Technologies, VA Linux Systems, Precision Insight, The Weather
       Channel and Tungsten Graphics, Red Hat, and the authors of the Linux

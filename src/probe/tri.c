@@ -37,8 +37,8 @@
  *
  * SCENE=TRI (default) is triscene.c, SCENE=TEX the textured texscene.c.
  *
- * PATH=RING (default) feeds the CP from the ring. PATH=DIRECT is what the
- * Picasso96 advised instead: the CP stays off and the CPU replays the
+ * PATH=RING (default) feeds the CP from the ring. PATH=DIRECT is the other
+ * way: the CP stays off and the CPU replays the
  * stream as register writes (see "the direct path" below). REPEAT=n draws
  * the scene n times (each draw starts with its clear, so the picture is the
  * same) and times the whole: the like-for-like comparison of the two paths.
@@ -255,8 +255,8 @@ static void LogRing(const struct R2Ring *r)
 
 /* --- the direct path: the stream replayed as register writes ------------------
  *
- * What Picasso96 advised instead of a ring: the CPU writes the
- * registers itself, the CP stays off (Radeon.card works this way). The
+ * The other way than a ring: the CPU writes the registers itself, the CP
+ * stays off (Radeon.card works this way). The
  * core's stream, built without the ring's byte swap, is walked packet by
  * packet:
  *   type 0  each value to its register, or all to one with ONE_REG_WR;

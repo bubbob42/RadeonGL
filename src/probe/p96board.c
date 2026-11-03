@@ -257,7 +257,7 @@ void P96Board_Report(const struct P96Board *b)
                (ULONG)b->lastMem);
     Log_Printf("bases (p96GetBitMapAttr inside a lock):\n"
                "  BOARDMEMBASE   0x%08lx\n"
-               "  BOARDIOBASE    0x%08lx  (BAR1 on a Radeon, per Picasso96)\n"
+               "  BOARDIOBASE    0x%08lx  (BAR1 on a Radeon)\n"
                "  BOARDMEMIOBASE 0x%08lx  (BAR2: the registers)\n",
                (ULONG)b->memBase, (ULONG)b->ioBase, (ULONG)b->memIoBase);
     Log_Printf("locks %lu, the address moved %lu times\n", b->locks, b->moves);

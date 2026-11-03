@@ -216,4 +216,4 @@ C.3 Not compiled into the library:
 
 GLQuake, the program RadeonGL is measured with, is not part of this
 repository or of the package (GNU General Public License version 2; by
-Frank Wille and Steffen Haeuser, after id Software's Quake).
+Frank Wille, Steffen Haeuser and Dennis Boon, after id Software's Quake).

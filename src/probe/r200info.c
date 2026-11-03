@@ -7,7 +7,7 @@
  * The card comes from Picasso96 (p96board.h): its register base is
  * P96BMA_BOARDMEMIOBASE, read inside a lock of a small bitmap on the
  * board, and every register is read inside such a lock, which keeps
- * Radeon.card off the chip (Picasso96, 2026-11-02). With
+ * Radeon.card off the chip (MEASURED: LockBench). With
  * openpci.library present its view of the card (identity, BARs, owner) is
  * reported beside it, read-only, the card never claimed.
  *

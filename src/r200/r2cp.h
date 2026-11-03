@@ -63,7 +63,7 @@ void R2Cp_Save(const struct R2Hw *hw, struct R2CpSaved *s);
 BOOL R2Cp_InUse(const struct R2CpSaved *s);
 
 /* A CP found running can only be one RadeonGL left behind when it crashed:
- * Radeon.card never uses the CP (Picasso96, 2026-11-02), and the
+ * Radeon.card does not use the CP, and the
  * ring registers held power-on garbage on the A4000D. Stops it as
  * R2Cp_Stop does (CSQ off, a bounded wait for idle, the CP alone
  * soft-reset if the engine stays busy) and records the stopped CSQ in s,

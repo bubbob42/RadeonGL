@@ -1,7 +1,7 @@
 /*
  * p96board.h -- the RTG board under the Workbench screen, as
- * Picasso96API.library hands it out. The rules come from Picasso96's answers of 2026-11-02 (LockBench)
- * and the Picasso96API autodoc (reference/P96API_digest.md):
+ * Picasso96API.library hands it out. The rules, from the Picasso96API
+ * autodoc and measured by the probes (LockBench):
  *
  *  - The card is found through P96, not on the PCI bus. A bitmap on the
  *    board is locked; p96GetBitMapAttr then gives the board's memory base,

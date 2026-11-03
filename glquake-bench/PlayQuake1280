@@ -1,0 +1,7 @@
+; PlayQuake1280 -- PlayQuake (sound, LAN, the fastest RadeonGL settings) at
+; 1280 x 720. Needs a Picasso96 mode of 1280 x 720 on the Radeon. In the GLQuake
+; drawer beside PlayQuake; anything after the name goes to GLQuake too.
+.KEY ARGS/F
+.BRA {
+.KET }
+Execute PlayQuake -width 1280 -height 720 {ARGS}

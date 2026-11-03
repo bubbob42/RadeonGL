@@ -6,8 +6,9 @@
  * Formats are RawDoFmt's: %ld %lu %lx %s %lc, with the l on every number.
  *
  * While a P96 bitmap is locked, nothing may be printed to a console: the
- * console handler renders through the same board, and per Picasso96 (2026-11-02) a held lock keeps P96 off the chip, so a Write()
- * to a console window could wait for an unlock that never comes. Between
+ * console handler renders through the same board, and a held lock keeps
+ * P96 off the chip (MEASURED: LockBench), so a Write() to a console
+ * window could wait for an unlock that never comes. Between
  * Log_Hold(TRUE) and Log_Hold(FALSE) lines still go to the LOG file at
  * once, but the console's copy waits in a buffer (16 KB; what does not fit
  * is counted and reported) and is written at the release, after a Flush
