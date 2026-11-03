@@ -19,10 +19,16 @@
  * function below reads registers: call them inside a P96Board_Lock. */
 void R200_CardFromP96(struct PciCard *card, const struct P96Board *b);
 
-/* Decides and reports the register byte order (Mmio_DetectSwap: by
- * CONFIG_MEMSIZE, else by CONFIG_APER_0_BASE against BAR0), sets
- * Mmio_Swap. Returns MMIO_UNDECIDED, MMIO_BY_MEMSIZE or MMIO_BY_APER. */
+/* Decides and reports the register byte order (Mmio_DetectSwap: by the
+ * PCI mirror's vendor ID, else CONFIG_MEMSIZE, else CONFIG_APER_0_BASE
+ * against BAR0, else CONFIG_APER_SIZE), sets Mmio_Swap. Returns MMIO_*. */
 ULONG R200_ReportEndian(const struct PciCard *card);
+
+/* TRUE when the chip's PCI mirror shows ATI and an R200-family device
+ * (R200, RV250, RV280: the chips the R200 microcode and the back end are
+ * for; the same list as lib/card.c). Logs the device ID. Call after
+ * R200_ReportEndian decided the byte order, inside a lock. */
+BOOL R200_CheckFamily(const struct PciCard *card);
 
 /* Number of entries in the register table (for a caller's previous-value
  * array). */

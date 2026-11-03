@@ -1,0 +1,68 @@
+.KEY DEST/A
+.BRA {
+.KET }
+; InstallCheck -- what a finished install must have left (T=InstallRun).
+FailAt 1000
+Search >NIL: LIBS:minigl.library "RadeonGL 0." QUIET
+If WARN
+  Echo "  FAILED LIBS:minigl.library is not RadeonGL's" >>DEV:Test/auto.log
+Else
+  Echo "  ok     LIBS:minigl.library is RadeonGL's" >>DEV:Test/auto.log
+EndIf
+Search >NIL: LIBS:minigl.library.old "a decoy" QUIET
+If WARN
+  Echo "  FAILED LIBS:minigl.library.old is not the foreign library" >>DEV:Test/auto.log
+Else
+  Echo "  ok     LIBS:minigl.library.old is the foreign library" >>DEV:Test/auto.log
+EndIf
+; the build for this CPU (the Installer's NOVICE choice), everywhere
+CPU CHECK 68040 >NIL:
+If WARN
+  Search >NIL: LIBS:minigl.library "for the 68020/68030" QUIET
+  If WARN
+    Echo "  FAILED LIBS:minigl.library is not the 68020/68030 build" >>DEV:Test/auto.log
+  Else
+    Echo "  ok     LIBS:minigl.library is the 68020/68030 build" >>DEV:Test/auto.log
+  EndIf
+  Search >NIL: {DEST}/C/GLSmoke "for the 68020/68030" QUIET
+  If WARN
+    Echo "  FAILED {DEST}/C/GLSmoke is not the 68020/68030 build" >>DEV:Test/auto.log
+  Else
+    Echo "  ok     {DEST}/C/GLSmoke is the 68020/68030 build" >>DEV:Test/auto.log
+  EndIf
+  Search >NIL: {DEST}/Demos/C/Spinner "for the 68020/68030" QUIET
+  If WARN
+    Echo "  FAILED {DEST}/Demos/C/Spinner is not the 68020/68030 build" >>DEV:Test/auto.log
+  Else
+    Echo "  ok     {DEST}/Demos/C/Spinner is the 68020/68030 build" >>DEV:Test/auto.log
+  EndIf
+Else
+  Search >NIL: LIBS:minigl.library "for the 68040/68060" QUIET
+  If WARN
+    Echo "  FAILED LIBS:minigl.library is not the 68040/68060 build" >>DEV:Test/auto.log
+  Else
+    Echo "  ok     LIBS:minigl.library is the 68040/68060 build" >>DEV:Test/auto.log
+  EndIf
+  Search >NIL: {DEST}/C/GLSmoke "for the 68020/68030" QUIET
+  If WARN
+    Echo "  ok     {DEST}/C/GLSmoke is the 68040/68060 build" >>DEV:Test/auto.log
+  Else
+    Echo "  FAILED {DEST}/C/GLSmoke is the 68020/68030 build" >>DEV:Test/auto.log
+  EndIf
+EndIf
+If EXISTS ENVARC:RadeonGLCheck
+  Echo "  FAILED ENVARC:RadeonGLCheck set (the novice default is the check on)" >>DEV:Test/auto.log
+Else
+  Echo "  ok     no ENVARC:RadeonGLCheck (check on)" >>DEV:Test/auto.log
+EndIf
+If EXISTS {DEST}.info
+  Echo "  ok     {DEST}.info" >>DEV:Test/auto.log
+Else
+  Echo "  FAILED no {DEST}.info" >>DEV:Test/auto.log
+EndIf
+If EXISTS {DEST}/Demos/C/Showcase
+  Echo "  ok     the demos are in {DEST}/Demos" >>DEV:Test/auto.log
+Else
+  Echo "  FAILED no {DEST}/Demos/C/Showcase" >>DEV:Test/auto.log
+EndIf
+List {DEST} ALL FILES LFORMAT "  file %p%n %l" >>DEV:Test/auto.log

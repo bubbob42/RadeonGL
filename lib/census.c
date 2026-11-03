@@ -993,6 +993,13 @@ void Hook_MGLDeleteContext(GLcontext context)
     c = (struct CenContext *)context;
     if (c == NULL || c != cen_Ctx)
         return;
+    if (c->owner != FindTask(NULL))
+    {
+        /* another program's delete: the SDK wrapper zeroed the ONE shared
+         * currentContext before the call (rgl.c, audit 2026-11-03) */
+        Cen_CurrentContext = (GLcontext) c;
+        return;
+    }
     if (cen_F[F_CALLS] > 0)
         WriteFrame(c);                      /* the unfinished last frame */
     BufFlush(c);

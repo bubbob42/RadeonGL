@@ -1,7 +1,7 @@
 ; GLQuakeStack -- GLQuake started with a small stack (Stack 100000), as a
 ; user may from the shell. The A4000D crashed with a guru that way
 ; (2026-11-02): GLQuake needs 768 KB and the GCC build never asked for it.
-; GLQuake now grows its own stack (glquake/sys_amiga.c, QUAKE_STACK): demo1
+; GLQuake now grows its own stack (../RadeonGL-GLQuake/sys_amiga.c, QUAKE_STACK): demo1
 ; must run to its end on the null card and the program must exit cleanly,
 ; its stack freed (Avail before and after).
 ; Needs: gmake glquake glquake-data rgl-lib.

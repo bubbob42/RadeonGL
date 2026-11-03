@@ -11,7 +11,9 @@
  *     glTexSubImage2D (a changing colour, top left of the quad): a texture
  *     the GPU drew a moment ago changes, as GLQuake's lightmaps do, which
  *     exercises the library's texture-hazard flush and its heap lock.
- * FRAMES frames (300), then the frame rate. CTRL-C stops it early.
+ * FRAMES frames (300), then the frame rate. Esc on the GL screen (or
+ * Ctrl-C in the Shell) stops it early. A Shell program: started from the
+ * Workbench it quits at once.
  *
  *   GLSmoke FRAMES/N,DEPTH/N,WIDTH/N,HEIGHT/N,NOSUB/S
  *
@@ -25,11 +27,18 @@
 #include <exec/types.h>
 #include <dos/dos.h>
 #include <dos/rdargs.h>
+#include <intuition/intuition.h>
+#include <intuition/intuitionbase.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <proto/intuition.h>
 #include <proto/minigl.h>
 
+#ifdef RGL_FOR_030
+static const char ver[] = "$VER: GLSmoke 0.1 (02.11.2026) for the 68020/68030";
+#else
 static const char ver[] = "$VER: GLSmoke 0.1 (02.11.2026)";
+#endif
 
 #define TEMPLATE "FRAMES/N,DEPTH/N,WIDTH/N,HEIGHT/N,NOSUB/S"
 
@@ -43,6 +52,26 @@ struct Args
 };
 
 #define TEX 64
+
+struct IntuitionBase *IntuitionBase = NULL;
+
+/* TRUE when Esc came in the library's window; every message replied */
+static BOOL EscPressed(struct Window *win)
+{
+    struct IntuiMessage *im;
+    BOOL esc;
+
+    esc = FALSE;
+    if (win == NULL || win->UserPort == NULL)
+        return esc;
+    while ((im = (struct IntuiMessage *) GetMsg(win->UserPort)) != NULL)
+    {
+        if (im->Class == IDCMP_VANILLAKEY && im->Code == 27)
+            esc = TRUE;
+        ReplyMsg((struct Message *) im);
+    }
+    return esc;
+}
 
 static UBYTE tex[TEX * TEX * 3];
 static UBYTE patch[8 * 8 * 3];
@@ -117,12 +146,13 @@ static void Frame(ULONG f, BOOL sub)
     mglSwitchDisplay();
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     struct RDArgs *rda;
     struct Args args;
     struct DateStamp d0;
     struct DateStamp d1;
+    struct Window *win;
     LONG frames;
     LONG depth;
     LONG w;
@@ -130,7 +160,11 @@ int main(void)
     LONG f;
     LONG ticks;
     int rc;
+    BOOL opened;
 
+    (void) argv;
+    if (argc == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args.frames = NULL;
     args.depth = NULL;
     args.width = NULL;
@@ -150,21 +184,31 @@ int main(void)
            (LONG) (args.nosub ? " (no texture updates)" : ""));
 
     rc = RETURN_FAIL;
+    opened = FALSE;
+    IntuitionBase = (struct IntuitionBase *) OpenLibrary((CONST_STRPTR) "intuition.library", 39);
+    if (IntuitionBase == NULL)
+    {
+        Printf("GLSmoke: intuition.library 39 did not open\n");
+        goto out;
+    }
     if (!MiniGLOpen())
     {
         Printf("GLSmoke: minigl.library 29.1 did not open\n");
-        FreeArgs(rda);
-        return rc;
+        goto out;
     }
+    opened = TRUE;
     mglChoosePixelDepth((int) depth);
     if (!mglCreateContext(0, 0, (int) w, (int) h))
     {
         Printf("GLSmoke: no context (see the library's log, RadeonGLLog)\n");
-        MiniGLClose();
-        FreeArgs(rda);
-        return rc;
+        goto out;
     }
     Printf("GL_RENDERER: %s\n", (LONG) glGetString(GL_RENDERER));
+    /* Esc in the library's window (it opens it with no IDCMP): the Shell
+     * that took Ctrl-C is hidden behind the GL screen */
+    win = (struct Window *) mglGetWindowHandle();
+    if (win != NULL && !ModifyIDCMP(win, IDCMP_VANILLAKEY))
+        win = NULL;
 
     glViewport(0, 0, (GLsizei) w, (GLsizei) h);
     glMatrixMode(GL_PROJECTION);
@@ -184,6 +228,8 @@ int main(void)
     {
         if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C)
             break;
+        if (EscPressed(win))
+            break;
         Frame((ULONG) f, (BOOL) !args.nosub);
     }
     DateStamp(&d1);
@@ -195,8 +241,15 @@ int main(void)
            (ticks % 50) * 2, f * 50L / ticks, (f * 500L / ticks) % 10, (LONG) glGetError());
     rc = RETURN_OK;
 
+    if (win != NULL)
+        ModifyIDCMP(win, 0);
     mglDeleteContext();
-    MiniGLClose();
+
+out:
+    if (opened)
+        MiniGLClose();
+    if (IntuitionBase != NULL)
+        CloseLibrary((struct Library *) IntuitionBase);
     FreeArgs(rda);
     return rc;
 }

@@ -54,7 +54,6 @@ static const struct Rule rules[] =
     { 0x2090, 0x2094, 0x04, 0, "SE_TCL_OUTPUT_VTX_FMT_n" },
     { 0x20b0, 0x20b0, 0x04, 0, "SE_VTE_CNTL" },
     { 0x210c, 0x210c, 0x04, 0, "SE_VF_MAX_VTX_INDX" },
-    { 0x2110, 0x2110, 0x04, 0, "SE_VF_MIN_VTX_INDX" },
     { 0x2140, 0x2140, 0x04, 0, "SE_VAP_CNTL_STATUS" },
     { 0x2180, 0x2180, 0x04, 0, "SE_VTX_STATE_CNTL" },
     { 0x2200, 0x2200, 0x04, 0, "SE_TCL_VECTOR_INDX_REG" },
@@ -309,6 +308,14 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
             st->have |= R2CHK_HAVE_FMT0;
             return R2CE_OK;
         case R_SE_VTX_FMT_1:
+            /* six texture-coordinate counts of 0..4; codes 5-7 and the
+             * bits above are no format RadeonGL sends (Linux counts them
+             * as 0: the fetcher might not) */
+            if (val & 0xfffc0000UL)
+                return Err(c, R2CE_FORMAT, reg, val);
+            for (unit = 0; unit < 6; unit++)
+                if (((val >> (3 * unit)) & 7) > 4)
+                    return Err(c, R2CE_FORMAT, reg, val);
             st->vtx_fmt1 = val;
             st->have |= R2CHK_HAVE_FMT1;
             return R2CE_OK;
@@ -319,6 +326,8 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
         case R_RB3D_CNTL:
             if (val & R_DEPTHXY_OFFSET_ENABLE)
                 return Err(c, R2CE_VALUE, reg, val);    /* Linux refuses it too */
+            if (val & R_STENCIL_ENABLE)
+                return Err(c, R2CE_VALUE, reg, val);    /* no stencil buffer here */
             if (ColorCpp(val) == 0)
                 return Err(c, R2CE_FORMAT, reg, val);
             st->rb3d_cntl = val;
@@ -345,6 +354,8 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
             st->have |= R2CHK_HAVE_DEPTH;
             return R2CE_OK;
         case R_RB3D_DEPTHPITCH:
+            if (val & ~R_DEPTHPITCH_MASK)
+                return Err(c, R2CE_VALUE, reg, val);    /* tiling: another footprint */
             st->depth_pitch = val;
             st->have |= R2CHK_HAVE_DPITCH;
             return R2CE_OK;
@@ -361,11 +372,25 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
             st->re_bottom_right = val;
             st->have |= R2CHK_HAVE_SCISSOR;
             return R2CE_OK;
+        case R_RE_CNTL:
+            st->re_cntl = val;
+            st->have |= R2CHK_HAVE_RECNTL;
+            return R2CE_OK;
+        case R_PP_CNTL_X:
+            if (val != 0)
+                return Err(c, R2CE_VALUE, reg, val);    /* second-pass lookups */
+            return R2CE_OK;
+        case R_WAIT_UNTIL:
+            if (val & ~(R_WAIT_2D_IDLE | R_WAIT_3D_IDLE | R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN))
+                return Err(c, R2CE_VALUE, reg, val);    /* no display waits */
+            return R2CE_OK;
         case R_PP_CNTL:
             st->pp_cntl = val;
             st->have |= R2CHK_HAVE_PPCNTL;
             return R2CE_OK;
         case R_SE_VF_MAX_VTX_INDX:
+            if (val > 0xffffUL)
+                return Err(c, R2CE_ARRAYS, reg, val);   /* 16-bit indices: and no wrap below */
             st->max_vtx_indx = val;
             st->have |= R2CHK_HAVE_MAXINDX;
             return R2CE_OK;
@@ -405,6 +430,14 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
             st->tex[unit].filter = val;
         else if (off == 0x04)
             st->tex[unit].format = val;
+        else if (off == 0x08)
+        {
+            /* depth 1 and plain or projective coordinates: no volume or
+             * cube map, whose faces' offsets are not on the whitelist */
+            if ((val & 0xfUL) != 0 || (((val >> 16) & 7) != 0 && ((val >> 16) & 7) != 3))
+                return Err(c, R2CE_VALUE, reg, val);
+            st->tex[unit].format_x = val;
+        }
         else if (off == 0x0c)
             st->tex[unit].size = val;
         else if (off == 0x10)
@@ -414,6 +447,8 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
     if (reg >= R_PP_TXOFFSET_0 && reg <= R_PP_TXOFFSET_0 + 5 * R_PP_TXOFFSET_STRIDE)
     {
         unit = (reg - R_PP_TXOFFSET_0) / R_PP_TXOFFSET_STRIDE;
+        if (val & 0x1cUL)
+            return Err(c, R2CE_VALUE, reg, val);        /* tiled: another footprint */
         if (!InRange(c->cfg, R2K_TEXTURE, val & R_TXO_OFFSET_MASK, 1))
             return Err(c, R2CE_ADDR, reg, val);
         st->tex[unit].offset = val & R_TXO_OFFSET_MASK;
@@ -432,6 +467,8 @@ static LONG Packet0(struct Ctx *c, ULONG h, ULONG n)
     ULONG r;
     LONG e;
 
+    if (h & 0x6000UL)
+        return Err(c, R2CE_REG, h, 0);  /* register bits the decode above ignores */
     reg = R2_PKT0_REG(h);
     one = R2_PKT0_ONE_REG_WR(h);
     count = R2_PKT_COUNT(h) + 1;
@@ -461,6 +498,7 @@ static LONG CheckTargets(struct Ctx *c)
 {
     struct R2ChkState *st;
     ULONG rows;
+    ULONG right;
     ULONG pitch;
     ULONG cpp;
 
@@ -468,11 +506,17 @@ static LONG CheckTargets(struct Ctx *c)
     if ((st->have & (R2CHK_HAVE_COLOR | R2CHK_HAVE_CPITCH | R2CHK_HAVE_RB3D | R2CHK_HAVE_SCISSOR))
         != (R2CHK_HAVE_COLOR | R2CHK_HAVE_CPITCH | R2CHK_HAVE_RB3D | R2CHK_HAVE_SCISSOR))
         return Err(c, R2CE_TARGET, R_RB3D_COLOROFFSET, st->have);
+    /* the box clips only when RE_CNTL says so (Mesa sets it always) */
+    if (!(st->have & R2CHK_HAVE_RECNTL) || !(st->re_cntl & R_SCISSOR_ENABLE))
+        return Err(c, R2CE_VALUE, R_RE_CNTL, st->re_cntl);
     rows = ((st->re_bottom_right >> 16) & 0xffffUL) + 1;
+    right = st->re_bottom_right & 0xffffUL;
     pitch = st->color_pitch & R_COLORPITCH_MASK;
     cpp = ColorCpp(st->rb3d_cntl);
     if (pitch == 0)
         return Err(c, R2CE_ALIGN, R_RB3D_COLORPITCH, st->color_pitch);
+    if (right >= pitch)
+        return Err(c, R2CE_TARGET, R_RE_WIDTH_HEIGHT, st->re_bottom_right);
     if ((st->color_pitch & R_COLOR_TILE_ENABLE)
         && ((st->color_offset & 0x7ffUL) != 0 || ((pitch * cpp) & 0xffUL) != 0))
         return Err(c, R2CE_ALIGN, R_RB3D_COLOROFFSET, st->color_offset);  /* mirq: 2 KB, pitch 256 B */
@@ -487,6 +531,8 @@ static LONG CheckTargets(struct Ctx *c)
         cpp = DepthCpp(st->zstencil);
         if (pitch == 0)
             return Err(c, R2CE_ALIGN, R_RB3D_DEPTHPITCH, st->depth_pitch);
+        if (right >= pitch)
+            return Err(c, R2CE_TARGET, R_RE_WIDTH_HEIGHT, st->re_bottom_right);
         if (!InRange(c->cfg, R2K_DEPTH, st->depth_offset, pitch * cpp * rows))
             return Err(c, R2CE_TARGET, R_RB3D_DEPTHOFFSET, pitch * cpp * rows);
     }
@@ -520,7 +566,10 @@ static LONG CheckTextures(struct Ctx *c)
             return Err(c, R2CE_FORMAT, R_PP_TXFORMAT_0 + u * R_PP_TXUNIT_STRIDE, t->format);
         if (t->format & R_TXFORMAT_NON_POWER2)
         {
-            /* one level, rows (TXPITCH + 32) bytes apart (Linux, Mesa) */
+            /* one level, rows (TXPITCH + 32) bytes apart (Linux, Mesa); the
+             * pitch's field only (else (pitch + 32) * h wraps to nothing) */
+            if ((t->pitch & ~0x3fe0UL) != 0 || (t->filter & R_MAX_MIP_LEVEL_MASK) != 0)
+                return Err(c, R2CE_VALUE, R_PP_TXPITCH_0 + u * R_PP_TXUNIT_STRIDE, t->pitch);
             w = (t->size & 0x7ffUL) + 1;
             h = ((t->size >> 16) & 0x7ffUL) + 1;
             if (((t->pitch + 32) & 31) != 0 || w * cpp > t->pitch + 32)
@@ -687,6 +736,8 @@ static LONG LoadVbpntr(struct Ctx *c, ULONG count)
     for (i = 0; i < nr; i += 2)
     {
         attr = D(c, k);
+        if (attr & 0x80008000UL)
+            return Err(c, R2CE_ARRAYS, R2_OP_3D_LOAD_VBPNTR, attr);    /* stride is 7 bits */
         st->aos[i].comps = attr & 0xff;
         st->aos[i].stride = (attr >> 8) & 0x7f;
         st->aos[i].gpu = D(c, k + 1);
@@ -797,6 +848,18 @@ void R2Chk_Reset(struct R2ChkState *st)
     p = (UBYTE *) st;
     for (i = 0; i < sizeof(*st); i++)
         p[i] = 0;
+}
+
+LONG R2Chk_End(struct R2ChkState *st, struct R2ChkError *err)
+{
+    if (st->pend_indx == 0)
+        return R2CE_OK;
+    err->code = R2CE_INDX;
+    err->at = st->pend_at;
+    err->what = R2_OP_3D_DRAW_INDX_2;
+    err->value = st->pend_indx;
+    st->pend_indx = 0;
+    return R2CE_INDX;
 }
 
 LONG R2Chk_Run(const struct R2ChkCfg *cfg, struct R2ChkState *st,

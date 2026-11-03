@@ -78,16 +78,54 @@ static float Sqrt(float v)
     return x;
 }
 
+/* An affine matrix: the bottom row exactly 0 0 0 1, read as bits (a -0.0f
+ * takes the general way, which is merely slower). */
+static ULONG Affine(const float *m)
+{
+    const ULONG *u;
+
+    u = (const ULONG *) (const void *) m;
+    return (u[3] == 0 && u[7] == 0 && u[11] == 0 && u[15] == 0x3f800000UL) ? 1UL : 0UL;
+}
+
+/* out = a b. With b affine (every modelview, GLQuake's rotations and
+ * translations) the products with its zero bottom row are left out, and
+ * the last column adds a's fourth column itself: 48 multiplications
+ * instead of 64, 36 when a is affine as well (its bottom row is then b's).
+ * The sums keep their order, so the results are the general way's. */
 void Mat_Mul(float *out, const float *a, const float *b)
 {
     float t[16];
     ULONG r;
     ULONG k;
+    ULONG rows;
 
-    for (k = 0; k < 4; k++)
-        for (r = 0; r < 4; r++)
-            t[k * 4 + r] = a[0 * 4 + r] * b[k * 4 + 0] + a[1 * 4 + r] * b[k * 4 + 1]
-                         + a[2 * 4 + r] * b[k * 4 + 2] + a[3 * 4 + r] * b[k * 4 + 3];
+    if (!Affine(b))
+    {
+        for (k = 0; k < 4; k++)
+            for (r = 0; r < 4; r++)
+                t[k * 4 + r] = a[0 * 4 + r] * b[k * 4 + 0] + a[1 * 4 + r] * b[k * 4 + 1]
+                             + a[2 * 4 + r] * b[k * 4 + 2] + a[3 * 4 + r] * b[k * 4 + 3];
+    }
+    else
+    {
+        rows = 4;
+        if (Affine(a))
+        {
+            rows = 3;
+            t[3] = 0.0f;
+            t[7] = 0.0f;
+            t[11] = 0.0f;
+            t[15] = 1.0f;
+        }
+        for (k = 0; k < 3; k++)
+            for (r = 0; r < rows; r++)
+                t[k * 4 + r] = a[0 * 4 + r] * b[k * 4 + 0] + a[1 * 4 + r] * b[k * 4 + 1]
+                             + a[2 * 4 + r] * b[k * 4 + 2];
+        for (r = 0; r < rows; r++)
+            t[12 + r] = a[0 * 4 + r] * b[12] + a[1 * 4 + r] * b[13] + a[2 * 4 + r] * b[14]
+                      + a[3 * 4 + r];
+    }
     for (k = 0; k < 16; k++)
         out[k] = t[k];
 }

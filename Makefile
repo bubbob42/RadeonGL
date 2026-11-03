@@ -1,4 +1,9 @@
 PROJECT_NAME := $(notdir $(CURDIR))
+# the release archive's Source drawer: its folder is not the project's
+# name, the revision file is (src/<name>_rev.rev)
+ifeq ($(wildcard src/$(PROJECT_NAME)_rev.rev),)
+PROJECT_NAME := $(patsubst src/%_rev.rev,%,$(firstword $(wildcard src/*_rev.rev)))
+endif
 
 # Local SMB target for `gmake push`, written by ./setup-smb.sh (git-ignored,
 # personal to this checkout). Optional: absent until you run the setup script.
@@ -95,7 +100,7 @@ REV_H := src/$(PROJECT_NAME)_rev.h
 #   rexx/*.rexx                           -> rexx-examples (ARexx macros)
 #   catalogs/$(PROJECT_NAME).cd + <lang>/ -> catalogs   (locale message catalogs)
 GUIDE_DEFAULT_LANG ?= english
-GUIDE_LANGS        ?= english
+GUIDE_LANGS        ?= english deutsch
 LOCALE_LANGS       ?=
 LOCALE_CATNAME     := $(PROJECT_NAME).catalog
 LOCALE_CD          := catalogs/$(PROJECT_NAME).cd
@@ -138,7 +143,7 @@ GCC_WARNINGS := -Wall -Wextra -Wno-pointer-sign -Wno-int-conversion -Werror=impl
 GCC_CFLAGS   := $(GCC_WARNINGS) -Os -std=gnu99 -msasregparm $(CPUFLAGS)
 GCC_LDFLAGS  := -noixemul -lamiga
 
-.PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config13 launch-fsuae13 run-fsuae13 info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run release-stage release-drawer release-archive release-lha release-adf release-aminet release-verify release-dist
+.PHONY: all gcc sasc debug release run-sasc fsuae-config launch-fsuae run-fsuae run-fsuae-gcc run-fsuae-sasc fsuae-config13 launch-fsuae13 run-fsuae13 info check clean distclean mirror-src dist-icons guides installer rexx-examples catalogs catalog-check push wb-run release-stage release-drawer release-archive release-lha release-aminet release-verify release-dist
 
 all: gcc sasc debug dist/runme dist/mutools mirror-src dist-icons guides installer rexx-examples catalogs catalog-check wb-run probes census-lib r200-objs rgl-lib
 
@@ -569,7 +574,7 @@ check:
 		printf "  %-16s %s (%s)\n" "bumprev:" "$(BUMPREV)" "$$s"
 	@if [ -f "$(AMIGA_LHA)" ]; then s="found"; else s="absent -- no gmake release-archive"; fi; \
 		printf "  %-16s %s (%s)\n" "Amiga LhA:" "$(AMIGA_LHA)" "$$s"
-	@if [ -x "$(XDFTOOL)" ]; then s="found"; else s="absent -- no gmake release-adf"; fi; \
+	@if [ -x "$(XDFTOOL)" ]; then s="found"; else s="absent"; fi; \
 		printf "  %-16s %s (%s)\n" "xdftool:" "$(XDFTOOL)" "$$s"
 
 clean:
@@ -624,10 +629,9 @@ push: all
 #   gmake release-stage    -> build/release/  (the package tree; edit THIS one)
 #   gmake release-drawer   -> dist/Release/   (the same tree, unpacked, on DEV:)
 #   gmake release-archive  -> dist/<Project>.lha        (release-lha = synonym)
-#   gmake release-adf      -> dist/<Project>.adf        (880K DD floppy)
 #   gmake release-aminet   -> dist/aminet/   (archive + .readme, NOT uploaded)
 #   gmake release-verify   -> inspect the built archives for private state
-#   gmake release-dist     -> archive + disk + verify
+#   gmake release-dist     -> archive + verify (no ADF here)
 #
 # ONLY `release-stage` is project-specific. Everything below it operates on
 # whatever that target produced, so extending a project's package means editing
@@ -635,13 +639,17 @@ push: all
 # never bump; see the `release` target above.
 #
 # --- GLQuake test client -----------------------------------------------------
-# A minigl.library ABI-5 dispatch client (glquake/, GPL), built with its own
-# makefile so its flags never mix with the project's. `glquake-data` copies
+# A minigl.library ABI-5 dispatch client (GPL), built with its own makefile so
+# its flags never mix with the project's. NOT part of this repository (the
+# user, 2026-11-03: the repo holds the library, the installer, the tools and
+# the demos): its source lives beside it, GLQUAKE_DIR. `glquake-data` copies
 # the id1 paks from QUAKE_ID1 (default: the Quake data drawer) into
-# dist/Quake/id1 -- 54 MB, never committed. See glquake/README.md.
+# dist/Quake/id1 -- 54 MB, never committed. See $(GLQUAKE_DIR)/README.md.
+GLQUAKE_DIR ?= ../RadeonGL-GLQuake
 .PHONY: glquake glquake-data clean-glquake
 glquake glquake-data clean-glquake:
-	$(MAKE) -f glquake/Makefile.radeongl $@
+	@test -f "$(GLQUAKE_DIR)/Makefile.radeongl" || { echo "no GLQuake source in GLQUAKE_DIR=$(GLQUAKE_DIR) (not part of this repository)"; exit 2; }
+	$(MAKE) -f $(GLQUAKE_DIR)/Makefile.radeongl QSRC=$(GLQUAKE_DIR) $@
 
 # The GL core's modules (src/core): defined here, before the probe rules
 # that list them as prerequisites (those expand when the Makefile is read).
@@ -996,8 +1004,8 @@ RGL_LIB    := dist/Libs/RadeonGL/minigl.library
 RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c | sort -u | paste -sd, -}
 RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
               -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
-              -fno-strict-aliasing -m68060 -m68881 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl -Isrc/core -Isrc/r200 \
-              -I$(P96_INC)
+              -fno-strict-aliasing -m68060 -m68881 -DRGL_CPU_040 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl \
+              -Isrc/core -Isrc/r200 -I$(P96_INC)
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_MODULES))) \
@@ -1009,7 +1017,8 @@ build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dis
 	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' \
 	    --include rgl.h --hooks $(RGL_HOOKS)
 
-build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS)
+build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
+               src/RadeonGL_rev.h
 	@mkdir -p build/rgl
 	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
 
@@ -1033,6 +1042,42 @@ $(RGL_LIB): $(RGL_OBJS)
 .PHONY: rgl-lib
 rgl-lib: $(RGL_LIB)
 
+# --- The 68020/68030 build (with a 68881/68882) ------------------------------
+# The same sources for a CPU whose FPU lacks the 68040's single- and double-
+# rounding instructions (fsmove, fsmul, fdadd ...: some 450 of them in the
+# build above). The Installer offers it (the user, 2026-11-03); without
+# RGL_CPU_040 the shell refuses a CPU below the 68020 or without an FPU, the
+# build above one below the 68040 (lib/shell.c). tools/check_fpu881.py
+# proves none of those instructions slipped in.
+RGL030_LIB    := dist/Libs/RadeonGL030/minigl.library
+RGL030_CFLAGS := $(filter-out -DRGL_CPU_040,$(subst -m68060,-m68030,$(RGL_CFLAGS)))
+RGL030_OBJS   := $(patsubst build/rgl/%,build/rgl030/%,$(RGL_OBJS))
+
+build/rgl030/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) \
+                  $(R200_HDRS) src/RadeonGL_rev.h
+	@mkdir -p build/rgl030
+	$(GCC_CC) $(RGL030_CFLAGS) -c $< -o $@
+
+build/rgl030/rgl_dispatch.o: build/rgl/rgl_dispatch.c lib/rgl.h
+	@mkdir -p build/rgl030
+	$(GCC_CC) $(RGL030_CFLAGS) -Wno-unused-parameter -c $< -o $@
+
+build/rgl030/core_%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS)
+	@mkdir -p build/rgl030
+	$(GCC_CC) $(RGL030_CFLAGS) -c $< -o $@
+
+build/rgl030/r2_%.o: src/r200/%.c $(R200_HDRS)
+	@mkdir -p build/rgl030
+	$(GCC_CC) $(RGL030_CFLAGS) -c $< -o $@
+
+$(RGL030_LIB): $(RGL030_OBJS)
+	@mkdir -p $(dir $@)
+	$(GCC_CC) -nostdlib -nostartfiles -nodefaultlibs -noixemul -m68030 -m68881 -o $@ $(RGL030_OBJS) -lgcc \
+	    -Wl,-Map=build/rgl030/minigl.map
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu881.py $@
+
+rgl-lib: $(RGL030_LIB)
+
 # --- GLSmoke: a small MiniGL client for the first runs on the card ----------
 # (glsmoke/glsmoke.c, docs/design-card-backend.md step 5). GCC only: it links
 # the MiniGL SDK's import library, as GLQuake does. dist/GLSmoke holds the
@@ -1045,6 +1090,16 @@ $(GLSMOKE): glsmoke/glsmoke.c
 	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
 	    -I$(MGL_SDK_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
+# GLSmoke for the 68030 library's drawer (-m68030: its one 68040 FPU
+# instruction would trap there)
+GLSMOKE030 := dist/For030/C/GLSmoke
+
+$(GLSMOKE030): glsmoke/glsmoke.c
+	@mkdir -p $(dir $@)
+	$(GCC_CC) -std=gnu99 -noixemul -m68030 -m68881 -DRGL_FOR_030 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu881.py $@
 
 GLBENCH := dist/GLSmoke/GLBench
 
@@ -1070,13 +1125,17 @@ glsmoke: $(GLSMOKE) $(GLBENCH) $(RGL_LIB)
 	@cp icons/run.info dist/GLSmoke/RunGLSmoke.info
 	@echo "glsmoke: staged DEV:GLSmoke (GLSmoke, Libs/minigl.library, RunGLSmoke)"
 
+include demos/demos.mk
+
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a
 # COPY of the system disk whose User-Startup runs DEV:Test/AutoRun; see
 # docs/testing.md for the disk and the rules. Grab (test/amiga/grab.c, from
 # Herald) keeps a screen region as a PPM when a test hangs.
 AUTOTEST_TEMPLATE := fsuae/autotest-040.fs-uae.in
-AUTOTEST_CONFIG   := fsuae/local/$(PROJECT_NAME)-autotest-040.fs-uae
+# AUTOTEST_CPU=030: the same disk on a 68030 + 68882 (the 68030 library)
+AUTOTEST_CPU      ?= 040
+AUTOTEST_CONFIG   := fsuae/local/$(PROJECT_NAME)-autotest-$(AUTOTEST_CPU).fs-uae
 P96_SDK ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
 P96_INC := $(P96_SDK)/Include
 
@@ -1087,6 +1146,8 @@ $(AUTOTEST_CONFIG): $(AUTOTEST_TEMPLATE)
 		-e 's|@PROJECT_PATH@|$(CURDIR)|g' \
 		-e 's|@PROJECT_DIST@|$(PROJECT_DIST)|g' \
 		-e 's|@PROJECT_NAME@|$(PROJECT_NAME)|g' \
+		$(if $(filter 030,$(AUTOTEST_CPU)),-e 's|^cpu = 68040|cpu = 68030|' -e 's|^fpu = 68040|fpu = 68882|' \
+		    -e 's|autotest 68040|autotest 68030 + 68882|') \
 		$< > $@
 
 build/test/grab.o: test/amiga/grab.c
@@ -1097,12 +1158,23 @@ dist/Test/Grab: build/test/grab.o
 	@mkdir -p dist/Test
 	$(GCC_CC) -noixemul $< -o $@ -lamiga
 
+# InputPoke (clicks and keys through input.device) and ScreenInfo (the front
+# screen's size): the release Installer's unattended test (test/auto/
+# InstallRun). Copied from Prisma Megamix's test/tools, unchanged.
+dist/Test/InputPoke: test/amiga/inputpoke.c
+	@mkdir -p dist/Test
+	$(GCC_CC) $(GCC_CFLAGS) -noixemul -s $< -o $@ -lamiga
+
+dist/Test/ScreenInfo: test/amiga/screeninfo.c
+	@mkdir -p dist/Test
+	$(GCC_CC) $(GCC_CFLAGS) -noixemul -s $< -o $@ -lamiga
+
 .PHONY: autotest
-autotest: $(AUTOTEST_CONFIG) dist/Test/Grab
+autotest: $(AUTOTEST_CONFIG) dist/Test/Grab dist/Test/InputPoke dist/Test/ScreenInfo
 	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in test/auto>"; exit 2; }
 	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see docs/testing.md"; exit 2; }
 	@mkdir -p dist/Test
-	@cp test/auto/RunOne test/auto/RunCensus test/auto/RunNull test/auto/RunNullX test/auto/RunNullTime test/auto/RunAB test/auto/WaitDone dist/Test/
+	@cp test/auto/RunOne test/auto/RunCensus test/auto/RunNull test/auto/RunNullX test/auto/RunNullTime test/auto/RunAB test/auto/WaitDone test/auto/InstallClicks test/auto/InstallClicksMsg test/auto/InstallCheck test/auto/ShowDrawers.rexx dist/Test/
 	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
 
 # --- Tools -------------------------------------------------------------------
@@ -1120,7 +1192,6 @@ SETPOS     = $(PYTHON) tools/set_icon_pos.py
 
 RELSTAGE  := build/release
 RELDRAWER := $(RELSTAGE)/$(PROJECT_NAME)
-RELDISK   := build/release-disk
 AMINETDIR := dist/aminet
 
 # The drawer icon dist/Release.info gets. A PRISTINE one, never the staged
@@ -1151,56 +1222,141 @@ REL_DRAWER_ICON := icons/release.info
 # unpacking. `chmod u+w` anything staged from a deliberately read-only master.
 #
 # Extend the list below as the project grows; the rest of the pipeline follows.
-REL_CX := 104          # centre line for the drawer window's icon column
+# RadeonGL's package (the user, 2026-11-03: "a complete release package for
+# minigl with guides, readmes and installer"):
+#
+#   RadeonGL/                      the archive's one drawer
+#     RadeonGL.guide               English manual  } what a user opens,
+#     RadeonGL_deutsch.guide       German manual   } readable before
+#     RadeonGL.readme              Aminet readme   } anything is installed
+#     Install                      the Installer (install/Install)
+#     Files/                       no icon: the Installer's larder
+#       Libs/minigl.library        -> LIBS: (the 68040/68060 build)
+#       68030/                     the 68020/68030 build (+ 68881/68882):
+#         Libs/minigl.library      -> LIBS: instead,
+#         C/GLSmoke, Demos/C/      -> over the drawer's C/ and Demos/C/
+#       RadeonGL.info              the installed drawer's icon
+#       RadeonGL/                  -> <chosen drawer>/RadeonGL/
+#         the two manuals, Test and CardReport (IconX scripts, install/),
+#         C/GLSmoke + C/R200Info (no icons), Licences/ (the three texts),
+#         Demos/ (the demonstrators' IconX launchers, demos/scripts/, with
+#         the programs in Demos/C/: demos/README.md)
+#
+# Only the library, GLSmoke, R200Info and the demonstrators ship: no
+# placeholder program, no probe that writes a register, no GLQuake. Icon positions and windows are
+# snapshotted here with set_icon_pos.py.
+REL_FILES  := $(RELDRAWER)/Files/RadeonGL
+REL_MANUAL := $(RELDRAWER)/RadeonGL
+REL_ICON_TXT := icons/guide.info
+REL_DRAWER_WIN := --show-icons
+# "RadeonGL 0.3": what the library's $$VER must carry (src/RadeonGL_rev.h)
+REL_VERS := ${shell awk -F'"' '/^\#define VERS[ \t]/ {print $$2}' $(REV_H)}
 
-release-stage: all
-	rm -rf $(RELSTAGE) $(RELDISK)
-	mkdir -p $(RELDRAWER)/Program $(RELDISK)
-	@# The program. The release ships ONE binary under the plain project name
-	@# -- which profile is a project decision; the SAS/C build is the
-	@# convention here, being the conservative one.
-	cp $(TARGET_SASC) $(RELDRAWER)/Program/$(PROJECT_NAME)
-	chmod u+w $(RELDRAWER)/Program/$(PROJECT_NAME)
-	@# The manual, with its MultiView icon, at the top of the window.
-	@if [ -f dist/$(PROJECT_NAME).guide ]; then \
-		cp dist/$(PROJECT_NAME).guide $(RELDRAWER)/; \
-		if [ -f icons/guide.info ]; then \
-			cp icons/guide.info $(RELDRAWER)/$(PROJECT_NAME).guide.info; \
-			$(SETPOS) $(RELDRAWER)/$(PROJECT_NAME).guide.info --center-x $(REL_CX) 12; \
-		fi; \
-	fi
-	@# The Installer, beneath it.
-	@if [ -f dist/Install ]; then \
-		cp dist/Install dist/Install.info $(RELDRAWER)/; \
-		$(SETPOS) $(RELDRAWER)/Install.info --center-x $(REL_CX) 96; \
-	fi
-	@if [ -f LICENSE ]; then cp LICENSE $(RELDRAWER)/LICENSE; fi
-	@# Message catalogs, when they have been built.
-	@for lang in $(LOCALE_LANGS); do \
-		if [ -f dist/Catalogs/$$lang/$(LOCALE_CATNAME) ]; then \
-			mkdir -p $(RELDRAWER)/Catalogs/$$lang; \
-			cp dist/Catalogs/$$lang/$(LOCALE_CATNAME) $(RELDRAWER)/Catalogs/$$lang/; \
-		else \
-			echo "WARNING: no built catalog for $$lang --"; \
-			echo "         the release ships without that translation"; \
-		fi; \
+release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info $(DEMO_BIN) $(DEMO030_BIN) guides installer
+	rm -rf $(RELSTAGE)
+	mkdir -p $(RELDRAWER)/Files/Libs $(REL_FILES)/C $(REL_FILES)/Licences $(REL_FILES)/Demos/C
+	mkdir -p $(RELDRAWER)/Files/68030/Libs $(RELDRAWER)/Files/68030/C $(RELDRAWER)/Files/68030/Demos/C
+	@# the library, and the two programs the installed drawer runs
+	cp $(RGL_LIB) $(RELDRAWER)/Files/Libs/minigl.library
+	cp $(GLSMOKE) dist/Probe/C/R200Info $(REL_FILES)/C/
+	@# the 68020/68030 build: the library, GLSmoke and the demos (R200Info
+	@# is a -m68020 program and runs on both)
+	cp $(RGL030_LIB) $(RELDRAWER)/Files/68030/Libs/minigl.library
+	cp $(GLSMOKE030) $(RELDRAWER)/Files/68030/C/
+	cp $(DEMO030_BIN) $(RELDRAWER)/Files/68030/Demos/C/
+	@# the manuals: the English one and the German one, in the package and
+	@# in the installed drawer (Latin-1, as `gmake guides` staged them)
+	cp dist/RadeonGL.guide $(RELDRAWER)/RadeonGL.guide
+	cp dist/Help/deutsch/RadeonGL.guide $(RELDRAWER)/RadeonGL_deutsch.guide
+	cp $(REL_ICON_TXT) $(RELDRAWER)/RadeonGL.guide.info
+	cp $(REL_ICON_TXT) $(RELDRAWER)/RadeonGL_deutsch.guide.info
+	cp $(RELDRAWER)/RadeonGL.guide $(RELDRAWER)/RadeonGL.guide.info \
+	   $(RELDRAWER)/RadeonGL_deutsch.guide $(RELDRAWER)/RadeonGL_deutsch.guide.info $(REL_FILES)/
+	@# the Aminet readme, readable before anything is installed; checked
+	@# here, and release-aminet renders the same file beside the archive
+	$(PYTHON) tools/make_aminet_readme.py -o $(RELDRAWER)/RadeonGL.readme >/dev/null
+	$(PYTHON) tools/make_aminet_readme.py --check $(RELDRAWER)/RadeonGL.readme
+	cp $(REL_ICON_TXT) $(RELDRAWER)/RadeonGL.readme.info
+	@# the Installer (comments stripped by `gmake installer`)
+	cp dist/Install dist/Install.info $(RELDRAWER)/
+	@# Test and CardReport: IconX scripts (icons/run.info keeps the
+	@# output window open)
+	cp install/Test install/CardReport $(REL_FILES)/
+	cp icons/run.info $(REL_FILES)/Test.info
+	cp icons/run.info $(REL_FILES)/CardReport.info
+	@# the demonstrators: launchers in Demos (their windows keep the frame
+	@# rate), the programs out of sight in Demos/C
+	cp $(DEMO_BIN) $(REL_FILES)/Demos/C/
+	@for d in $(DEMO_NAMES); do \
+		cp demos/scripts/$$d $(REL_FILES)/Demos/$$d || exit 1; \
+		cp icons/run.info $(REL_FILES)/Demos/$$d.info || exit 1; \
 	done
-	@# The package drawer's own icon, and the window it opens.
-	@if [ -f $(REL_DRAWER_ICON) ]; then \
-		cp $(REL_DRAWER_ICON) $(RELSTAGE)/$(PROJECT_NAME).info; \
-		$(SETPOS) $(RELSTAGE)/$(PROJECT_NAME).info --no-pos --window 200 100 350 200; \
-	else \
-		echo "WARNING: no $(REL_DRAWER_ICON) -- the package drawer will be"; \
-		echo "         INVISIBLE on Workbench. Run tools/make_release_icon.py --write"; \
-	fi
-	@# The disk image's root IS the drawer's content, with the same icon typed
-	@# as a disk (do_Type 2 -> 1).
-	cp -R $(RELDRAWER)/. $(RELDISK)/
-	@if [ -f $(REL_DRAWER_ICON) ]; then \
-		cp $(REL_DRAWER_ICON) $(RELDISK)/Disk.info; \
-		$(SETPOS) $(RELDISK)/Disk.info --type 1 --no-pos --window 200 100 350 200; \
-	fi
-	@echo "release-stage: $(RELSTAGE)"
+	cp $(REL_DRAWER_ICON) $(REL_FILES)/Demos.info
+	@# the licences, unchanged
+	cp LICENSE $(REL_FILES)/Licences/RadeonGL.txt
+	cp sdk/minigl-29.1/licences/License_MiniGL_Library.txt $(REL_FILES)/Licences/MiniGL.txt
+	cp sdk/radeon-firmware/LICENSE $(REL_FILES)/Licences/R200-Microcode.txt
+	@for f in RadeonGL MiniGL R200-Microcode; do cp $(REL_ICON_TXT) $(REL_FILES)/Licences/$$f.txt.info; done
+	cp $(REL_DRAWER_ICON) $(REL_FILES)/Licences.info
+	cp $(REL_DRAWER_ICON) $(RELDRAWER)/Files/RadeonGL.info
+	@# LhA records the HOST file mode as protection bits: nothing read-only
+	chmod -R u+w $(RELSTAGE)
+	@# where everything sits: the package window (two manuals over the
+	@# readme and the Installer), the installed drawer (the manuals over
+	@# Test, CardReport and Licences), the Licences drawer
+	$(SETPOS) $(RELDRAWER)/RadeonGL.guide.info --center-x 100 8
+	$(SETPOS) $(RELDRAWER)/RadeonGL_deutsch.guide.info --center-x 290 8
+	$(SETPOS) $(RELDRAWER)/RadeonGL.readme.info --center-x 100 70
+	$(SETPOS) $(RELDRAWER)/Install.info --center-x 290 70
+	$(SETPOS) $(REL_FILES)/RadeonGL.guide.info --center-x 110 8
+	$(SETPOS) $(REL_FILES)/RadeonGL_deutsch.guide.info --center-x 320 8
+	$(SETPOS) $(REL_FILES)/Test.info --center-x 55 70
+	$(SETPOS) $(REL_FILES)/CardReport.info --center-x 160 70
+	$(SETPOS) $(REL_FILES)/Demos.info --center-x 265 70
+	$(SETPOS) $(REL_FILES)/Licences.info --center-x 370 70
+	$(SETPOS) $(REL_FILES)/Demos/Spinner.info --center-x 60 8
+	$(SETPOS) $(REL_FILES)/Demos/Glow.info --center-x 160 8
+	$(SETPOS) $(REL_FILES)/Demos/Landscape.info --center-x 260 8
+	$(SETPOS) $(REL_FILES)/Demos/Showcase.info --center-x 360 8
+	$(SETPOS) $(REL_FILES)/Demos.info --window 180 90 420 80 $(REL_DRAWER_WIN)
+	$(SETPOS) $(RELDRAWER)/Files/RadeonGL.info --no-pos --window 140 50 440 165 $(REL_DRAWER_WIN)
+	$(SETPOS) $(REL_FILES)/Licences/RadeonGL.txt.info --center-x 70 8
+	$(SETPOS) $(REL_FILES)/Licences/MiniGL.txt.info --center-x 190 8
+	$(SETPOS) $(REL_FILES)/Licences/R200-Microcode.txt.info --center-x 320 8
+	$(SETPOS) $(REL_FILES)/Licences.info --window 160 70 420 80 $(REL_DRAWER_WIN)
+	@# the package drawer's own icon, and the window it opens
+	cp $(REL_DRAWER_ICON) $(RELSTAGE)/RadeonGL.info
+	$(SETPOS) $(RELSTAGE)/RadeonGL.info --no-pos --window 120 50 400 165 $(REL_DRAWER_WIN)
+	@# the sources and makefiles (the user, 2026-11-03), in Source: no icon,
+	@# so the package window stays as it is; the list is tools/source_list.py
+	$(PYTHON) -I tools/source_list.py --check > build/release-src.txt
+	rsync -a --files-from=build/release-src.txt ./ $(RELDRAWER)/Source/
+	chmod -R u+w $(RELDRAWER)/Source
+	@find $(RELSTAGE) \( -name '._*' -o -name '.DS_Store' \) -delete
+	@# everything the package promises is there and not empty; the
+	@# shipped Installer carries no comments; the library says RadeonGL
+	@ok=1; \
+	for f in Install Install.info RadeonGL.guide RadeonGL.guide.info RadeonGL_deutsch.guide \
+	         RadeonGL_deutsch.guide.info RadeonGL.readme RadeonGL.readme.info \
+	         Files/Libs/minigl.library Files/RadeonGL.info Files/68030/Libs/minigl.library \
+	         Files/68030/C/GLSmoke $(foreach d,$(DEMO_NAMES),Files/68030/Demos/C/$(d)) \
+	         Files/RadeonGL/RadeonGL.guide Files/RadeonGL/RadeonGL_deutsch.guide \
+	         Files/RadeonGL/Test Files/RadeonGL/Test.info Files/RadeonGL/CardReport Files/RadeonGL/CardReport.info \
+	         Files/RadeonGL/C/GLSmoke Files/RadeonGL/C/R200Info Files/RadeonGL/Licences.info \
+	         Files/RadeonGL/Licences/RadeonGL.txt Files/RadeonGL/Licences/MiniGL.txt \
+	         Files/RadeonGL/Licences/R200-Microcode.txt Files/RadeonGL/Demos.info \
+	         $(foreach d,$(DEMO_NAMES),Files/RadeonGL/Demos/$(d) Files/RadeonGL/Demos/$(d).info \
+	                                   Files/RadeonGL/Demos/C/$(d)) \
+	         Source/Makefile Source/LICENSE Source/README.md Source/lib/rgl.c Source/src/core/array.c \
+	         Source/install/Install Source/demos/demos.mk Source/sdk/minigl-29.1/lib/libminigl.a; do \
+		test -s "$(RELDRAWER)/$$f" || { echo "  MISSING $$f"; ok=0; }; \
+	done; \
+	grep -q '^;' $(RELDRAWER)/Install && { echo "  Install still carries comments"; ok=0; }; \
+	grep -q '$(REL_VERS) (' $(RELDRAWER)/Files/Libs/minigl.library || { echo "  the library's version string does not say $(REL_VERS)"; ok=0; }; \
+	grep -q 'for the 68040/68060' $(RELDRAWER)/Files/Libs/minigl.library || { echo "  Files/Libs is not the 68040/68060 build"; ok=0; }; \
+	grep -q 'for the 68020/68030' $(RELDRAWER)/Files/68030/Libs/minigl.library || { echo "  Files/68030/Libs is not the 68020/68030 build"; ok=0; }; \
+	test $$ok -eq 1 || { echo "release-stage: package is incomplete"; exit 1; }
+	@echo "release-stage: $(RELDRAWER) -- contents checked"
 
 # --- DEV:Release -- the release archive, unpacked ----------------------------
 # dist/ is DEV: in FS-UAE, so this puts the package where the emulated (or
@@ -1226,26 +1382,46 @@ release-drawer: release-stage
 	@echo "release-drawer: DEV:Release -- the archive contents, unpacked"
 
 # ⚠ Members are given as the `#?` wildcard so every stored name comes from a
-# directory scan and keeps its canonical case -- a literal argument would be
-# stored in its ToLower()ed matching form. `#` needs NO escape in a recipe
-# line (make hands recipe lines to the shell verbatim); `\#` would reach the
-# shell as a backslash. LhA `@file` response files crash vamos -- don't.
+# directory scan and keeps its canonical case -- a literal argument, a path in
+# a pattern included, is stored in its ToLower()ed form (MEASURED 2026-11-03:
+# "RadeonGL/Source/lib/#?" gave radeongl/source/lib/...). `#` needs NO escape
+# in a recipe line; `\#` would reach the shell as a backslash. LhA `@file`
+# response files crash vamos -- don't.
+# ⚠ One LhA run over the whole package (some 270 files with Source) runs vamos
+# out of locks ("no more lock slots", Prisma Megamix, 18 Oct 2026), and LhA
+# adds nothing to an archive that is there already. So each part gets a root
+# of its own -- the package without Source, Source's top files, each Source
+# drawer -- holding just that part under RadeonGL/, is packed from there with
+# "#?", and tools/join_lha.py joins the archives (LhA stores no drawer
+# entries, so the shared RadeonGL/Source prefix is no duplicate).
+# tools/check_lha_bits.py counts the members against the staged files.
 # ⚠ vamos's Examine reports 1978 dates, so archive members carry them.
+RELPARTS := build/release-parts
+
 release-archive: release-stage
-	rm -f dist/$(PROJECT_NAME).lha
-	cd $(RELSTAGE) && $(VAMOS_LHA) $(AMIGA_LHA) -r a \
-		proj:dist/$(PROJECT_NAME).lha "#?"
+	rm -rf $(RELPARTS) dist/$(PROJECT_NAME).lha
+	mkdir -p $(RELPARTS)/pkg/$(PROJECT_NAME) $(RELPARTS)/top/$(PROJECT_NAME)/Source
+	cp $(RELSTAGE)/$(PROJECT_NAME).info $(RELPARTS)/pkg/
+	cd $(RELDRAWER) && for e in * .[!.]*; do \
+		[ -e "$$e" ] && [ "$$e" != Source ] && cp -R "$$e" $(CURDIR)/$(RELPARTS)/pkg/$(PROJECT_NAME)/; \
+	done; true
+	cd $(RELDRAWER)/Source && for e in * .[!.]*; do \
+		[ -f "$$e" ] && cp "$$e" $(CURDIR)/$(RELPARTS)/top/$(PROJECT_NAME)/Source/; \
+	done; true
+	@for d in `cd $(RELDRAWER)/Source && ls -d */ | tr -d /`; do \
+		mkdir -p $(RELPARTS)/src-$$d/$(PROJECT_NAME)/Source || exit 1; \
+		cp -R $(RELDRAWER)/Source/$$d $(RELPARTS)/src-$$d/$(PROJECT_NAME)/Source/ || exit 1; \
+	done
+	@for r in `ls $(RELPARTS)`; do \
+		echo "lha      $$r"; \
+		(cd $(RELPARTS)/$$r && $(VAMOS_LHA) $(AMIGA_LHA) -r a proj:$(RELPARTS)/$$r.lha "#?" >/dev/null) || exit 1; \
+	done
+	$(PYTHON) -I tools/join_lha.py dist/$(PROJECT_NAME).lha `ls $(RELPARTS)/*.lha`
+	$(PYTHON) -I tools/check_lha_bits.py dist/$(PROJECT_NAME).lha `find $(RELSTAGE) -type f | wc -l`
 	@echo "release-archive: dist/$(PROJECT_NAME).lha"
 	@ls -l dist/$(PROJECT_NAME).lha
 
 release-lha: release-archive          # synonym (the sibling projects' name)
-
-release-adf: release-stage
-	rm -f dist/$(PROJECT_NAME).adf
-	@cmd="create + format $(PROJECT_NAME) ffs"; \
-	for e in $(RELDISK)/*; do cmd="$$cmd + write $$e"; done; \
-	$(XDFTOOL) dist/$(PROJECT_NAME).adf $$cmd
-	@echo "release-adf: dist/$(PROJECT_NAME).adf (volume $(PROJECT_NAME))"
 
 # --- Aminet upload package ---------------------------------------------------
 # Everything Aminet wants, staged side by side and checked over -- but NOT
@@ -1254,7 +1430,7 @@ release-adf: release-stage
 # Aminet takes a PAIR: the archive, and a .readme of the same base name that
 # sits BESIDE it on the server and supplies the index metadata. That readme is
 # not the manual, which is why these are staged in a directory of their own.
-release-aminet: release-archive
+release-aminet: release-archive release-verify
 	@rm -rf $(AMINETDIR)
 	@mkdir -p $(AMINETDIR)
 	@# ONE top-level drawer, named for the package. An archive that unpacks
@@ -1303,19 +1479,12 @@ release-verify:
 			echo "  FAIL: private state in the LhA archive"; bad=1; \
 		else echo "  ok: $(PROJECT_NAME).lha carries no private state"; fi; \
 	fi; \
-	if [ -f dist/$(PROJECT_NAME).adf ]; then \
-		$(XDFTOOL) dist/$(PROJECT_NAME).adf list \
-			> build/relverify_adf.txt 2>&1 || true; \
-		if grep -iE '$(REL_PRIVATE)' build/relverify_adf.txt; then \
-			echo "  FAIL: private state on the ADF"; bad=1; \
-		else echo "  ok: $(PROJECT_NAME).adf carries no private state"; fi; \
-	fi; \
 	if [ $$bad -ne 0 ]; then \
 		echo "release-verify: REFUSING -- see the lines above"; \
 		exit 1; \
 	fi
 
-release-dist: release-archive release-adf release-verify
+release-dist: release-archive release-verify         # no ADF for this project (the user, 2026-11-03)
 
 # =============================================================================
 # OPTIONAL: per-CPU build variants

@@ -113,7 +113,7 @@ static void Where(const char *what, APTR addr)
     Printf("  %-22s at 0x%08lx: %s\n", (LONG) what, (ULONG) addr, (LONG) name);
 }
 
-int main(void);
+int main(int argc, char **argv);
 
 static float pos[100 * 3];
 static UBYTE col[100 * 4];
@@ -497,7 +497,7 @@ static void Run(ULONG t, ULONG reps)
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     struct RDArgs *rda;
     struct MsgPort *port;
@@ -510,7 +510,14 @@ int main(void)
     ULONG t0;
     ULONG ticks;
     ULONG tenths;
+    BOOL dev;
+    BOOL lib;
+    BOOL ctx;
+    int rc;
 
+    (void) argv;
+    if (argc == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args[0] = 0;
     args[1] = 0;
     args[2] = 0;
@@ -520,29 +527,41 @@ int main(void)
         PrintFault(IoErr(), "GLBench");
         return RETURN_ERROR;
     }
+    /* one cleanup path: the context and the library above all (libminigl.a
+     * has no destructor: a context left open keeps its screen until reboot) */
+    rc = RETURN_FAIL;
+    port = NULL;
+    req = NULL;
+    dev = FALSE;
+    lib = FALSE;
+    ctx = FALSE;
+    membuf_mem = NULL;
     scale = (args[0] && *(LONG *) args[0] > 0) ? (ULONG) *(LONG *) args[0] : 1;
     port = CreateMsgPort();
-    req = port ? (struct timerequest *) CreateIORequest(port, sizeof(*req)) : NULL;
+    if (port != NULL)
+        req = (struct timerequest *) CreateIORequest(port, sizeof(*req));
     if (req == NULL || OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ, (struct IORequest *) req, 0) != 0)
     {
         Printf("GLBench: timer.device did not open\n");
-        return RETURN_FAIL;
+        goto out;
     }
+    dev = TRUE;
     TimerBase = req->tr_node.io_Device;
     clk_Freq = ReadEClock(&ev);
     Printf("%s\n", (LONG) (ver + 6));
     if (!MiniGLOpen())
     {
         Printf("GLBench: minigl.library 29.1 did not open\n");
-        return RETURN_FAIL;
+        goto out;
     }
+    lib = TRUE;
     mglChoosePixelDepth(16);
     if (!mglCreateContext(0, 0, 320, 240))
     {
         Printf("GLBench: no context\n");
-        MiniGLClose();
-        return RETURN_FAIL;
+        goto out;
     }
+    ctx = TRUE;
     Printf("GL_RENDERER: %s\n", (LONG) glGetString(GL_RENDERER));
     Where("the dispatch table", (APTR) MiniGLDispatch);
     Where("a hook in the library", (APTR) MiniGLDispatch->GLTexCoord2f);
@@ -551,7 +570,10 @@ int main(void)
     Setup();
     membuf_mem = AllocVec(320 * 1024, MEMF_ANY | MEMF_CLEAR);
     if (membuf_mem == NULL)
-        return RETURN_FAIL;
+    {
+        Printf("GLBench: no memory for the 320 KB test buffer\n");
+        goto out;
+    }
     membuf = (ULONG *) (((ULONG) membuf_mem + 15) & ~15UL);
     mglSwitchDisplay();
     if (args[2] && !PcProf_Start(1000, 8000, 64))
@@ -577,12 +599,24 @@ int main(void)
     if (args[2])
         PcProf_Stop((const char *) args[2], (ULONG) MiniGLDispatch->GLTexCoord2f, (ULONG) main);
     Printf("GL error 0x%lx\n", (LONG) glGetError());
-    mglDeleteContext();
-    MiniGLClose();
-    FreeVec(membuf_mem);
-    CloseDevice((struct IORequest *) req);
-    DeleteIORequest((struct IORequest *) req);
-    DeleteMsgPort(port);
+    rc = RETURN_OK;
+
+out:
+    if (ctx)
+        mglDeleteContext();
+    if (lib)
+        MiniGLClose();
+    if (membuf_mem != NULL)
+    {
+        FreeVec(membuf_mem);
+        membuf_mem = NULL;
+    }
+    if (dev)
+        CloseDevice((struct IORequest *) req);
+    if (req != NULL)
+        DeleteIORequest((struct IORequest *) req);
+    if (port != NULL)
+        DeleteMsgPort(port);
     FreeArgs(rda);
-    return RETURN_OK;
+    return rc;
 }

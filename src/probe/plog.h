@@ -10,8 +10,11 @@
  * to a console window could wait for an unlock that never comes. Between
  * Log_Hold(TRUE) and Log_Hold(FALSE) lines still go to the LOG file at
  * once, but the console's copy waits in a buffer (16 KB; what does not fit
- * is counted and reported) and is written at the release. P96Board_Lock
- * and P96Board_Unlock (p96board.h) hold and release.
+ * is counted and reported) and is written at the release, after a Flush
+ * of what VFPrintf still buffers. While held, pr_WindowPtr is -1: a DOS
+ * requester for the LOG file's volume would draw on the locked board, so
+ * the write fails instead. P96Board_Lock and P96Board_Unlock (p96board.h)
+ * hold and release.
  */
 
 #ifndef PROBE_PLOG_H

@@ -40,6 +40,15 @@ reference/*.md
 # the Picasso96's private reference documents: private, never committed
 reference/*.doc
 
-# Quake game data -- id Software copyright, never committed (use QUAKE_ID1=, see glquake/README.md)
+# Quake game data -- id Software copyright, never committed (use QUAKE_ID1=, see
+# ../RadeonGL-GLQuake/README.md)
 *.pak
 *.PAK
+
+# GLQuake, the test client, is not part of this repository: its source lives
+# beside it (GLQUAKE_DIR, default ../RadeonGL-GLQuake)
+/glquake/
+
+# Thomas Richter's openpci kit: it may travel only as his whole archive
+# (Aminet driver/other/openpci68k.lha); fetched locally, never committed
+/sdk/openpci/

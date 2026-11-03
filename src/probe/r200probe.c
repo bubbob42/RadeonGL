@@ -112,11 +112,14 @@ ULONG R200_ReportEndian(const struct PciCard *card)
 
     Log_Section("Register byte order");
     bar0 = card->cfgBar[0] & 0xfffffff0UL;
-    raw = MMIO_RAW(card->mmio, R_CONFIG_MEMSIZE);
+    raw = MMIO_RAW(card->mmio, R_PCI_MIRROR);
     how = Mmio_DetectSwap(card->mmio, bar0, &size);
+    Log_Printf("PCI mirror (vendor, device) native read 0x%08lx, byte-swapped 0x%08lx\n",
+               raw, Mmio_Swap32(raw));
+    raw = MMIO_RAW(card->mmio, R_CONFIG_MEMSIZE);
     Log_Printf("CONFIG_MEMSIZE native read 0x%08lx, byte-swapped 0x%08lx\n",
                raw, Mmio_Swap32(raw));
-    if (how != MMIO_BY_MEMSIZE)
+    if (how != MMIO_BY_MEMSIZE && how != MMIO_BY_PCIMIRROR)
     {
         raw = MMIO_RAW(card->mmio, R_CONFIG_APER_0_BASE);
         Log_Printf("  not a whole number of megabytes either way (no PC BIOS set it)\n");
@@ -134,18 +137,37 @@ ULONG R200_ReportEndian(const struct PciCard *card)
     }
     if (how == MMIO_UNDECIDED)
     {
-        Log_Printf("UNDECIDED, assuming little-endian registers (swap)\n");
+        Log_Printf("UNDECIDED, assuming registers read as they are (no swap)\n");
         return MMIO_UNDECIDED;
     }
     Log_Printf("verdict: registers read %s (by %s)\n",
                Mmio_Swap ? (CONST_STRPTR)"little-endian (68k swaps every access)"
                          : (CONST_STRPTR)"right as they are (NO swap)",
-               how == MMIO_BY_MEMSIZE ? (CONST_STRPTR)"CONFIG_MEMSIZE"
+               how == MMIO_BY_PCIMIRROR ? (CONST_STRPTR)"the PCI mirror's vendor ID"
+               : how == MMIO_BY_MEMSIZE ? (CONST_STRPTR)"CONFIG_MEMSIZE"
                : how == MMIO_BY_APER  ? (CONST_STRPTR)"CONFIG_APER_0_BASE"
                                       : (CONST_STRPTR)"CONFIG_APER_SIZE");
     if (size != 0)
         Log_Printf("memory size %lu MB\n", size >> 20);
     return how;
+}
+
+BOOL R200_CheckFamily(const struct PciCard *card)
+{
+    ULONG id;
+    ULONG dev;
+    BOOL r200;
+
+    id = Mmio_Read(card->mmio, R_PCI_MIRROR);
+    dev = id >> 16;
+    r200 = (BOOL)((id & 0xffffUL) == 0x1002UL
+                  && ((dev >= 0x5148 && dev <= 0x514f)                     /* R200 */
+                      || dev == 0x4966 || dev == 0x4967 || dev == 0x4c66 || dev == 0x4c67 /* RV250 */
+                      || (dev >= 0x5960 && dev <= 0x5967) || dev == 0x5c61 || dev == 0x5c63)); /* RV280 */
+    Log_Printf("chip: vendor 0x%04lx device 0x%04lx: %s\n", id & 0xffffUL, dev,
+               r200 ? (CONST_STRPTR)"an R200-family Radeon"
+                    : (CONST_STRPTR)"NOT an R200-family Radeon (R200, RV250, RV280)");
+    return r200;
 }
 
 static void DumpOne(CONST_STRPTR name, ULONG off, ULONG value, ULONG *prev,

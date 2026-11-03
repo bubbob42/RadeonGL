@@ -9,8 +9,11 @@
  *   - LibInit frees the library base when it fails (the original leaks it);
  *   - LibClose does not clear the current context for every closer: a
  *     context belongs to the task that created it, and only that task's
- *     close (a client that died or forgot mglDeleteContext) frees it;
- *   - nothing runs MGLInit inside LibOpen.
+ *     LAST close (a client that died or forgot mglDeleteContext) frees it
+ *     -- the opens are counted per task;
+ *   - nothing runs MGLInit inside LibOpen;
+ *   - LibInit refuses a CPU the build cannot run on (the 68040/68060 build
+ *     holds FPU instructions a 68881/68882 does not know).
  *
  * This file must stay first in the link: LibNoExec is the first code in the
  * hunk, so running the library as a program returns at once.
@@ -48,6 +51,28 @@ LONG LibNoExec(void)
 }
 
 static const char LibName[] = LIBNAME;
+
+/* Opens per task (LibOpen and LibClose run under Forbid). A task beyond
+ * the table is not counted: its first close counts as its last. */
+#define OPENERS 32
+static struct Task *opener[OPENERS];
+static UWORD opens[OPENERS];
+
+/* The CPU this build needs: RGL_CPU_040 (Makefile) for the 68040/68060
+ * build, else a 68020 or 68030 with a 68881/68882. Either needs an FPU. */
+static BOOL CpuFits(struct ExecBase *sb)
+{
+    UWORD f;
+
+    f = sb->AttnFlags;
+    if (!(f & (AFF_68881 | AFF_FPU40)))
+        return FALSE;
+#ifdef RGL_CPU_040
+    return (BOOL) ((f & AFF_68040) != 0);
+#else
+    return (BOOL) ((f & AFF_68020) != 0);
+#endif
+}
 
 /* The bases the NDK inline headers use. */
 struct ExecBase *SysBase = NULL;
@@ -87,6 +112,11 @@ static struct MiniGLBase *LibInit(
     register struct ExecBase *sysbase __asm("a6"))
 {
     SysBase = sysbase;
+    if (!CpuFits(sysbase))
+    {
+        FreeBase(base);
+        return NULL;
+    }
     base->lib.lib_Node.ln_Type = NT_LIBRARY;
     base->lib.lib_Node.ln_Name = (char *)LibName;
     base->lib.lib_Flags = LIBF_SUMUSED | LIBF_CHANGED;
@@ -113,6 +143,26 @@ static BPTR LibExpunge(register struct MiniGLBase *base __asm("a6"));
 
 static struct MiniGLBase *LibOpen(register struct MiniGLBase *base __asm("a6"))
 {
+    struct Task *me;
+    ULONG i;
+    ULONG free_slot;
+
+    me = FindTask(NULL);
+    free_slot = OPENERS;
+    for (i = 0; i < OPENERS; i++)
+    {
+        if (opener[i] == me)
+            break;
+        if (opener[i] == NULL && free_slot == OPENERS)
+            free_slot = i;
+    }
+    if (i == OPENERS)
+        i = free_slot;
+    if (i < OPENERS)
+    {
+        opener[i] = me;
+        opens[i]++;
+    }
     base->lib.lib_OpenCnt++;
     base->lib.lib_Flags &= (UBYTE)~LIBF_DELEXP;
     return base;
@@ -120,7 +170,29 @@ static struct MiniGLBase *LibOpen(register struct MiniGLBase *base __asm("a6"))
 
 static BPTR LibClose(register struct MiniGLBase *base __asm("a6"))
 {
-    Back_ClientGone(FindTask(NULL));
+    struct Task *me;
+    ULONG i;
+    BOOL last;
+
+    me = FindTask(NULL);
+    last = TRUE;
+    for (i = 0; i < OPENERS; i++)
+        if (opener[i] == me)
+        {
+            if (opens[i] > 1)
+            {
+                opens[i]--;
+                last = FALSE;
+            }
+            else
+            {
+                opens[i] = 0;
+                opener[i] = NULL;
+            }
+            break;
+        }
+    if (last)
+        Back_ClientGone(me);
     if (base->lib.lib_OpenCnt)
         base->lib.lib_OpenCnt--;
     if (base->lib.lib_OpenCnt == 0 && (base->lib.lib_Flags & LIBF_DELEXP))

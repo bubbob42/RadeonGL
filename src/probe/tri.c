@@ -52,6 +52,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/rdargs.h>
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
@@ -106,6 +107,7 @@ struct Args
 
 #define MAXPIX        32
 #define MAXREPEAT     1000UL
+#define LOCK_US       1000000UL    /* REPEAT stops after this long inside the lock */
 #define FIFO_STEP     32UL         /* direct path: writes between FIFO checks */
 #define PATTERN       0x5A5A5A5AUL /* the colour buffer before a draw */
 #define PAL_FILL      0x80000080UL
@@ -141,7 +143,9 @@ struct Ctx
     ULONG repeat;           /* REPEAT= */
 };
 
-static struct Core core;
+/* The GL core's state: allocated (main), not static -- with today's upload
+ * cache it outgrew SAS/C's 64 KB of near data (Error 194, 2026-11-03). */
+static struct Core *core;
 static struct R2ChkState chk;
 
 /* --- struct R2Hw over the probes' MMIO helpers (as CPRing) -------------------- */
@@ -165,6 +169,15 @@ static ULONG HwReadBack(APTR hw, volatile ULONG *p)
 static ULONG HwClock(APTR hw)
 {
     return Clock_Us(Clock_Since(((struct Ctx *)hw)->clock_base));
+}
+
+/* Nanoseconds each of count things that took us microseconds, without
+ * us * 1000 (it overflows past 4.29 s). */
+static ULONG NsEach(ULONG us, ULONG count)
+{
+    if (count == 0)
+        return 0;
+    return (us / count) * 1000UL + ((us % count) * 1000UL) / count;
 }
 
 /* --- the core's environment: fast RAM, nothing to wait for ----------------- */
@@ -388,7 +401,8 @@ static BOOL DrawDirect(struct Ctx *c, const ULONG *buf, ULONG n)
     d.waits = 0;
     t0 = HwClock(c);
     e = R2_OK;
-    for (r = 0; r < c->repeat && e == R2_OK; r++)
+    /* REPEAT draws, but never more than LOCK_US inside the lock */
+    for (r = 0; r < c->repeat && e == R2_OK && HwClock(c) - t0 < LOCK_US; r++)
         e = DirectRun(c, &d, buf, n);
     if (e == R2_OK)
         e = DirectFence(c, &d);
@@ -396,7 +410,7 @@ static BOOL DrawDirect(struct Ctx *c, const ULONG *buf, ULONG n)
     Log_Printf("%lu x %lu dwords, %lu register writes, and the fence: %s after %lu us "
                "(%lu ns a stream dword); %lu FIFO checks waited; RBBM_STATUS 0x%08lx\n",
                r, n, d.writes, e == R2_OK ? (CONST_STRPTR)"passed" : (CONST_STRPTR)"TIMED OUT",
-               dt, (r * n != 0) ? dt * 1000UL / (r * n) : 0UL, d.waits, HwRead(c, R_RBBM_STATUS));
+               dt, NsEach(dt, r * n), d.waits, HwRead(c, R_RBBM_STATUS));
     if (e != R2_OK)
     {
         if (Reset3D(c))
@@ -451,6 +465,11 @@ static BOOL Prepare(struct Ctx *c)
     if (R200_ReportEndian(c->card) == MMIO_UNDECIDED)
     {
         Log_Printf("Tri: register byte order undecided: the card is not touched\n");
+        return FALSE;
+    }
+    if (!R200_CheckFamily(c->card))
+    {
+        Log_Printf("Tri: not an R200-family chip: the R200 microcode is not loaded\n");
         return FALSE;
     }
     R2Cp_Save(&c->hw, &c->saved);
@@ -529,7 +548,10 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     Log_Section("Layout");
     ring_cpu = (ULONG *)Align4k((ULONG)mem);
     color_cpu = Align4k((ULONG)ring_cpu + RING_BYTES);
-    depth_cpu = Align4k(color_cpu + COLOR_BYTES);
+    /* the colour buffer spans TRI_H rows of the BITMAP's pitch (P96 may pad
+     * a row beyond TRI_W * 4); the block check below catches a pitch the
+     * block was not sized for */
+    depth_cpu = Align4k(color_cpu + c->bpr * TRI_H);
     heap_cpu = Align4k(depth_cpu + DEPTH_BYTES);
     ring_gpu = Gpu(c, (ULONG)ring_cpu);
     t.width = TRI_W;
@@ -569,19 +591,19 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     env.free = EnvFree;
     env.wait_idle = EnvIdle;
     env.env = NULL;
-    v = Core_Init(&core, &bcs, &env, &t, Gpu(c, heap_cpu),
+    v = Core_Init(core, &bcs, &env, &t, Gpu(c, heap_cpu),
                   (ULONG *)heap_cpu, HEAP_BYTES);
     if (v != GL_NO_ERROR)
     {
         Log_Printf("Core_Init: GL error 0x%04lx\n", v);
-        Core_Free(&core);
+        Core_Free(core);
         goto unlock;
     }
-    c->draw(&core);
+    c->draw(core);
     n = (ULONG)(bcs.ptr - buf);
-    v = Core_GetError(&core);
+    v = Core_GetError(core);
     Log_Printf("%lu dwords, stream error %ld, GL error 0x%04lx\n", n, bcs.error, v);
-    Core_Free(&core);
+    Core_Free(core);
     if (bcs.error != R2_OK || v != GL_NO_ERROR || n == 0 || n > RING_DW - 64)
         goto unlock;
 
@@ -675,7 +697,7 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     /* 3. the scene (c->repeat times), then one fence */
     Log_Section("Draw, the ring");
     t0 = HwClock(c);
-    for (r = 0; r < c->repeat; r++)
+    for (r = 0; r < c->repeat && HwClock(c) - t0 < LOCK_US; r++)
     {
         p = R2Cs_Room(&ring.cs, n);
         if (p == NULL)
@@ -693,8 +715,8 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     dt = HwClock(c) - t0;
     Log_Printf("%lu x %lu dwords and a fence: %s after %lu us (%lu ns a stream dword); "
                "RPTR %lu, WPTR %lu, RBBM_STATUS 0x%08lx\n",
-               c->repeat, n, e == R2_OK ? (CONST_STRPTR)"passed" : (CONST_STRPTR)"TIMED OUT", dt,
-               dt * 1000UL / (c->repeat * n),
+               r, n, e == R2_OK ? (CONST_STRPTR)"passed" : (CONST_STRPTR)"TIMED OUT", dt,
+               NsEach(dt, r * n),
                HwRead(c, R_CP_RB_RPTR), HwRead(c, R_CP_RB_WPTR), HwRead(c, R_RBBM_STATUS));
     LogRing(&ring);
     if (e != R2_OK)
@@ -805,6 +827,8 @@ int main(void)
     ULONG bad;
     int rc;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args.log = NULL;
     args.wait = NULL;
     args.noshow = 0;
@@ -824,6 +848,7 @@ int main(void)
 
     rc = RETURN_FAIL;
     buf = NULL;
+    core = NULL;
     for (i = 0; i < sizeof(c); i++)
         ((UBYTE *)&c)[i] = 0;
     c.card = &card;
@@ -880,7 +905,8 @@ int main(void)
     }
     R200_CardFromP96(&card, &board);
     buf = (ULONG *)AllocVec(STREAM_DW * 4, MEMF_ANY | MEMF_CLEAR);
-    if (buf == NULL)
+    core = (struct Core *)AllocVec(sizeof(struct Core), MEMF_ANY | MEMF_CLEAR);
+    if (buf == NULL || core == NULL)
     {
         Log_Printf("Tri: no fast RAM for the stream\n");
         goto out;
@@ -926,6 +952,8 @@ out:
     P96Board_Close(&board);
     if (buf != NULL)
         FreeVec(buf);
+    if (core != NULL)
+        FreeVec(core);
     if (c.rgb != NULL)
         FreeVec(c.rgb);
     Clock_Close();

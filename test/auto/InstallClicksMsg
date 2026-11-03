@@ -1,0 +1,32 @@
+.KEY DONE/A,TAG/A
+.BRA {
+.KET }
+; InstallClicksMsg -- the clicks for run C of T=InstallRun, the one with a
+; (message) page: the welcome page's Proceed (126, -33), then the message
+; page's Proceed, which sits where a grid page has About (126, -15: Prisma
+; Megamix's InstallClicks), then the closing pages' one button (248, -15).
+; A grab before every click.
+Wait 8
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-1-welcome.ppm
+  DEV:Test/InputPoke WIN="/Install" X=126 Y=-33 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-2-message.ppm
+  DEV:Test/InputPoke WIN="/Install" X=126 Y=-15 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-3-closing.ppm
+  DEV:Test/InputPoke WIN="/Install" X=248 Y=-15 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-4-final.ppm
+  DEV:Test/InputPoke WIN="/Install" X=248 Y=-15 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-stuck.ppm
+EndIf

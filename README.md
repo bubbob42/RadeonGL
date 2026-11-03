@@ -1,597 +1,183 @@
-# AmigaOS 3.2 VS Code Cross-Development Starter
+# RadeonGL
 
-A macOS-based starter for writing, building, and testing classic **AmigaOS 3.2**
-(Motorola 68000) applications from **Visual Studio Code**, with two compiler
-paths and optional FS-UAE emulator testing.
+A `minigl.library` for the ATI Radeon R200 family (Radeon 8500, 9000, 9100,
+9200, 9250) on Picasso96, for AmigaOS 3.x on a 68040 or 68060 -- or, in a
+second build, on a 68020 or 68030 with a 68881 or 68882.
 
-- **m68k-amigaos-gcc** + **libnix** (`-noixemul`) — the main cross path.
-- **SAS/C 6.58** run through **amitools/vamos** — a compatibility check that
-  keeps code close to classic Amiga C conventions.
+RadeonGL draws with the Radeon's own 3D engine. It needs no Warp3D: it
+programs the card's command processor through Picasso96, one lock a frame,
+while the Workbench keeps running. It is a `minigl.library` 29.1 with the
+dispatch interface (ABI 5) of the current MiniGL SDK, so programs built
+with that SDK open it like any other `minigl.library` 29.
 
-It deliberately avoids POSIX, SDL, and direct hardware access in normal
-application code, and is set up to work well with Claude Code / AI assistance.
+## Features
 
-**Contents**
+- **Drawing:** every GL primitive (points, lines, line strips and loops,
+  triangles, strips, fans, quads, quad strips, polygons), in immediate mode
+  and from vertex arrays (`glDrawArrays`, `glDrawElements` with 8-, 16- and
+  32-bit indices).
+- **The fast path:** compiled vertex arrays (`glLockArraysEXT`) go to the
+  card as indexed draws; an upload cache keeps what a program sends again
+  unchanged in the card's memory.
+- **Transformation and rasterising on the Radeon:** the full float matrix
+  stack (`glFrustum`, `glOrtho`, `glRotatef`, `glTranslatef`, `glScalef`,
+  push, pop, load, multiply), viewport, depth range.
+- **Textures:** two units (multitexture), RGB565, ARGB4444, I8 and AI88 in
+  the card's memory (up to 16 MB), nearest, linear and mipmap filters,
+  repeat and clamp, the environments MODULATE, REPLACE, DECAL (RGB) and
+  ADD, `glTexSubImage2D` updates.
+- **Fragments:** blending, alpha test, depth test with every function,
+  depth mask, polygon offset and `mglSetZOffset`, back-face culling,
+  scissor, colour mask, flat and smooth shading, point size.
+- **MiniGL 29.1 contexts:** a Picasso96 screen of its own, 16 or 32 bit, up
+  to 2048 x 2048, double buffered, with MiniGL's lock modes.
+- **Safety:** every command list is checked before the Radeon runs it
+  (`RadeonGLCheck=0` turns it off for speed).
+- **The package:** an Installer, manuals in English and German, a card test,
+  a card report for bug reports and four demos (`demos/`).
 
-- [Overview & layout](#overview--layout)
-- [Installation](#installation) — set up the toolchain on a fresh Mac
-- [Getting started](#getting-started) — first build
-- [Building & running](#building--running) — targets, profiles, dev loop
-- [Testing & debugging](#testing--debugging) — FS-UAE, MuForce, serial
-- [Project capabilities](#project-capabilities) — new project, versioning, publish, staging, native build
-- [Configuration & conventions](#configuration--conventions)
-- [Troubleshooting](#troubleshooting)
+## Not implemented yet
 
----
+RadeonGL implements 100 of the 205 functions of `minigl.library` 29.1:
+everything GLQuake uses, and more. A missing function draws nothing and
+sets GL_INVALID_OPERATION; the library's log names every such call.
 
-## Overview & layout
+- Lighting and materials (`glLight`, `glMaterial`, `glLightModel`,
+  `glColorMaterial`): not there (they set GL_INVALID_OPERATION).
+- Fog, display lists, texture coordinate generation (`glTexGen`),
+  `glTexCoord4f`.
+- The texture environment `GL_BLEND` (drawn as `GL_MODULATE`) and
+  `GL_DECAL` with an RGBA texture; 32-bit textures are stored with 16 bits.
+- Stencil and accumulation buffers, line and polygon stipple, logic
+  operations.
+- `glReadPixels`, `glCopyTexImage2D`, `glCopyTexSubImage2D`,
+  `glPixelStorei`, `glDrawBuffer`, `glReadBuffer`.
+- The double-precision calls, `glArrayElement`, `glInterleavedArrays`,
+  `glMultiDrawArrays`, `glNormalPointer`, edge flags, colour-index mode,
+  `glBlendEquation`, `glBlendFuncSeparate`, `glLineWidth`, `glColorTable`.
+- GLU and GLUT; MiniGL's own main loop and callbacks; contexts in a window
+  or a bitmap.
+- One program at a time; textures beyond 16 MB are not swapped out.
 
-`dist/` is the build output directory; FS-UAE mounts it as the Amiga volume
-`DEV:`, so building and testing share one tree. The GCC build is the primary
-target; the SAS/C build exists to catch portability drift.
+## GLQuake benchmarks
 
-```text
-.
-├── CLAUDE.md                 # project guidance for Claude Code / AI tools
-├── Makefile                  # the whole build; derives PROJECT_NAME from the folder
-├── new_project.sh            # scaffold a new sibling project from this template
-├── setup-smb.sh              # configure `gmake push` for your own SMB share
-├── .vamosrc.in               # vamos volume/assign template (-> .vamosrc)
-├── .vscode/tasks.json
-├── fsuae/
-│   ├── project.fs-uae.in     # FS-UAE config template (-> fsuae/local/…)
-│   └── mutools               # MuForce/MuGuardianAngel session starter
-├── src/
-│   ├── main.c                # GCC entry point (embeds the $VER cookie)
-│   ├── main_sasc.c           # SAS/C entry point
-│   ├── help.c, help.h        # OPTIONAL async AmigaGuide help scaffolding
-│   ├── app_strings.h         # localization seed — every user-facing string
-│   ├── app_locale.c/.h       # OPTIONAL locale/catalog module (scaffolded)
-│   ├── groupframe.c/.h       # OPTIONAL layout.gadget subclass: titled frames
-│   ├── app_msg.h, app_catver.h, <project>_cat.h   # generated by gen_catalog.py
-│   ├── <project>_rev.h/.rev  # bumprev version include + counter (committed)
-│   ├── smakefile.in          # native SAS/C build templates (-> DEV:src/)
-│   └── Makefile.in
-├── tools/                    # host-side Python helpers (icons, catalogs)
-├── install/                  # generic Installer script + Workbench icon
-├── guide/english/            # AmigaGuide online-help stub
-├── docs/                     # inherited knowledge base (see docs/README.md)
-├── reference/                # pulled reference PDFs (git-ignored)
-├── build/  dist/             # build artifacts (git-ignored)
-```
+GLQuake for `minigl.library`, by Frank Wille and Steffen Häuser: its
+timedemos (all frames) on the test machine: an A4000D, 68060 at 50 MHz on a
+CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96. Frames a
+second:
 
-Generated / machine-specific files are git-ignored and never committed:
-`.vamosrc`, `smbpush.conf`, `build/`, `dist/`, `fsuae/local/`, `src/*_rev.i`,
-`reference/*.pdf`. The committed vs. generated split is enforced by
-[`.gitignore`](.gitignore).
+| Demo | Screen | Check on | Check off | Direct | Direct, 8-bit lightmaps |
+|---|---|---:|---:|---:|---:|
+| demo1 | 320 x 240 | 18.7 | 23.7 | 24.2 | 24.9 |
+| demo2 | 320 x 240 |  | 21.1 |  | 21.7 |
+| demo3 | 320 x 240 |  | 20.9 |  | 22.3 |
+| demo1 | 640 x 480 |  | 21.4 |  | 22.5 |
+| demo1 | 1280 x 720 |  | 18.4 |  | 19.8 |
 
----
+- **Check on:** RadeonGL as installed. **Check off:** `RadeonGLCheck=0`.
+- **Direct:** `RadeonGLDirect=1` as well: about eight short Picasso96 locks
+  a frame instead of one.
+- **8-bit lightmaps:** GLQuake started with `-lm_LUMINANCE` (id's own
+  default; the Amiga port changed it to 16 bit).
+- **The 68020/68030 build**, on the same 68060 for comparison: demo1 16.8
+  (check on), 22.1 (check off), 23.2 (direct, 8-bit lightmaps). A real
+  68030 is far slower than that.
 
-## Installation
+The 68060 sets the pace, not the Radeon: sixteen times the pixels cost a
+few frames a second.
 
-A fresh Mac needs two kinds of things: **build tools you install** (the GCC
-cross-toolchain, amitools/vamos, FS-UAE) and **Amiga software you must supply
-yourself from legal sources** (SAS/C, a Kickstart ROM, an AmigaOS 3.2 system
-disk). Each lands at a path the Makefile expects; override any with a `gmake
-VAR=…` assignment (all summarised at the [end of this section](#expected-locations-override-on-the-command-line)).
+## Requirements
 
-Host basics: macOS on Apple Silicon with [Homebrew](https://brew.sh) under
-`/opt/homebrew`, and GNU Make as `gmake` (`brew install make`).
+- A Radeon 8500, 9000, 9100, 9200 or 9250, driven by Picasso96 3.6 or
+  newer with its Radeon driver (`Radeon.card`).
+- A 68040 or 68060 with FPU (built for the 68060), or a 68020 or 68030 with
+  a 68881 or 68882 (the second build, `dist/Libs/RadeonGL030`). The
+  Installer picks the right one; a build refuses to open on a CPU it cannot
+  run on.
+- AmigaOS 3.1 or newer (tested on 3.2).
 
-### 1. GCC cross-toolchain → `~/amiga-arm` (`PREFIX`)
+## Building
 
-`m68k-amigaos-gcc` (with libnix and the bundled NDK headers) is built from
-Bebbo's [amiga-gcc](https://github.com/bebbo/amiga-gcc):
+The toolchain is the AmigaOS cross-development starter this project grew
+from: `m68k-amigaos-gcc` (libnix) for the library, SAS/C 6.58 through
+`vamos` for the C89 check of the core, FS-UAE for unattended tests, a host
+`cc` and Python 3 for the tests and tools.
 
-```sh
-git clone https://github.com/bebbo/amiga-gcc.git
-cd amiga-gcc
-make update                          # fetch the component sources
-make all PREFIX=$HOME/amiga-arm -j8  # build + install into ~/amiga-arm
-```
+Not in this repository (or the release archive's Source drawer), to be
+fetched from Aminet:
 
-See that project's README for its own build prerequisites (a few Homebrew
-packages). This starter was built against GCC 6.5.0b.
+- **The Picasso96 developer files** (`P96_SDK=`, default
+  `~/Developer/AmigaSDK/Picasso96Develop`): the library and the probes.
+- **Thomas Richter's openpci kit** (`driver/other/openpci68k.lha`), for the
+  probes only: its `Include` tree goes to `sdk/openpci/include`, and
+  `fd2pragma --infile openpci.fd --clib include/clib/openpci_protos.h
+  --special 40` makes the GCC inline header. Its licence lets it travel only
+  as Thomas Richter's whole archive.
 
-### 2. amitools / vamos → `~/Developer/AmigaTools/venv-amitools` (`VAMOS`)
-
-vamos runs the classic SAS/C compiler on the host.
-[amitools](https://github.com/cnvogelg/amitools) and its `machine68k` CPU
-emulator install from source into a virtualenv, editable so they stay in sync:
-
-```sh
-python3 -m venv ~/Developer/AmigaTools/venv-amitools
-source ~/Developer/AmigaTools/venv-amitools/bin/activate
-git clone https://github.com/cnvogelg/machine68k.git && pip install -e machine68k
-git clone https://github.com/cnvogelg/amitools.git   && pip install -e amitools
-```
-
-(If the two drift apart later, see the `machine68k.Traps` fix in
-[Troubleshooting](#troubleshooting).)
-
-### 3. FS-UAE → `/opt/homebrew/bin/fs-uae` (`FSUAE`)
-
-```sh
-brew install fs-uae
-```
-
-Needed only for full-OS testing (`gmake run-fsuae`).
-
-### 4. SAS/C 6.58 → `~/Developer/AmigaSDK/SASC/SC` (`SASC_PATH`)
-
-Supply SAS/C yourself and place its `SC` drawer at that path. vamos maps the
-compiler, includes, and libs from there via `.vamosrc.in` (`sc:`, `include:`,
-`lib:`).
-
-### 5. Kickstart ROM + AmigaOS 3.2 system disk (`KICKSTART_FILE`, `SYSTEM_HDF`)
-
-Supply these legally (AmigaOS 3.2 is sold by Hyperion). Place them at:
-
-```text
-~/Developer/AmigaEmu/ROMs/kick32.rom       # Kickstart 3.2 ROM image
-~/Developer/AmigaEmu/HDF/AmigaOS32.hdf     # AmigaOS 3.2 install as a hard-disk image
-```
-
-Only FS-UAE testing needs these; the GCC/SAS-C builds do not.
-
-### 6. bumprev (optional) → `~/Developer/AmigaTools/bumprev/bumprev` (`BUMPREV`)
-
-Only `gmake release` needs it — the standard AmigaOS `bumprev` tool, run through
-vamos to advance the version. Point `BUMPREV` at your copy, or skip releases.
-
-### Expected locations (override on the command line)
-
-| Path | Component | `gmake` var |
-|---|---|---|
-| `~/amiga-arm` | GCC cross-toolchain | `PREFIX` |
-| `~/Developer/AmigaTools/venv-amitools` | amitools / vamos | `VAMOS` |
-| `~/Developer/AmigaSDK/SASC/SC` | SAS/C 6.58 | `SASC_PATH` |
-| `~/Developer/AmigaEmu/ROMs/kick32.rom` | Kickstart 3.2 ROM | `KICKSTART_FILE` |
-| `~/Developer/AmigaEmu/HDF/AmigaOS32.hdf` | AmigaOS 3.2 system disk | `SYSTEM_HDF` |
-| `/opt/homebrew/bin/fs-uae` | FS-UAE | `FSUAE` |
-
-```sh
-gmake check    # confirms every path resolves; fails on the first missing one
-```
-
-> **Legal note:** the AmigaOS ROM, system disk/Workbench, NDK, and SAS/C are
-> **not** included and must not be committed — supply them from legal sources.
-
----
-
-## Getting started
-
-With the prerequisites in place:
-
-```sh
-gmake check        # validate the toolchain/paths (run this first on a new machine)
-gmake all          # build both profiles + generate the dist/ helper scripts
-gmake run-sasc     # run the SAS/C binary under vamos (quick CLI smoke test)
-gmake run-fsuae    # build, generate the FS-UAE config, and launch the emulator
-```
-
----
-
-## Building & running
-
-### Make targets
-
-| Target | Does |
+| Command | What |
 |---|---|
-| `all` | Both profiles, `dist/` helper scripts, and any [optional staging](#optional-staging-targets). |
-| `gcc` / `sasc` | Build one profile → `dist/<project>_gcc` / `_sasc`. |
-| `debug` | Serial-debug (kprintf) builds → `dist/<project>_{gcc,sasc}_debug`. See [serial output](#serial-debug-output). |
-| `release` | Advance the revision (bumprev) and rebuild — see [versioning](#versioning-gmake-release). |
-| `release-dist` | Package it: LhA archive + ADF disk + a private-state check — see [releases](#packaging-a-release-gmake-release-dist). |
-| `run-sasc` | Run the SAS/C binary under vamos. CLI programs only, not a full-OS test. |
-| `run-fsuae` | `all` + generate the FS-UAE config + launch. Also `run-fsuae-gcc` / `run-fsuae-sasc`. |
-| `run-fsuae13` | The same on an **optional** Kickstart 1.3 / 68000 A500 — see [the 1.3 machine](#the-optional-kickstart-13-machine). |
-| `cpu-all` | **Opt-in.** Build one binary per CPU into `dist/cpu/` + a size table — see [per-CPU builds](#optional-per-cpu-builds). |
-| `fsuae-config` | Generate `fsuae/local/<project>.fs-uae` from the template only. |
-| `push` | Publish `dist/` to an SMB share — see [publishing](#publish-to-a-share-gmake-push). |
-| `info` | `file` + `objdump -f` on the built binaries. |
-| `clean` | Remove `build/` and `dist/`. |
-| `distclean` | `clean` + remove `.vamosrc` and `fsuae/local/`. |
+| `gmake rgl-lib` | `dist/Libs/RadeonGL/minigl.library` |
+| `gmake demos` | `dist/Demos/`: Spinner, Glow, Landscape, Showcase |
+| `gmake glsmoke probes` | GLSmoke (the card test), R200Info and the other probes |
+| `gmake test` | the host tests (the core, the packet layer, the R200 simulator) |
+| `gmake autotest T=<name>` | one FS-UAE test from `test/auto` (`docs/testing.md`) |
+| `gmake release-stage release-archive release-aminet release-drawer` | the release package: `dist/RadeonGL.lha`, the Aminet pair, `DEV:Release` |
 
-### Compiler profiles
+GLQuake, the program RadeonGL is measured with, is not part of this
+repository. Its source lives beside it (`GLQUAKE_DIR`, default
+`../RadeonGL-GLQuake`); `gmake glquake glquake-data` builds it and copies
+the game data (never committed).
 
-**GCC** builds with `-m68000 -Os -std=gnu99 -msasregparm -noixemul -lamiga`.
-Warnings are `-Wall -Wextra` with `-Wno-pointer-sign` and `-Wno-int-conversion`
-suppressed (the classic NDK inlines produce false positives on those), and
-`-Werror=implicit-function-declaration` kept fatal.
+## Layout
 
-**SAS/C** runs `sc`/`slink` through vamos. Both steps get `-H disable -m 16128`
-to work around vamos's default RAM ceiling on larger sources (see the comment
-above `$(TARGET_SASC)` in the Makefile).
-
-Both profiles pass function arguments in **registers** rather than on the stack
-— the natural 680x0 convention (`PARAMETERS=REGISTERS` in `SC_OPTS`,
-`-msasregparm` in `GCC_CFLAGS`, the SAS/C-compatible variant so the two profiles
-share one ABI). It is applied to every build, debug included. See
-[docs/compiler-usage.md](docs/compiler-usage.md) for why this is safe and the one
-exception — a `DEVS:Printers` driver's `Render`/`DoSpecial`/`ConvFunc` entry
-points must stay on the C stack convention (`SC_DRIVER_OPTS`).
-
-#### SAS/C stack checking (`NOSTACKCHECK`) and GUI stacks
-
-The SAS/C build compiles with `NOSTACKCHECK` (`SC_OPTS` in the Makefile,
-`SCOPTS` in the `src/*.in` templates). SAS/C otherwise inserts a per-function
-stack-overflow check whose handler (`__XCOVF`) is **unsafe inside an OS
-callback** — most importantly a BOOPSI/ReAction dispatcher called by Intuition,
-where it corrupts the task stack and shows up as an exec address-error crash
-(`80000003`) instead of a clean diagnostic. GCC inserts no such check, so a
-program can appear to work under GCC and crash only under SAS/C.
-
-With the check off, the program owns its stack sizing. The default Shell stack
-is small and BOOPSI GUIs (`window.class`, `texteditor.gadget`, …) are
-stack-hungry, so a GUI program should embed a **stack cookie** — the Shell reads
-it (`ScanStackToken()`) and sizes the process stack before `main()`:
-
-```c
-/* Note the space after the colon -- the exact format the Shell scans for. */
-const char stack_cookie[] = "$STACK: 16384";
-```
-
-Put it in each entry point (add `__attribute__((used))` under GCC so it is not
-stripped). Pure CLI tools that never enter Intuition callbacks can skip it.
-
-### Typical development loop
-
-```sh
-gmake clean && gmake all
-gmake run-sasc     # fast CLI check under vamos
-gmake run-fsuae    # full AmigaOS test in the emulator
-```
-
-Round trip: VS Code → GCC/SAS-C build → vamos CLI test → FS-UAE AmigaOS test.
-
----
-
-## Testing & debugging
-
-### FS-UAE integration
-
-`gmake run-fsuae` renders `fsuae/project.fs-uae.in` into
-`fsuae/local/<project>.fs-uae` and launches it with `dist/` mounted as `DEV:`.
-Inside AmigaOS:
-
-```text
-DEV:
-execute runme        ; lists the binaries and how to start each
-```
-
-The config emulates a **68030 with an MMU** (not the A1200's stock 68EC020) so
-MuForce/MuGuardianAngel have an MMU to use — a test-environment choice only;
-your code is still compiled for a plain 68000 baseline (`CPUFLAGS`).
-`bsdsocket_library = 1` is enabled for programs that need the Amiga TCP/IP
-stack, and `joystick_port_1 = nothing` so cursor keys reach the guest.
-
-### Serial-debug output
-
-`gmake debug` builds with the `DBG()` trace (`src/debug.h`) enabled and links
-`debug.lib` for `KPrintF()`. The FS-UAE config exposes the emulated serial port
-over TCP, so read the trace from the host:
-
-```sh
-telnet 127.0.0.1 1234
-```
-
-Connect *before* triggering the code you're debugging so you don't miss early
-output. (Same channel MuForce uses.) Based on
-[this write-up](https://blog.arisamiga.rocks/post/debuggingamiga/).
-
-### MuForce (`DEV:mutools`)
-
-`dist/mutools` (from the committed `fsuae/mutools`) starts a
-MuForce/MuGuardianAngel session that catches illegal memory access, stack
-overflow, and register corruption. It needs the `mutools` package already
-installed under `sys:tools/mutools/` in the guest. Run it before launching what
-you're debugging:
-
-```text
-execute DEV:mutools
-```
-
-Edit `fsuae/mutools` to change its flags (`dist/mutools` is regenerated every
-build).
-
-### `dist/` helper scripts
-
-Every build regenerates AmigaDOS scripts in `dist/` (= `DEV:`): `runme` (menu),
-`run-gcc`, and `run-sasc` (each assigns `HELP:` and launches its binary). Run a
-binary directly with `DEV:<project>_gcc` / `DEV:<project>_sasc`.
-
-### Desktop run icons (`.backdrop`)
-
-The build also stages three IconX scripts with icons — **Run** (the release
-build), **RunDebug** (starts MuForce/MuGuardianAngel via `DEV:mutools`, then
-runs the kprintf debug build; read the trace with `telnet 127.0.0.1 1234`) and
-**MuTools** (loads MuForce/MuGuardianAngel and nothing else, so anything else
-can then be run guarded) — plus a `.backdrop` file in `dist/`. A `.backdrop`
-file in a volume's root lists icons Workbench shows directly on the desktop,
-so all three appear on the Workbench as soon as `DEV:` mounts. Regenerate
-the icon artwork with `tools/make_run_icons.py` (output-window titles carry
-the project name; `new_project.sh` does this on clone).
-
-Each script begins with `Assign >NIL: DEV: ""`. IconX makes the icon's own
-drawer the current directory, so `DEV:` then means "wherever this script
-lives" — a `dist/` drawer simply **copied onto real hardware** resolves its
-paths unchanged, with no assign to set up by hand.
-
-Stage anything you want tested in the emulator or on real hardware the same
-way, with binaries, volumes and arguments baked in: an icon to double-click
-beats filenames typed into the emulated Shell. Name a script after what it
-proves, and keep the icon name stable as its contents change. ⚠ A test script
-must also **install what it tests** — one that merely opens something
-exercises whatever build is already resident and reports the old behaviour,
-convincingly.
-
----
-
-## Project capabilities
-
-Reusable template features. The optional ones stay inert until you add their
-inputs, and everything here is portable AmigaOS work built only from public
-documentation (no AmigaOS source), so it's safe to grow in the shared knowledge
-base.
-
-### Creating a new project
-
-`new_project.sh` clones this template into a **sibling** directory (under the
-parent `AmigaApps/`) and can be run from anywhere:
-
-```sh
-starter/new_project.sh gadtools_test   # from AmigaApps/
-./new_project.sh gadtools_test         # from inside any cloned project
-```
-
-The new clone is a **playground**: branch renamed to `playground`, pushing
-disabled (a `pre-push` hook blocks accidents), generated files removed,
-`CLAUDE.md` copied to `.claude/CLAUDE.md`, the version include reseeded for the
-new name, the guide/install-icon rebranded, and the **RKRM: DOS** reference PDF
-pulled into `reference/` (git-ignored, cached under `../.reference-cache/`).
-Branch off a different sibling with `SOURCE_PROJECT=<name> new_project.sh …`.
-
-### Versioning (`gmake release`)
-
-`src/<project>_rev.h` (committed, seeded at rev 1) supplies the `$VER` cookie
-embedded in both binaries via `src/main*.c`. Ordinary builds never touch it.
-`gmake release` runs `bumprev` to advance the revision and rebuilds — run it by
-hand when cutting a release.
-
-### Publish to a share (`gmake push`)
-
-`gmake push` mirrors the built `dist/` onto an SMB share so a real Amiga (or an
-emulator with the share mounted) can pick it up. Configure the share once, or
-override inline:
-
-```sh
-./setup-smb.sh                            # one-time; writes git-ignored smbpush.conf
-gmake push                                # uses smbpush.conf
-gmake push SMB_HOST=nas SMB_SHARE=amiga   # or set it on the command line
-```
-
-The copy is additive and uses `cp -X`; Finder cruft (`.DS_Store`, `._*`) is
-purged from `dist/` first. macOS only.
-
-### Optional staging targets
-
-Drop the sources in and the matching target lights up (all fold into
-`gmake all`); the pristine starter has none, so nothing extra is staged.
-
-| Provide… | Target | Result on `DEV:` |
-|---|---|---|
-| `icons/<project>.info` (author with `tools/amiga_icon.py`) | `dist-icons` | a Workbench icon on each binary |
-| `guide/<lang>/<project>.guide` | `guides` | AmigaGuide help in `PROGDIR:` + `HELP:` |
-| `src/help.c` wired into your GUI | — | opens that help asynchronously |
-| `src/groupframe.c` added to your sources | — | titled section frames in YOUR font, not the ReAction prefs one |
-| `install/Install(.info)` | `installer` | a double-clickable `Install` |
-| `rexx/*.rexx` | `rexx-examples` | example ARexx macros in `DEV:Rexx/` |
-| `catalogs/<project>.cd` + `<lang>/*.ct` | `catalogs` | locale message catalogs (+ `DEV:gencat`) |
-| `src/app_strings.h` (shipped seed) | — | run `tools/gen_catalog.py gen` for the whole localization skeleton |
-
-`icons/PrefsIcon_classic.info` is the **blank template for a preferences-editor
-icon**: the 60×26 classic frame in the AmigaOS prefs style, with the picture
-area empty and the standard prefs Tool Types already in place (`NOREMAP` live,
-`ACTION`/`CREATEICONS`/`CLIPUNIT`/`PUBSCREEN` present but disabled). Copy it to
-`icons/<yourprefs>.info` and draw your subject into the empty panel — keeping
-the frame is what makes a prefs editor look like one on the Workbench. Its
-stack is set to 16384, the value the GUI programs here use; do not drop it to
-the stock 4096.
-
-See `docs/` (`reaction-layout-cookbook.md`, `boopsi-custom-classes.md`,
-`amigaguide-format.md`, `installer-scripting.md`, `localization-catcomp.md`,
-`arexx-programming.md`) and `tools/README.md` for the details.
-
-### Packaging a release (`gmake release-dist`)
-
-Turns the built tree into what a user actually downloads:
-
-| Target | Result |
+| Path | What |
 |---|---|
-| `release-stage` | `build/release/` — the package tree. **The one target a project edits.** |
-| `release-drawer` | `dist/Release/` — the same tree, unpacked, reachable as `DEV:Release` |
-| `release-archive` | `dist/<project>.lha` (`release-lha` is a synonym) |
-| `release-adf` | `dist/<project>.adf` — an 880K DD floppy image |
-| `release-aminet` | `dist/aminet/` — archive + validated `.readme`, **not** uploaded |
-| `release-verify` | reads the built archives back and fails if private state is in them |
-| `release-dist` | archive + disk + verify |
+| `lib/` | the library: the MiniGL shell, the hooks, the card back end, the null card |
+| `src/core/` | the GL core: state, matrices, vertices, arrays, textures |
+| `src/r200/` | the R200 layer: packets, emitter, ring, command processor, checker |
+| `src/probe/` | the hardware probes (R200Info, BusBench, ...) |
+| `demos/` | the demonstrators |
+| `install/` | the Installer script and the drawer's scripts |
+| `guide/` | the manuals (English, German) and the Aminet readme |
+| `test/` | host tests and FS-UAE tests |
+| `tools/` | build, packaging and analysis tools |
+| `docs/` | design notes, measurements, research |
+| `sdk/` | the MiniGL 29.1 SDK, the R200 microcode and other headers |
 
-Only `release-stage` is project-specific; everything else works on whatever it
-produced. The shipped one stages the program, the guide, the Installer, the
-licence and any built catalogs into the conventional layout — a package drawer
-whose window shows only what a user should *open*, with everything the
-Installer merely reads hidden in icon-less subdrawers. Icon positions and the
-drawer window are snapshotted host-side with `tools/set_icon_pos.py`.
+## Licence
 
-`release-drawer` matters more than it looks: `dist/` is `DEV:`, so it puts the
-package where the emulated or real Amiga can reach it **without an unarchiver
-on that machine** — which a Kickstart 1.3 boot medium usually lacks.
+`minigl.library` contains MiniGL (the library shell and the 29.1
+programming interface) and is therefore under the Hyperion MiniGL Open
+Source License: it may only be used on AmigaOS, and the source code of
+every change has to be published. RadeonGL's own code is also available
+under the MIT licence. The R200 microcode is AMD's (MIT); the register
+definitions follow the MIT-licensed Linux radeon, Mesa r200 and
+xf86-video-ati drivers. Everything is in [LICENSE](LICENSE).
 
-Cutting the version stays a separate, deliberate act (`gmake release`); these
-targets never bump.
+## Made with AI
 
-⚠ Read [`docs/packaging-release.md`](docs/packaging-release.md) before changing
-any of it. Several traps there have shipped broken packages: a drawer without
-an `.info` is *invisible* to Workbench, and Amiga LhA copies the **host file
-mode** into the archive's protection bits, so a read-only source ships as a
-file the user cannot delete.
+RadeonGL was made with the help of AI. Claude, an AI model by Anthropic,
+wrote most of its code, its tests and its documentation, working under the
+direction of Marcus Gerards, who made the design decisions. Every release
+was tested on real hardware.
 
-### Optional: per-CPU builds
+## Credits
 
-```sh
-gmake build-68020      # one variant  -> dist/cpu/<project>_68020
-gmake cpu-all          # every variant in CPU_LIST, then a size table
-```
-
-**Opt-in only.** None of this is part of `all`, nothing else depends on it, and
-an ordinary build is unaffected — `gmake all` still builds the 68000 baseline
-and nothing more. Reach for it when a project decides to *ship* more than one
-processor variant.
-
-`CPU_LIST` defaults to `68000 68020 68040 68060`; override it for a project
-that ships fewer. Output goes to `dist/cpu/` rather than `dist/` itself
-deliberately: `dist/` is what FS-UAE mounts as `DEV:`, and four extra binaries
-loose in it show up on the emulated Workbench and land in every `release-stage`
-that copies from there.
-
-The loop is serial on purpose — a loop that is parallel today is a trap for
-whoever adds a vamos step to it tomorrow.
-
-⚠ **Do not verify a variant with `objdump -f`**: for the Amiga hunk format it
-reports `m68k:68000` whatever `-m<cpu>` was used. Check the code instead (a
-`-m68000` build calls `__divsi3`/`__mulsi3`; a 68020+ build does not), or just
-read the size table.
-
-### The optional Kickstart 1.3 machine
-
-```sh
-gmake run-fsuae13      # all + generate the 1.3 config + launch
-gmake fsuae-config13   # generate fsuae/local/<project>-13.fs-uae only
-```
-
-An A500: OCS, a stock 68000, **no MMU** (so MuForce debugging stays on the
-68030 machine, `gmake run-fsuae`). It mounts the same `dist/` as `DEV:`, so the
-build you just made is already there. Use it to check that a program really
-runs on 1.3 — the V33/V34 API floor, and the Workbench conveniences a 3.x
-machine hides: no Window ▸ Show ▸ All Files, no MultiView, no AmigaGuide.
-
-It needs its own ROM and system hardfile:
-
-| Path | `gmake` var |
-|---|---|
-| `~/Developer/AmigaEmu/ROMs/kick13.rom` | `KICKSTART13_FILE` |
-| `~/Developer/AmigaEmu/HDF/AmigaOS13.hdf` | `SYSTEM13_HDF` |
-
-Both are **entirely optional**. `gmake check` reports them under "Optional
-(absent is fine)" and never fails on them; only `launch-fsuae13` itself
-insists, and it says which one is missing.
-
-### Native on-Amiga build (`DEV:src/`)
-
-Every build mirrors the sources into `dist/src/` with an `smakefile` and
-`Makefile` generated from the `src/*.in` templates, so the project can also be
-compiled natively on the Amiga:
-
-```text
-cd DEV:src
-smake                ; incremental build     -> DEV:src/<project>
-smake debug          ; DEBUG=SF rebuild       -> DEV:src/<project>.debug
-cpr <project>.debug  ; source-level debug in CodeProbe
-smake clean
-```
-
-The mirror is one-way (host wins) — treat `DEV:src/` as a scratch build area,
-not a place to edit. When adding source files, extend `OBJS`/`SRCS` in both
-`.in` templates alongside the host Makefile's source lists.
-
----
-
-## Configuration & conventions
-
-### `.vamosrc.in`
-
-A portable template with `@SASC_PATH@` / `@PROJECT_PATH@` placeholders; the
-Makefile renders it to `.vamosrc` (do not commit). It maps the `sasc:` and
-`proj:` volumes and the SAS/C assigns vamos needs:
-
-```ini
-[volumes]
-sasc=@SASC_PATH@
-proj=@PROJECT_PATH@
-tmp=/tmp
-[assigns]
-sc=sasc:
-include=sasc:include
-lib=sasc:lib
-t=tmp:
-[path]
-path=sc:c
-```
-
-### VS Code
-
-`.vscode/tasks.json` provides build/run tasks (Build GCC/SAS-C/All, Run SAS/C
-via vamos, Run FS-UAE, Clean). Their `PATH` must include both the toolchain and
-the vamos venv:
-
-```json
-"PATH": "${env:HOME}/Developer/AmigaTools/venv-amitools/bin:${env:HOME}/amiga-arm/bin:/opt/homebrew/bin:${env:PATH}"
-```
-
-### Claude Code / AI assistance
-
-`CLAUDE.md` (root) guides AI tools; `new_project.sh` also copies it to
-`.claude/CLAUDE.md` so it is found reliably. Confirm it loaded with `/memory`.
-The key rules it enforces: use AmigaOS APIs via NDK/proto headers; no POSIX,
-SDL, pthreads, or Unix paths; no direct chip/CIA/Copper/Blitter access in normal
-apps; keep shared code C89-clean with explicit prototypes and clear resource
-ownership. `docs/` is a project-agnostic knowledge base carried into every
-clone — see `docs/README.md`.
-
-### Coding style (shared GCC + SAS/C code)
-
-C89/C90 structure: declarations at the top of a block, no mixed
-declarations/statements, no GCC extensions, explicit prototypes, AmigaOS types,
-and `CONST_STRPTR` casts on AmigaOS string APIs where the profiles disagree.
-
-```c
-#include <exec/types.h>
-#include <dos/dos.h>
-#include <proto/dos.h>
-
-int main(void)
-{
-    Printf((CONST_STRPTR)"Hello AmigaOS 3.2\n");
-    return RETURN_OK;
-}
-```
-
----
-
-## Troubleshooting
-
-**`vamos: No such file or directory`** — the venv is missing or was copied from
-another Mac (venvs hold absolute paths). Recreate it:
-`ls -l ~/Developer/AmigaTools/venv-amitools/bin/vamos`.
-
-**`bad interpreter: /usr/bin/python`** — an old global `vamos` wrapper is on
-`PATH`. Check `which vamos` / `head -1 $(which vamos)`; use the venv-local one.
-
-**`machine68k.Traps` AttributeError** — `amitools` and `machine68k` are out of
-sync. Reinstall both from source into the same venv in editable mode
-(`pip install -U -e .`).
-
-**SAS/C builds old code after cloning** — a stale `.vamosrc` points at the old
-project dir. `gmake distclean && gmake sasc` regenerates it.
-
-**vamos "NO MEMORY" while compiling** — vamos's RAM ceiling, not your source.
-The Makefile already passes `-H disable -m 16128`; raise `-m` for much larger
-sources.
-
-**Cursor keys don't reach a program in FS-UAE** — the config sets
-`joystick_port_1 = nothing`; also make sure the target window is the *active*
-Intuition window (only it receives keyboard IDCMP).
-
-**FS-UAE can't find the ROM or HDF** — run `gmake check`, or override
-`KICKSTART_FILE=` / `SYSTEM_HDF=` on the command line.
+- **Thomas Richter:** Picasso96 3 and its Radeon driver, `openpci.library`,
+  and his advice on using Picasso96 with the Radeon; his `68060.library`
+  and `mmu.library` ran on the test machine, his LhA builds the package.
+- **Alexander Kneer and Tobias Abt:** Picasso96.
+- **Hyperion Entertainment (Hans-Jörg and Thomas Frieden):** MiniGL.
+- **Steffen "MagicSN" Häuser:** `minigl.library` 29.1, its shell, its
+  dispatch interface and its SDK.
+- **Frank Wille and Steffen Häuser:** GLQuake for `minigl.library`, after
+  id Software's Quake.
+- **Advanced Micro Devices:** the R200 microcode.
+- **ATI Technologies, VA Linux Systems, Precision Insight, The Weather
+  Channel and Tungsten Graphics, Red Hat**, and the authors of the Linux
+  radeon and Mesa r200 drivers (among them Dave Airlie, Alex Deucher,
+  Jerome Glisse, Kevin E. Martin, Gareth Hughes and Keith Whitwell), whose
+  code is the public record of the R200.
+- **The tools:** amiga-gcc (Stefan "Bebbo" Franke), amitools and vamos
+  (Christian Vogelgsang), FS-UAE (Frode Solheim), libnix, SAS/C, and the
+  AmigaOS 3.2 NDK (Hyperion).

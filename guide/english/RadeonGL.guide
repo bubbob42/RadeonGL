@@ -1,49 +1,530 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 1.0 (14.7.2026)
-@author You
+@$VER: RadeonGL.guide 0.4 (3.11.2026)
+@(c) 2026 Marcus Gerards
+@author Marcus Gerards
 @wordwrap
 
-@node Main "RadeonGL Help"
+@node Main "RadeonGL"
 
-@{b}starter@{ub} -- online help.
+@{b}RadeonGL 0.4@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
 
-This is a starter AmigaGuide help file. Replace this text with your own, and
-add nodes for each topic. See @{" AmigaGuide format " link Format} for the
-markup, or @docs/amigaguide-format.md in the project.
+RadeonGL is a minigl.library that draws with the 3D engine of an ATI
+Radeon from the R200 family, on a graphics card that Picasso96 drives. It
+needs no Warp3D: it talks to the Radeon's own command processor, through
+Picasso96, while the Workbench keeps running.
 
-@{b}Contents@{ub}
-
-    @{" Getting started       " link GettingStarted}
-    @{" AmigaGuide format      " link Format}
-
-Press the @{b}Help@{ub} key, or choose @{b}Help@{ub} from the Project menu, to
-return here.
+    @{" What RadeonGL is                     " link About}
+    @{" What you need                        " link Requirements}
+    @{" Installing, and going back           " link Install}
+    @{" Testing the card                     " link Test}
+    @{" The demos                            " link Demos}
+    @{" Which programs work                  " link Programs}
+    @{" The screen                           " link Screen}
+    @{" Settings                             " link Settings}
+    @{" Speed                                " link Speed}
+    @{" The log file                         " link Log}
+    @{" When something goes wrong            " link Trouble}
+    @{" Limits of this version               " link Limits}
+    @{" How it works                         " link Inside}
+    @{" Licence, credits and AI              " link Licences}
+    @{" History                              " link History}
 @endnode
 
-@node GettingStarted "Getting started"
+@node About "What RadeonGL is"
 @toc Main
-@next Format
+@next Requirements
 
-The default language guide is staged by @{b}gmake guides@{ub} both next to the
-program (PROGDIR:) and under HELP:. The Makefile's run scripts assign HELP: to
-DEV:Help so FS-UAE finds it. src/help.c opens the current node on the app's own
-screen.
+@{b}What RadeonGL is@{ub}
 
-Next: @{" AmigaGuide format " link Format}
+Programs such as GLQuake draw through minigl.library, the Amiga's small
+OpenGL library. RadeonGL is a minigl.library of its own: the same
+library name, the same programming interface (minigl.library 29.1,
+dispatch ABI 5), but behind it the Radeon's 3D hardware instead of
+Warp3D or a software renderer.
+
+@{b}What it does@{ub}
+
+    * draws textured, coloured and blended triangles with the Radeon's
+      own transformation and rasterising hardware
+    * opens a Picasso96 screen of its own for the program, in 16 or 32 bit
+    * keeps textures in the card's memory
+    * checks every list of commands before the Radeon runs it, and
+      stops a faulty one before it reaches the card (this can be turned
+      off for speed)
+    * leaves the Workbench and every other program running
+
+RadeonGL is new. It has been written and tested with GLQuake on one
+machine (see @{" Speed " link Speed}). Other programs may need functions
+it does not have yet: see @{" Which programs work " link Programs}.
 @endnode
 
-@node Format "AmigaGuide format"
+@node Requirements "What you need"
 @toc Main
-@prev GettingStarted
+@prev About
+@next Install
 
-A guide is plain text. A @{b}@@@{ub} in column 0 starts a command; @{b}@@{...}@{ub}
-in body text is an inline attribute.
+@{b}What you need@{ub}
 
-    @{b}@@node name "title"@{ub}   start a node (link target + window title)
-    @{b}@@endnode@{ub}            end the node
-    @{b}@@{b} ... @@{ub}@{ub}     bold on / off
-    @{b}@@{i} ... @@{ui}@{ub}     italic on / off
-    @{b}@@{"text" link node}@{ub} a clickable link to another node
+    * @{b}A Radeon of the R200 family@{ub}: Radeon 8500, 9000, 9100, 9200
+      or 9250 (the chips R200, RV250 and RV280). Other Radeons are refused.
+    * @{b}Picasso96 3.6 or newer@{ub}, with its Radeon driver
+      (LIBS:Picasso96/Radeon.card) driving that card. RadeonGL finds the
+      card through Picasso96 and nowhere else.
+    * @{b}A 68040 or 68060 with FPU@{ub}, or @{b}a 68020 or 68030 with
+      a 68881 or 68882@{ub}. RadeonGL comes in two builds, one for each;
+      the Installer picks the right one. The 68040/68060 build is made
+      for the 68060; on a 68040 it needs the 68040.library as usual. A
+      build on a CPU it cannot run on does not open at all.
+    * @{b}AmigaOS 3.1 or newer@{ub}. It has been tested on AmigaOS 3.2.
+    * @{b}Screen modes@{ub} on the Radeon in the sizes your programs use,
+      for example 320 x 240 or 640 x 480, made with the Picasso96Mode
+      preferences: see @{" The screen " link Screen}.
+    * @{b}Free card memory@{ub} for RadeonGL's own buffers and at least
+      4 MB of textures. It takes up to 16 MB for textures when the card
+      has it.
 
-See @docs/amigaguide-format.md for the full digest.
+@{b}Tested on@{ub}
+
+An A4000D with a CyberStorm MK II 68060 at 50 MHz, a Mediator PCI
+bridge and a Radeon 9200, under AmigaOS 3.2 and Picasso96.
+@endnode
+
+@node Install "Installing, and going back"
+@toc Main
+@prev Requirements
+@next Test
+
+@{b}Installing@{ub}
+
+Double-click @{b}Install@{ub} in the RadeonGL drawer. The Installer
+
+    * checks the CPU, the FPU and Picasso96,
+    * picks the build for your CPU (it asks, from the Intermediate user
+      level on), and puts that minigl.library into LIBS:,
+    * keeps a minigl.library that was there before and is not RadeonGL's
+      as LIBS:minigl.library.old (or .old1, when there is an .old
+      already),
+    * makes a RadeonGL drawer with these manuals, the card test, the card
+      report, the demos and the licences, where you choose (Work: by
+      default),
+    * asks whether the command check stays on (see @{" Settings " link Settings});
+      at the Novice level it keeps what is set.
+
+@{b}By hand@{ub}
+
+Copy Files/Libs/minigl.library (68040/68060) or
+Files/68030/Libs/minigl.library (68020/68030 with an FPU) from the
+package into LIBS:, after renaming the old one. Then, or reboot:
+
+    Avail FLUSH
+
+A library stays in memory until it is flushed, so without this the next
+program would still meet the old one.
+
+@{b}Going back@{ub}
+
+Rename LIBS:minigl.library.old back to LIBS:minigl.library (delete
+RadeonGL's first), then Avail FLUSH or reboot.
+@endnode
+
+@node Test "Testing the card"
+@toc Main
+@prev Install
+@next Demos
+
+@{b}Test@{ub}
+
+Double-click @{b}Test@{ub} in the RadeonGL drawer. It opens a 640 x 480
+screen on the Radeon and draws 300 frames: a spinning triangle that
+crosses a red and white chequered square, and a small patch of the
+square that changes colour every frame. Then it shows the frame rate
+and what the library saw. Ctrl-C stops it early.
+
+If you see a small window "RadeonGL null card" instead, RadeonGL did not
+find a Radeon it can use: see @{" When something goes wrong " link Trouble}.
+
+@{b}CardReport@{ub}
+
+Double-click @{b}CardReport@{ub} for a report of the card as RadeonGL
+sees it: the Picasso96 board, the chip, its memory and its main
+registers. It reports the board the Workbench screen is on, and only
+reads it. The report goes to RAM:RadeonGL-Report.txt; please add it to
+any bug report.
+@endnode
+
+@node Demos "The demos"
+@toc Main
+@prev Test
+@next Programs
+
+@{b}The demos@{ub}
+
+The Demos drawer holds four small programs that show the Radeon at work.
+Double-click one; Esc ends it, and its window then shows the frame rate.
+
+@{b}Spinner@{ub}
+    A textured ring turns about three axes in front of a colour gradient,
+    its colours lit at every corner by a light that stays where it is.
+
+@{b}Glow@{ub}
+    Sparks with comet tails circle inside a slowly turning crystal of
+    tinted glass. The glass is see-through, the sparks add up their light.
+
+@{b}Landscape@{ub}
+    A flight low over rolling hills under a dusk sky, the ground drawn with
+    two textures: grass and earth, and a light texture shaded from the
+    slopes.
+
+@{b}Showcase@{ub}
+    The three in turn, twelve seconds each. The space bar skips to the
+    next one.
+
+From a Shell they take FRAMES (0: until Esc), WIDTH, HEIGHT and DEPTH
+(16 or 32), for example:
+
+    Spinner FRAMES=600 WIDTH=320 HEIGHT=240
+
+On the test machine (640 x 480, 16 bit, command check off): Spinner 60,
+Glow 36, Landscape 64 frames a second.
+@endnode
+
+@node Programs "Which programs work"
+@toc Main
+@prev Demos
+@next Screen
+
+@{b}Which programs work@{ub}
+
+RadeonGL is a minigl.library 29.1 with the dispatch interface (ABI 5) of
+the current MiniGL SDK. Programs built with that SDK open it like any
+other minigl.library 29.
+
+    * @{b}GLQuake@{ub} built for the shared minigl.library runs, all three
+      demos, in 320 x 240 up to 1280 x 720.
+    * @{b}Programs for older MiniGL versions@{ub} (minigl.library 1.x or
+      2.x, built against Warp3D) use a different interface and do not
+      run with RadeonGL.
+    * @{b}Other programs@{ub} for minigl.library 29 may call functions
+      RadeonGL does not have yet. Such a call draws nothing and sets the
+      error GL_INVALID_OPERATION (glGetError); the @{" log file " link Log}
+      lists them under "slots called but not implemented". Please report
+      them.
+
+Only one program can draw through RadeonGL at a time. A second one is
+refused until the first one ends.
+@endnode
+
+@node Screen "The screen"
+@toc Main
+@prev Programs
+@next Settings
+
+@{b}The screen@{ub}
+
+A program that asks minigl.library for a display gets a Picasso96 screen
+of its own on the Radeon, in the size it asks for:
+
+    * RadeonGL takes the Picasso96 mode that fits that size best, in
+      16 bit (R5G6B5) if there is one, else in 32 bit.
+    * The screen has to be on the Radeon. If the best mode is on another
+      board, or there is none, RadeonGL cannot draw.
+    * Make the modes your programs need with the Picasso96Mode
+      preferences, for the Radeon board: GLQuake uses 320 x 240 or
+      640 x 480 unless told otherwise, Test 640 x 480.
+    * The largest screen is 2048 x 2048.
+
+You can switch to the Workbench and back while a program draws: the
+Workbench and the other programs keep running.
+@endnode
+
+@node Settings "Settings"
+@toc Main
+@prev Screen
+@next Speed
+
+@{b}Settings@{ub}
+
+RadeonGL reads a few environment variables when a program opens its
+display. Set one for this session with SetEnv, and for good with SetEnv
+SAVE (AmigaOS 3.2) or by copying it from ENV: to ENVARC:. A variable
+that is not set means the default.
+
+@{b}RadeonGLCheck@{ub}  (default: on)
+    0 turns the command check off. The check reads every list of commands
+    before the Radeon runs it and stops one that would program anything a
+    3D draw has no business with. It costs about a fifth of the frame
+    rate. Off is faster, and safe as long as RadeonGL has no bug.
+
+        SetEnv SAVE RadeonGLCheck 0     (off)
+        UnSetEnv SAVE RadeonGLCheck     (on again)
+
+@{b}RadeonGLLog@{ub}  (default: PROGDIR:radeongl.log)
+    Where the @{" log file " link Log} goes. NIL: writes none.
+
+        SetEnv SAVE RadeonGLLog NIL:
+
+@{b}RadeonGLCard@{ub}  (default: the Radeon, else the null card)
+    Radeon: draw on the Radeon or refuse, with a requester that says why.
+    Null: never touch the card; programs run and show only a small
+    window (for testing programs without a Radeon).
+
+@{b}RadeonGLDirect@{ub}  (default: off)
+    1 writes the vertices of each draw straight into the card's memory,
+    with a short Picasso96 lock each time, instead of one lock a frame.
+    About 2% faster on the test machine.
+
+@{b}RadeonGLUploadCache@{ub}  (default: on)
+    0 sends every vertex again in every frame (for comparing only).
+
+@{b}RadeonGLLocked@{ub}  (default: on)
+    0 draws a program's vertex arrays the slow, direct way (for
+    comparing, or if indexed drawing misbehaves).
+@endnode
+
+@node Speed "Speed"
+@toc Main
+@prev Settings
+@next Log
+
+@{b}Speed@{ub}
+
+GLQuake for minigl.library, by Frank Wille and Steffen Häuser: its
+timedemos (all frames) on the test machine (A4000D, 68060 at 50 MHz on a
+CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96), frames
+a second:
+
+    Demo   Screen       Check on  Check off  Direct  Direct, 8-bit LM
+    demo1  320 x 240        18.7       23.7    24.2              24.9
+    demo2  320 x 240           -       21.1       -              21.7
+    demo3  320 x 240           -       20.9       -              22.3
+    demo1  640 x 480           -       21.4       -              22.5
+    demo1  1280 x 720          -       18.4       -              19.8
+
+Check on: RadeonGL as installed. Check off: RadeonGLCheck=0. Direct:
+RadeonGLDirect=1 as well. 8-bit LM: 8-bit lightmaps, GLQuake started with
+-lm_LUMINANCE (id's own default; the Amiga port changed it to 16 bit).
+
+The build for the 68020/68030, on the same 68060 for comparison: demo1
+16.8 (check on), 22.1 (check off), 23.2 (direct, 8-bit LM). A real 68030
+is far slower than that; its figures will follow.
+
+The Radeon is not what sets the pace: sixteen times the pixels cost only
+a few frames a second. The 68060 is: it runs the game, prepares every
+draw for the card, and writes the commands and vertices into the card's
+memory over the Zorro bus at about 9 MB a second.
+
+So, to make a program faster:
+
+    * turn the command check off (see @{" Settings " link Settings}),
+    * close programs that use the CPU in the background, and screen
+      blankers that wake up during a game,
+    * use the program's own options that save CPU time (in GLQuake for
+      example fewer particles or dynamic lights).
+@endnode
+
+@node Log "The log file"
+@toc Main
+@prev Speed
+@next Trouble
+
+@{b}The log file@{ub}
+
+When a program closes its display, RadeonGL writes a short summary to
+radeongl.log in the program's own drawer (or where
+@{" RadeonGLLog " link Settings} says). It names the card and the screen
+and counts the frames, the lock times, the texture memory used, and any
+GL error or missing function.
+
+If a program fails, that file says why more often than not. When the
+Radeon cannot be used at all, the log holds the one line of the reason,
+the same as the requester.
+
+To have no log at all:
+
+    SetEnv SAVE RadeonGLLog NIL:
+@endnode
+
+@node Trouble "When something goes wrong"
+@toc Main
+@prev Log
+@next Limits
+
+@{b}A small window "RadeonGL null card" and no picture@{ub}
+    RadeonGL found no Radeon screen mode for the size the program wants,
+    or no Radeon at all, and fell back to drawing nothing. Make the mode
+    with Picasso96Mode (see @{" The screen " link Screen}). To get the
+    reason instead: SetEnv RadeonGLCard Radeon, and run the program again.
+
+@{b}A requester "The Radeon cannot be used"@{ub}
+    The second line says why. The usual ones:
+
+    "not an R200-family chip"
+        The card is a Radeon, but not one of the 8500 to 9250.
+    "no texture heap of 4 MB or more on the board"
+        The card's memory is full: close screens on the Radeon (a big
+        Workbench screen in 32 bit takes much of it) and try again.
+    "did not put the ... bitmap on the board"
+        The same: Picasso96 had no room in the card's memory.
+    "the GL screen did not open"
+        Picasso96 could not open the screen mode.
+    "the aperture byte-swaps this screen's bitmaps"
+        A screen format RadeonGL does not support yet.
+
+@{b}"Unable to open minigl.library"@{ub}
+    The program wants a different minigl.library version, or is built
+    for the older Warp3D MiniGL (see @{" Which programs work " link Programs}).
+
+@{b}The screen goes black after a while@{ub}
+    A screen blanker or a monitor power saver (a DPMS commodity) can blank
+    the Radeon's screen while a program draws. Quit them for the game.
+
+@{b}White or missing textures@{ub}
+    The texture memory is full (see @{" Limits " link Limits}); the log
+    counts the refused textures.
+@endnode
+
+@node Limits "Limits of this version"
+@toc Main
+@prev Trouble
+@next Inside
+
+@{b}Limits of this version@{ub}
+
+    * One program at a time, on a screen of its own (no drawing into a
+      Workbench window or a bitmap).
+    * Textures live in up to 16 MB of the card's memory, and RadeonGL
+      does not yet swap them out: a program that needs more gets white
+      textures for the rest.
+    * Textures are stored with 16 bits a texel: 32-bit RGBA textures lose
+      precision (ARGB4444), RGB ones become RGB565.
+    * Screens up to 2048 x 2048, in 16 or 32 bit.
+    * The card is reached only through Picasso96 and its Radeon driver.
+
+@{b}Not implemented yet@{ub}
+
+RadeonGL implements 100 of the 205 functions of minigl.library 29.1:
+everything GLQuake uses, and more. A program calling one of the others
+gets nothing for it but the error GL_INVALID_OPERATION; the
+@{" log file " link Log} names such calls.
+
+    * Lighting and materials (glLight, glMaterial, glLightModel,
+      glColorMaterial): not there (GL_INVALID_OPERATION). Normals are
+      taken but not used.
+    * Fog (glFog).
+    * Display lists (glNewList, glCallList and the rest).
+    * Texture coordinate generation (glTexGen), glTexCoord4f, the texture
+      environment GL_BLEND (drawn as GL_MODULATE) and GL_DECAL with an
+      RGBA texture.
+    * Stencil and accumulation buffers, line and polygon stipple, logic
+      operations.
+    * Reading and copying pixels (glReadPixels, glCopyTexImage2D,
+      glCopyTexSubImage2D, glPixelStorei, glDrawBuffer, glReadBuffer).
+    * The double-precision calls (glLoadMatrixd, glMultMatrixd,
+      glRotated, glScaled, glTranslated, glGetDoublev).
+    * glArrayElement, glInterleavedArrays, glMultiDrawArrays,
+      glNormalPointer, edge flags and colour-index mode.
+    * glBlendEquation, glBlendFuncSeparate, glLineWidth, glColorTable,
+      glTexEnvfv, texture priorities and residency.
+    * GLU and GLUT (gluPerspective, gluLookAt, gluBuild2DMipmaps, the
+      quadrics; the GLUT window and shape functions).
+    * MiniGL's own main loop and its callbacks (mglMainLoop, mglIdleFunc,
+      mglKeyFunc, mglMouseFunc), contexts on a window or a bitmap,
+      mglLockBack, mglTexMemStat, mglWriteShotPPM.
+@endnode
+
+@node Inside "How it works"
+@toc Main
+@prev Limits
+@next Licences
+
+@{b}How it works@{ub}
+
+For each frame, RadeonGL builds the Radeon's commands in fast RAM: the
+state changes, the vertices and the texture uploads, packed the way the
+R200 reads them. At the end of the frame it locks its Picasso96 bitmaps
+once, copies the commands into the card's memory, lets the Radeon's
+command processor run them, waits until the frame is drawn, shows it,
+and unlocks. In between, Picasso96 and the Workbench have the card as
+always.
+
+    * The command processor runs AMD's R200 microcode, loaded at the first
+      use.
+    * The texture memory, the command ring and the back buffer are
+      Picasso96 bitmaps of their own: Picasso96 decides where they are,
+      and RadeonGL asks again at every lock.
+    * Vertices that a program sends again unchanged (GLQuake does that
+      for most of its world and models) stay in the card's memory and are
+      not sent twice.
+    * The command check runs before the lock, on the commands in fast RAM.
+@endnode
+
+@node Licences "Licence, credits and AI"
+@toc Main
+@prev Inside
+@next History
+
+@{b}Licence@{ub}
+
+RadeonGL (c) 2026 Marcus Gerards. The full text is Licences/RadeonGL.txt
+in the RadeonGL drawer; in short:
+
+    * minigl.library contains MiniGL -- the library shell and the
+      minigl.library 29.1 programming interface -- and is therefore under
+      the Hyperion MiniGL Open Source License (Licences/MiniGL.txt): it may
+      only be used on AmigaOS, and the source code of every change to it
+      has to be published.
+    * RadeonGL's complete source code is published at
+      https://github.com/bubbob42/RadeonGL, and the package carries it
+      in its Source drawer. Its own code is also available under the MIT
+      licence.
+    * The R200 microcode is (c) Advanced Micro Devices, MIT licence
+      (Licences/R200-Microcode.txt). The register definitions follow the
+      MIT-licensed Linux radeon, Mesa r200 and xf86-video-ati drivers;
+      their notices are in Licences/RadeonGL.txt.
+
+@{b}Made with AI@{ub}
+
+RadeonGL was made with the help of AI. Claude, an AI model by Anthropic,
+wrote most of its code, its tests and these manuals, working under the
+direction of Marcus Gerards, who made the design decisions. Every release
+was tested on real hardware.
+
+@{b}Credits@{ub}
+
+    * Thomas Richter: Picasso96 3 and its Radeon driver, openpci.library,
+      and his advice on using Picasso96 with the Radeon; his 68060.library
+      and mmu.library ran on the test machine, his LhA built the package.
+    * Alexander Kneer and Tobias Abt: Picasso96.
+    * Hyperion Entertainment (Hans-Jörg and Thomas Frieden): MiniGL.
+    * Steffen "MagicSN" Häuser: minigl.library 29.1, its shell, its
+      dispatch interface and its SDK.
+    * Frank Wille and Steffen Häuser: GLQuake for minigl.library, after
+      id Software's Quake -- the program RadeonGL was made and measured
+      with.
+    * Advanced Micro Devices: the R200 microcode.
+    * ATI Technologies, VA Linux Systems, Precision Insight, The Weather
+      Channel and Tungsten Graphics, Red Hat, and the authors of the Linux
+      radeon and Mesa r200 drivers (among them Dave Airlie, Alex Deucher,
+      Jerome Glisse, Kevin E. Martin, Gareth Hughes and Keith Whitwell),
+      whose code is the public record of the R200.
+    * Stefan "Bebbo" Franke (amiga-gcc), Christian Vogelgsang (amitools,
+      vamos), Frode Solheim (FS-UAE), the authors of libnix and SAS/C,
+      and Hyperion (the AmigaOS 3.2 NDK): the tools it was built and
+      tested with.
+@endnode
+
+@node History "History"
+@toc Main
+@prev Licences
+
+@{b}History@{ub}
+
+0.4 (3.11.2026)
+    * first release
+    * GLQuake demo1 at 23.7 fps at 320 x 240 on a 68060/50 (command check
+      off), 24.9 fps with RadeonGLDirect=1 and 8-bit lightmaps
+    * a second build for a 68020 or 68030 with a 68881 or 68882
+    * vertices sent again unchanged stay in the card's memory
+    * one Picasso96 lock a frame
+    * four demos: Spinner, Glow, Landscape, Showcase
 @endnode

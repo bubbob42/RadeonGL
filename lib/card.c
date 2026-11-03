@@ -13,6 +13,7 @@
 #include <graphics/modeid.h>
 #include <libraries/Picasso96.h>
 #include <proto/exec.h>
+#include <proto/dos.h>
 #include <proto/graphics.h>
 #include <proto/intuition.h>
 #include <proto/timer.h>
@@ -154,8 +155,13 @@ static ULONG HwClock(APTR hw)
 
 static BOOL Reset3D(struct Card *k)
 {
+    ULONG t;
+
     HwWrite(k, R_RBBM_SOFT_RESET, SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP);
     (void) HwRead(k, R_RBBM_SOFT_RESET);
+    t = HwClock(k);
+    while (HwClock(k) - t < 200)
+        ;                           /* held 200 us, as Linux does */
     HwWrite(k, R_RBBM_SOFT_RESET, 0);
     (void) HwRead(k, R_RBBM_SOFT_RESET);
     return (BOOL) (R2Cp_WaitIdle(&k->hw, TIMEOUT_US) == R2_OK);
@@ -329,6 +335,9 @@ static LONG Peek(APTR ctx, ULONG gpu, ULONG *val)
     return 0;
 }
 
+/* GL screens a visitor window kept open at Card_Close (for the log). */
+ULONG Card_ScreensLeft = 0;
+
 /* --- the command buffer --------------------------------------------------------------- */
 
 static void ResetCs(struct Card *k)
@@ -366,7 +375,9 @@ static void Drop(struct Card *k)
 }
 
 /* The commands into the ring, in chunks that end at packet boundaries (the
- * ring's wrap filler must never land inside a packet). */
+ * ring's wrap filler must never land inside a packet), and never between
+ * a DRAW_INDX_2 and its INDX_BUFFER: a kick's NOP padding would land
+ * there, a layout the checker refuses (audit 2026-11-03). */
 static LONG CopyCommands(struct Card *k, ULONG n)
 {
     ULONG i;
@@ -376,17 +387,28 @@ static LONG CopyCommands(struct Card *k, ULONG n)
     ULONG *p;
     const ULONG *src;
     ULONG j;
+    ULONG last;
 
     i = 0;
     while (i < n)
     {
         c = 0;
+        last = 0;
         while (i + c < n)
         {
             h = Swap32(k->cmd[i + c]);          /* stored byte-reversed */
             len = (R2_PKT_TYPE(h) == 2) ? 1 : R2_PKT_COUNT(h) + 2;
             if (c != 0 && c + len > CHUNK_DW)
-                break;
+            {
+                /* the end of a chunk: never right after a DRAW_INDX_2
+                 * (looked at here only, not for every packet: this runs
+                 * inside the lock) */
+                h = Swap32(k->cmd[i + last]);
+                if (!(R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_INDX_2))
+                    break;
+                h = Swap32(k->cmd[i + c]);
+            }
+            last = c;
             c += len;
         }
         if (i + c > n)
@@ -454,6 +476,8 @@ LONG Card_Flush(struct Card *k, BOOL present)
 
     if (k->in_flush)
         return R2_OK;
+    if (k->vram_lock)
+        return R2_OK;               /* inside Card_VramBegin: the heap is held (never today) */
     n = (ULONG) (k->cs.ptr - k->cmd);
     if (k->lost != 0 || (n == 0 && !present))
     {
@@ -518,7 +542,7 @@ LONG Card_Flush(struct Card *k, BOOL present)
         k->depth_gpu = depth;
         k->heap_gpu = heap;
         if ((heap & 31) != 0)
-            k->lost = CARD_LOST_CP;             /* textures can no longer be aligned */
+            k->lost = CARD_LOST_HEAP;           /* textures can no longer be aligned */
         Drop(k);
         k->in_flush = 0;
         return R2_OK;
@@ -551,7 +575,7 @@ LONG Card_Flush(struct Card *k, BOOL present)
     n = (ULONG) (k->cs.ptr - k->cmd);
     if (k->cs.error != R2_OK)
     {
-        k->lost = CARD_LOST_CHECKER;
+        k->lost = CARD_LOST_EMIT;
         k->err_code = k->cs.error;
         goto unlock;
     }
@@ -581,11 +605,30 @@ LONG Card_Flush(struct Card *k, BOOL present)
         }
     }
 
-    /* 5. the CP, on the ring at this lock's address */
+    /* the flush ends no indexed draw half-way (its indices would never come) */
+    if (k->check && R2Chk_End(&k->chk, &k->err) != R2CE_OK)
+    {
+        k->err_code = R2CE_INDX;
+        k->lost = CARD_LOST_CHECKER;
+        goto unlock;
+    }
+
+    /* 5. the CP, on the ring at this lock's address (its microcode again
+     * after a reset) */
     if (R2Cp_WaitIdle(&k->hw, TIMEOUT_US) != R2_OK)
     {
         k->lost = CARD_LOST_CP;
         goto unlock;
+    }
+    if (k->reload_ucode)
+    {
+        R2Cp_LoadMicrocode(&k->hw, R2Cp_Microcode);
+        if (R2Cp_CheckMicrocode(&k->hw, R2Cp_Microcode) != 0)
+        {
+            k->lost = CARD_LOST_CP;
+            goto unlock;
+        }
+        k->reload_ucode = 0;
     }
     ring_gpu = Align4k(k->b[CARD_RING].gpu);
     ring_cpu = (ULONG *) (k->b[CARD_RING].mem + (ring_gpu - k->b[CARD_RING].gpu));
@@ -626,6 +669,8 @@ LONG Card_Flush(struct Card *k, BOOL present)
     us = HwClock(k) - t0;
     if (us > k->fence_us_max)
         k->fence_us_max = us;
+    if (k->dwords + n < k->dwords)
+        k->dwords_hi++;
     k->dwords += n;
     if (e != R2_OK)
         k->lost = CARD_LOST_FENCE;
@@ -638,12 +683,28 @@ stop:
         k->cp_resets++;
     if (tf != R2_OK && !Reset3D(k))
         k->lost = CARD_LOST_CP;
+    if (reset || tf != R2_OK)
+    {
+        /* a reset discarded the 3D state and perhaps the microcode: the
+         * core sends everything again, the checker starts over, and the
+         * next lock loads the microcode before the CP starts */
+        Core_Forget(k->core);
+        R2Chk_Reset(&k->chk);
+        k->reload_ucode = 1;
+    }
 unlock:
     UnlockAll(k);
     us = HwClock(k);
     if (us > k->lock_us_max)
         k->lock_us_max = us;
+    if (k->lock_us_sum + us < k->lock_us_sum)
+    {
+        /* hours of play: halve both, the mean stays */
+        k->lock_us_sum /= 2;
+        k->lock_flushes /= 2;
+    }
     k->lock_us_sum += us;
+    k->lock_flushes++;
     ResetCs(k);
     k->in_flush = 0;
     return (k->lost != 0) ? R2_ETIMEOUT : R2_OK;
@@ -1051,7 +1112,12 @@ void Card_Close(struct Card *k)
     }
     if (k->scr != NULL)
     {
-        p96CloseScreen(k->scr);
+        /* a visitor window (a requester, a tool) keeps it open: give it
+         * five seconds, then leave the screen (the next log says so) */
+        for (i = 0; i < 25 && !p96CloseScreen(k->scr); i++)
+            Delay(10);
+        if (i == 25)
+            Card_ScreensLeft++;
         k->scr = NULL;
     }
     if (k->cmd != NULL)

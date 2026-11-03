@@ -361,7 +361,14 @@ void Core_ClearDepth(struct Core *c, double d)
 
 void Core_Hint(struct Core *c, ULONG target, ULONG mode)
 {
-    (void) target;
+    /* GL's five targets and MiniGL's two (glHint(MGL_W_ONE_HINT): GLQuake);
+     * every hint is accepted and changes nothing */
+    if ((target < GL_PERSPECTIVE_CORRECTION_HINT || target > GL_FOG_HINT)
+        && target != MGL_W_ONE_HINT && target != MGL_FIXPOINTTRANS_HINT)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
     if (mode != GL_FASTEST && mode != GL_NICEST && mode != GL_DONT_CARE)
         Core_Error(c, GL_INVALID_ENUM);
 }

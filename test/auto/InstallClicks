@@ -1,0 +1,47 @@
+.KEY DONE/A,TAG/A
+.BRA {
+.KET }
+; InstallClicks -- the clicks for T=InstallRun, in a process of its own, so
+; the Installer runs in the FOREGROUND and its return code can be read.
+; Geometry from Prisma Megamix's InstallClicks (the same OS 3.2 Installer),
+; counted from the Installer window ("/Install" in its title):
+;   (126, -33)  Proceed on a page with a button grid (welcome, questions)
+;   (248, -15)  the one button of the closing page
+; Every round grabs the screen before each click: the account of every page.
+; Rounds stop once DONE exists (InstallRun writes it after the Installer).
+;
+;   Run Execute DEV:Test/InstallClicks RAM:InstDone1 a
+Wait 8
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-1a.ppm
+  DEV:Test/InputPoke WIN="/Install" X=126 Y=-33 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-1b.ppm
+  DEV:Test/InputPoke WIN="/Install" X=248 Y=-15 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-2a.ppm
+  DEV:Test/InputPoke WIN="/Install" X=126 Y=-33 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-2b.ppm
+  DEV:Test/InputPoke WIN="/Install" X=248 Y=-15 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-3a.ppm
+  DEV:Test/InputPoke WIN="/Install" X=126 Y=-33 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-3b.ppm
+  DEV:Test/InputPoke WIN="/Install" X=248 Y=-15 CLICKS=1
+  Wait 4
+EndIf
+If NOT EXISTS {DONE}
+  DEV:Test/Grab 0 0 800 600 DEV:Test/inst-{TAG}-stuck.ppm
+EndIf

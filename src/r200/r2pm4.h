@@ -2,7 +2,7 @@
  * r2pm4.h -- the R100/R200 command processor's packet headers ("PM4").
  *
  * Linux 6.6 r100d.h and radeon_reg.h (RADEON_CP_PACKET*_GET_*), Mesa 21.3
- * radeon_cmdbuf.h (CP_PACKET0_ONE):
+ * radeon_cmdbuf.h (CP_PACKET0_ONE); their notices: LICENSE, section C.2.
  *
  *   type 0  register write   bits 31-30 = 0, 29-16 = count, 15 = ONE_REG_WR,
  *                            12-0 = register >> 2; count + 1 values follow,

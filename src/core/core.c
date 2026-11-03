@@ -169,6 +169,13 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
         c->stream_cpu = staging;
 }
 
+void Core_Forget(struct Core *c)
+{
+    c->dirty = D_ALL;
+    c->rebase_gen++;
+    Hw_Forget(c);
+}
+
 void Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gpu)
 {
     ULONG i;
@@ -180,8 +187,7 @@ void Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gp
     c->heap.gpu = heap_gpu;
     c->target.color_gpu = color_gpu;
     c->target.depth_gpu = depth_gpu;
-    c->dirty = D_ALL;
-    Hw_Forget(c);
+    Core_Forget(c);
     UCache_Clear(c);        /* a dropped frame's uploads may never have landed */
     Core_GpuIdle(c);
 }
@@ -204,7 +210,10 @@ void Core_TexHazard(struct Core *c, struct CoreTex *t)
         return;
     c->env.wait_idle(c->env.env);
     c->stat_idle_waits++;
-    c->epoch++;
+    /* the whole idle, not just the epoch: a locked range drawn again
+     * afterwards must look itself up (and re-stamp its cache entry), or a
+     * later miss in the new epoch could overwrite it (audit 2026-11-03) */
+    Core_GpuIdle(c);
 }
 
 void Core_Error(struct Core *c, ULONG err)

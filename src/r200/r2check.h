@@ -99,6 +99,7 @@ struct R2ChkTex
 {
     ULONG filter, format, size, pitch, offset;
     ULONG have_offset;
+    ULONG format_x;
 };
 
 struct R2ChkAos
@@ -117,6 +118,7 @@ struct R2ChkState
     ULONG depth_offset, depth_pitch;
     ULONG zstencil;
     ULONG re_top_left, re_bottom_right;
+    ULONG re_cntl;
     ULONG pp_cntl;
     ULONG max_vtx_indx;
     struct R2ChkTex tex[6];
@@ -151,8 +153,14 @@ struct R2ChkState
 #define R2CHK_HAVE_MAXINDX  0x0800
 #define R2CHK_HAVE_VEC      0x1000
 #define R2CHK_HAVE_SCAL     0x2000
+#define R2CHK_HAVE_RECNTL   0x4000
 
 void R2Chk_Reset(struct R2ChkState *st);
+
+/* The end of what goes to the CP (a flush): R2CE_INDX when a DRAW_INDX_2
+ * still waits for its INDX_BUFFER -- the vertex fetcher would wait for
+ * indices that never come. */
+LONG R2Chk_End(struct R2ChkState *st, struct R2ChkError *err);
 
 /* Check n dwords (stored in the stream's byte order: swap as the stream's
  * cs->swap). at0 numbers the first one in error reports. Returns R2CE_OK

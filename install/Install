@@ -1,159 +1,270 @@
-; Install -- Commodore/Amiga Installer script for @PROJECT_NAME@
+; Install -- Commodore/Amiga Installer script for RadeonGL
 ; =========================================================================
-; Installs @PROJECT_NAME@ on a real AmigaOS 3.x system. Written for the V44
-; Installer (works on V42+). See docs/installer-scripting.md for the language.
+; Installs RadeonGL's minigl.library into LIBS: and a RadeonGL drawer (the
+; manuals, the card test, the card report, the licences) wherever the user
+; chooses. Written for the V44 Installer of AmigaOS 3.2. It runs from the
+; package drawer: every (source ...) path is relative to it, and the files
+; it installs wait in Files/, which has no icon and stays out of sight.
 ;
-; This is a GENERIC starter template: @PROJECT_NAME@ is substituted by the
-; Makefile's `installer` target. Extend it for your project (localisation,
-; fonts, extra data files -- see the commented examples at the bottom).
+;   Files/Libs/minigl.library   -> LIBS:  (the 68040/68060 build)
+;   Files/68030/Libs/minigl.library -> LIBS:  (or the 68020/68030 build)
+;   Files/RadeonGL/#?           -> <chosen drawer>/RadeonGL/
+;   Files/68030/C, Demos/C      -> over its C and Demos/C (the 68030 build)
 ;
-; It ships in the dist/ tree (staged by `gmake installer`, pushed by
-; `gmake push`) and runs from there -- on the Amiga, double-click the "Install"
-; icon (its default tool is Installer). All (source ...) paths below are
-; relative to that drawer. It copes with two layouts:
+; The library replaces any minigl.library in LIBS:. One that is NOT
+; RadeonGL's (Search finds no "RadeonGL" in it) is kept first, renamed to
+; minigl.library.old, or .old1 when an .old is there already; with both
+; there the installation stops rather than lose a library.
+; NOT (copylib): it keeps an installed file whose version is not older, and
+; every minigl.library 29.1 (PiStorm3D's, RadeonGL's) has the same version.
 ;
-;   * the build/push tree, which carries BOTH compiler builds
-;       @PROJECT_NAME@_gcc(.info)  @PROJECT_NAME@_sasc(.info)
-;   * a clean release drawer, which carries a single renamed
-;       @PROJECT_NAME@(.info)
+; NOVICE asks nothing (the Installer's own rule, MEASURED on 3.2): every ask
+; below has a nested-if novice default.
 ;
-; The chosen program is always installed as "@PROJECT_NAME@".
-;
-; NOVICE asks nothing -- the Installer's own rule, and MEASURED on the 3.2
-; Installer: at that level it answers every ask from its (default). The
-; script still says each novice default itself, in a nested if.
-;
-; Measured traps (docs/installer-scripting.md, section 10; tools/
-; check_installer.py catches the mechanical ones before staging):
-;
-; WARNING: askchoice answers the CHOICE NUMBER from 0, NOT a bit mask --
-; whatever the Installer guide says (askoptions is the one with a mask).
-; Read as a mask, the second of two choices installed the first.
-; WARNING: (OR ...) and (AND ...) evaluate every argument: an ask inside
-; one shows its requester even to the novice it should spare.
-; WARNING: a | in a (patmatch) pattern alternates only inside parentheses;
-; compare CPUs with (database "cpu" "68000"), the exact two-argument form.
-; WARNING: never (exists "Vol:") for a volume that may not be mounted: DOS
-; asks for the disk. (getassign "Work" "av") reads the list in memory.
-; WARNING: one substitution per parenthesis pair, and (set) takes PAIRS:
-; join strings with (cat). The closing text is built that way and handed
-; to (exit) as one string.
+; Measured traps (docs/installer-scripting.md; tools/check_installer.py
+; catches the mechanical ones before staging):
+; WARNING: askchoice answers the CHOICE NUMBER from 0, not a bit mask.
+; WARNING: (OR ...) and (AND ...) evaluate every argument.
+; WARNING: compare CPUs with (database "cpu" "68060"), the exact form.
+; WARNING: never (exists "Vol:") for a volume that may not be mounted;
+; (getassign "Work" "av") reads the list in memory.
+; WARNING: one substitution per parenthesis pair; join strings with (cat).
+; WARNING: (run) does nothing in Pretend mode unless it is (safe).
 ; =========================================================================
 
-(welcome "This will install @PROJECT_NAME@ onto your system.\n")
+(welcome "This will install RadeonGL, a minigl.library for the ATI Radeon "
+         "8500, 9000, 9100, 9200 and 9250 on Picasso96, on your system.\n")
 
-; --- system requirements ---------------------------------------------------
-; Minimum AmigaOS version. V37 (2.04) is a safe floor for a plain application;
-; RAISE this to 39 (3.0) for a ReAction/Intuition GUI. getversion with no file
-; returns the OS version as (version << 16 | revision).
-(set #minos 37)
+(set #minos 40)
 (set #os (/ (getversion) 65536))
 (if (< #os #minos)
-    (abort ("@PROJECT_NAME@ requires AmigaOS V%ld or newer.\n" #minos)
+    (abort ("RadeonGL requires AmigaOS 3.1 (V%ld) or newer.\n" #minos)
            ("This system reports Kickstart V%ld.\n" #os))
 )
 
-; --- which program file to install -----------------------------------------
-; A clean release ships one "@PROJECT_NAME@"; the build tree ships two builds,
-; so let the user pick. Either way #binary names the file to copy (its icon
-; copies with it via (infos), renamed to @PROJECT_NAME@.info by (newname)).
-(if (exists "@PROJECT_NAME@")
-    (set #binary "@PROJECT_NAME@")
-    (
-        (if (= @user-level 0)
-            (set #pick 0)                   ; novices are not asked: GCC
-            (set #pick
-                (askchoice
-                    (prompt "Which build of @PROJECT_NAME@ should be installed?")
-                    (help "Both do the same thing. GCC is the default; SAS/C is "
-                          "the classic native-compiler build. If unsure, keep GCC.\n\n"
-                          @askchoice-help)
-                    (choices "GCC (68000)" "SAS/C 6.58")
-                    (default 0))
-            )
+; --- the CPU and its FPU ---------------------------------------------------
+; Two builds (the user, 2026-11-03): the 68040/68060 one (GCC -m68060: FPU
+; instructions a 68881/68882 does not know) and the 68020/68030 one for a
+; 68881/68882 (-m68030), with its own GLSmoke and demos. Each refuses to
+; open on a CPU it cannot run on (lib/shell.c). Without an FPU, neither.
+(if (database "fpu" "NOFPU")
+    (abort "RadeonGL needs a CPU with a floating-point unit (FPU).\n\n"
+           "This system has none. RadeonGL runs on a 68040 or 68060, or on "
+           "a 68020 or 68030 with a 68881 or 68882.")
+)
+(set #for030 0)
+(if (database "cpu" "68020") (set #for030 1))
+(if (database "cpu" "68030") (set #for030 1))
+(if (= @user-level 0)
+    (set #build #for030)
+    (set #build
+        (askchoice
+            (prompt "Which minigl.library should be installed?\n"
+                    "The Installer has chosen the one for this CPU.")
+            (help "RadeonGL comes in two builds. The one for the 68040 and "
+                  "68060 uses FPU instructions that a 68881 or 68882 does "
+                  "not have. The other runs on a 68020 or 68030 with a "
+                  "68881 or 68882 (and on a 68040 or 68060 too, a little "
+                  "slower). A build on a CPU it cannot run on does not "
+                  "open at all.\n\n" @askchoice-help)
+            (choices "For the 68040 and 68060"
+                     "For a 68020 or 68030 with a 68881 or 68882")
+            (default #for030)
         )
-        ; the CHOICE NUMBER from 0: 0 -> GCC, 1 -> SAS/C (not a bit mask)
-        (if (= #pick 1)
-            (set #binary "@PROJECT_NAME@_sasc")
-            (set #binary "@PROJECT_NAME@_gcc"))
     )
 )
-(if (= (exists #binary) 0)
-    (abort ("The program file '%s' is missing from this drawer.\n" #binary))
+(set #libsrc "Files/Libs/minigl.library")
+(set #buildname "68040/68060")
+(if (= #build 1)
+    (
+        (set #libsrc "Files/68030/Libs/minigl.library")
+        (set #buildname "68020/68030")
+    )
 )
 
-; --- choose the destination ------------------------------------------------
-; The parent: Work: when it is mounted, else SYS:Tools, else SYS: -- an
-; askdir cannot offer a drawer that is not there, and a novice gets it
-; unasked.
+; --- Picasso96 and its Radeon driver ---------------------------------------
+(set #p96 0)
+(if (exists "LIBS:Picasso96API.library")
+    (set #p96 (/ (getversion "LIBS:Picasso96API.library") 65536)))
+(if (< #p96 2)
+    (abort "RadeonGL draws through Picasso96, which is not installed "
+           "(there is no LIBS:Picasso96API.library).\n\n"
+           "Install Picasso96 3.6 or newer with its Radeon driver first.")
+)
+(if (= (exists "LIBS:Picasso96/Radeon.card") 0)
+    (message "There is no Radeon driver in LIBS:Picasso96 (Radeon.card).\n\n"
+             "RadeonGL needs a Radeon 8500, 9000, 9100, 9200 or 9250 that "
+             "Picasso96 drives with its Radeon driver. Without one, programs "
+             "that use minigl.library show a small RadeonGL window instead "
+             "of a picture.\n\n"
+             "You can install it anyway, or stop the installation here."
+             (all))
+)
+
+; --- the library -----------------------------------------------------------
+(set #kept "")
+(if (exists "LIBS:minigl.library")
+    (if (<> 0 (run "Search >NIL: LIBS:minigl.library RadeonGL QUIET" (safe)))
+        (
+            (set #keep "LIBS:minigl.library.old")
+            (if (exists #keep) (set #keep "LIBS:minigl.library.old1"))
+            (if (exists #keep)
+                (abort "LIBS: holds a minigl.library that is not RadeonGL's, and "
+                       "LIBS:minigl.library.old and LIBS:minigl.library.old1 are "
+                       "there already.\n\n"
+                       "So that none of them is lost, the installation stops here. "
+                       "Move one of the two away, then install again.")
+            )
+            ; (rename) answers 1 or 0 (it fails across the volumes of a
+            ; multi-assign LIBS:); in Pretend mode it renames nothing
+            (set #renamed
+                (rename "LIBS:minigl.library" #keep
+                    (prompt ("Your minigl.library is kept as %s." #keep))
+                    (help "The minigl.library in LIBS: is not RadeonGL's. It is "
+                          "renamed, not deleted, so you can go back to it: see "
+                          "the RadeonGL manual.")
+                )
+            )
+            (if (= @pretend 0)
+                (if (= #renamed 0)
+                    (abort "LIBS:minigl.library, which is not RadeonGL's, could "
+                           ("not be renamed to %s.\n\n" #keep)
+                           "So that it is not lost, the installation stops here. "
+                           "Move it away yourself, then install again.")
+                )
+            )
+            (set #kept #keep)
+        )
+    )
+)
+(copyfiles
+    (prompt "Installing minigl.library into LIBS:.")
+    (help "minigl.library is how programs such as GLQuake reach the Radeon's "
+          "3D engine.\n\n" @copyfiles-help)
+    (source #libsrc)
+    (dest "LIBS:")
+    (optional "force")
+)
+; a library stays in memory until it is flushed: without this, the next
+; program would still meet the old one
+(run "Avail >NIL: FLUSH")
+(run "Avail >NIL: FLUSH")
+
+; --- the RadeonGL drawer ---------------------------------------------------
 (set #defbase "SYS:")
-(if (= (exists "SYS:Tools" (noreq)) 2) (set #defbase "SYS:Tools"))
+(if (= (exists "SYS:Utilities" (noreq)) 2) (set #defbase "SYS:Utilities"))
 (if (NOT (= (getassign "Work" "av") "")) (set #defbase "Work:"))
 (if (= @user-level 0)
     (set #where #defbase)
     (set #where
         (askdir
-            (prompt "In which drawer should @PROJECT_NAME@ be installed?\n"
-                    "A new '@PROJECT_NAME@' drawer will be created inside it.")
-            (help "Select the drawer that will hold the new @PROJECT_NAME@ drawer, "
-                  "for example Work: or SYS:Tools.\n\n"
+            (prompt "Where should the RadeonGL drawer go?\n"
+                    "It holds the manuals, the card test, the demos and the licences.")
+            (help "Select the drawer that will hold the new RadeonGL drawer, "
+                  "for example Work: or SYS:Utilities. The library itself "
+                  "always goes into LIBS:.\n\n"
                   @askdir-help)
             (default #defbase)
         )
     )
 )
-(set #dest (tackon #where "@PROJECT_NAME@"))
+(set #dest (tackon #where "RadeonGL"))
 (makedir #dest
     (prompt ("Creating the drawer\n%s" #dest))
     (help @makedir-help)
-    (infos)
 )
-(set @default-dest #dest)          ; so the summary + log point at the real place
-
-; --- the program and its icon (installed as "@PROJECT_NAME@") ---------------
+(set @default-dest #dest)
+; the drawer's own icon, with its window and icon positions: a drawer
+; without one is invisible in an icon view
 (copyfiles
-    (prompt "Copying the @PROJECT_NAME@ program.")
-    (help "This copies the program and its icon into the new drawer.\n\n"
-          @copyfiles-help)
-    (source #binary)
+    (prompt "Copying the drawer's icon.")
+    (help @copyfiles-help)
+    (source "Files/RadeonGL.info")
+    (dest #where)
+    (optional "force")
+)
+(copyfiles
+    (prompt "Copying the manuals, the card test, the demos and the licences.")
+    (help "Test runs a short 3D test on the Radeon and shows the frame "
+          "rate; CardReport writes a report of the card for bug reports. "
+          "Both only read the card's settings.\n\n" @copyfiles-help)
+    (source "Files/RadeonGL")
     (dest #dest)
-    (newname "@PROJECT_NAME@")      ; rename the build to the plain name
-    (infos)                        ; carries the icon, renamed to match
+    (all)
+    (infos)
+    (optional "force")
+)
+; the 68020/68030 build's own GLSmoke and demos over the 68040/68060 ones
+(if (= #build 1)
+    (
+        (copyfiles
+            (prompt "Copying the card test for the 68020/68030.")
+            (help @copyfiles-help)
+            (source "Files/68030/C")
+            (dest (tackon #dest "C"))
+            (all)
+            (optional "force")
+        )
+        (copyfiles
+            (prompt "Copying the demos for the 68020/68030.")
+            (help @copyfiles-help)
+            (source "Files/68030/Demos/C")
+            (dest (tackon #dest "Demos/C"))
+            (all)
+            (optional "force")
+        )
+    )
 )
 
-; --- online help (optional) ------------------------------------------------
-; A GUI app typically looks for PROGDIR:@PROJECT_NAME@.guide first, then HELP:.
-; Installing it into the program drawer satisfies the PROGDIR: search and keeps
-; the app self-contained. Help is not essential, so a copy failure is not fatal.
-(if (exists "@PROJECT_NAME@.guide")
-    (copyfiles
-        (prompt "Copying the online help.")
-        (help @copyfiles-help)
-        (source "@PROJECT_NAME@.guide")
-        (dest #dest)
-        (optional "nofail")
+; --- the command check -----------------------------------------------------
+; RadeonGLCheck=0 turns the checker off; nothing (the library's default)
+; keeps it on. A choice of "on" removes an old "0". The default is what is
+; set now, so a reinstall at NOVICE keeps a user's RadeonGLCheck=0.
+(set #checknow 0)
+(if (= (getenv "RadeonGLCheck") "0") (set #checknow 1))
+(if (= @user-level 0)
+    (set #check #checknow)
+    (set #check
+        (askchoice
+            (prompt "Should RadeonGL check every list of commands before "
+                    "the Radeon runs it?")
+            (help "The check stops a faulty command list before it can hang "
+                  "the graphics card. It costs about a fifth of the frame "
+                  "rate (GLQuake on a 68060: 19 instead of 24 frames a "
+                  "second). You can change this later with the RadeonGLCheck "
+                  "variable: see the manual.\n\n" @askchoice-help)
+            (choices "Check (safe)" "Do not check (faster)")
+            (default #checknow)
+        )
+    )
+)
+(if (= #check 1)
+    (
+        (textfile (prompt "Turning the command check off.")
+                  (help "RadeonGLCheck=0 in ENVARC: and ENV:.")
+                  (dest "ENVARC:RadeonGLCheck") (append "0"))
+        (textfile (prompt "Turning the command check off.")
+                  (help "RadeonGLCheck=0 in ENVARC: and ENV:.")
+                  (dest "ENV:RadeonGLCheck") (append "0"))
+    )
+    (
+        (if (exists "ENVARC:RadeonGLCheck")
+            (delete "ENVARC:RadeonGLCheck" (optional "force")))
+        (if (exists "ENV:RadeonGLCheck")
+            (delete "ENV:RadeonGLCheck" (optional "force")))
     )
 )
 
 ; --- done ------------------------------------------------------------------
 (complete 100)
 (set #closing
-    (cat ("@PROJECT_NAME@ has been installed into\n\n    %s\n\n" #dest)
-         "Open that drawer and double-click the @PROJECT_NAME@ icon to start."))
+    (cat ("RadeonGL's minigl.library (for the %s) is in LIBS:.\n\n" #buildname)
+         ("Your previous minigl.library is kept as %s.\n\n" #kept)
+         ("The manuals, the card test, the demos and the licences are in\n%s\n\n" #dest)
+         "Double-click Test there to see the Radeon draw, and look in Demos."))
+(if (= #kept "")
+    (set #closing
+        (cat ("RadeonGL's minigl.library (for the %s) is in LIBS:.\n\n" #buildname)
+             ("The manuals, the card test, the demos and the licences are in\n%s\n\n" #dest)
+             "Double-click Test there to see the Radeon draw, and look in Demos.")))
 (exit #closing)
-
-; =========================================================================
-; EXTENDING THIS SCRIPT (examples -- see docs/installer-scripting.md)
-;
-; Message catalog into the system locale tree (so the app localises itself):
-;   (if (exists "Catalogs/deutsch/@PROJECT_NAME@.catalog")
-;       (copyfiles
-;           (prompt "Copying the German message catalog.")
-;           (source "Catalogs/deutsch/@PROJECT_NAME@.catalog")
-;           (dest "LOCALE:Catalogs/deutsch")
-;           (optional "nofail")))
-;
-; Bitmap fonts into the system FONTS: drawer:
-;   (if (exists "Fonts")
-;       (copyfiles (source "Fonts") (dest "FONTS:") (all) (optional "nofail")))
-; =========================================================================

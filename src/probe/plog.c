@@ -6,6 +6,7 @@
 
 #include <exec/types.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -34,6 +35,7 @@ struct Held
 static BPTR log_File = 0;
 static ULONG log_Depth = 0;
 static struct Held log_Held;
+static APTR log_WindowPtr;      /* pr_WindowPtr as found, while held */
 
 BOOL Log_Open(CONST_STRPTR path)
 {
@@ -102,14 +104,29 @@ void Log_Hold(BOOL hold)
 {
     BPTR out;
 
+    struct Process *me;
+
+    me = (struct Process *)FindTask(NULL);
     if (hold)
     {
-        log_Depth++;
+        /* the LOG file is still written while the board is locked: a DOS
+         * requester there (disk full, volume missing) would draw on the
+         * locked board and deadlock, so DOS fails the write instead */
+        if (log_Depth++ == 0 && me->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+        {
+            log_WindowPtr = me->pr_WindowPtr;
+            me->pr_WindowPtr = (APTR)-1;
+        }
         return;
     }
     if (log_Depth == 0 || --log_Depth != 0)
         return;
+    if (me->pr_Task.tc_Node.ln_Type == NT_PROCESS)
+        me->pr_WindowPtr = log_WindowPtr;
     out = Output();
+    /* the held text comes after what VFPrintf still buffers */
+    if (out)
+        Flush(out);
     if (out && log_Held.len != 0)
         Write(out, log_Held.buf, (LONG)log_Held.len);
     if (out && log_Held.lost != 0)

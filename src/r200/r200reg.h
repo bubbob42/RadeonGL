@@ -15,6 +15,7 @@
  *
  * A register that is in none of them is not here. The names drop the
  * RADEON_/R200_ prefixes for R_ so the probes and the back end share one set.
+ * The notices of those headers are in LICENSE, section C.2.
  */
 
 #ifndef R200REG_H
@@ -114,6 +115,7 @@
 #define R_DP_DATATYPE           0x16c4
 #define   R_HOST_BIG_ENDIAN_EN    (1UL << 29)
 #define R_WAIT_UNTIL            0x1720
+#define   R_WAIT_2D_IDLE          (1UL << 14)
 #define   R_WAIT_DMA_GUI_IDLE     (1UL << 9)
 #define   R_WAIT_3D_IDLE          (1UL << 15)
 #define   R_WAIT_2D_IDLECLEAN     (1UL << 16)
@@ -167,6 +169,7 @@
 #define   R_PLANE_MASK_ENABLE     (1UL << 1)
 #define   R_DITHER_ENABLE         (1UL << 2)
 #define   R_ROUND_ENABLE          (1UL << 3)
+#define   R_STENCIL_ENABLE        (1UL << 7)
 #define   R_Z_ENABLE              (1UL << 8)
 #define   R_DEPTHXY_OFFSET_ENABLE (1UL << 9)
 #define   R_COLOR_FORMAT_SHIFT    10

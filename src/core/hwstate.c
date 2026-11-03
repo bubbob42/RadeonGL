@@ -382,18 +382,30 @@ static LONG EmitScissor(struct Core *c)
     if (y2 > H - 1) y2 = H - 1;
     if (x2 < x1 || y2 < y1)
     {
-        /* an empty box: a one-pixel box drawn with no colour, no depth
-         * would still touch a pixel; draws are skipped instead (vertex.c) */
+        /* an empty box (the R200's cannot be): a valid one-pixel box;
+         * draws and clears are skipped instead (CORE_SCISSOR_EMPTY) */
         x2 = x1;
         y2 = y1;
     }
     return R2E_Scissor(c->cs, (ULONG) x1, (ULONG) y1, (ULONG) x2, (ULONG) y2);
 }
 
-LONG Core_Validate(struct Core *c)
+ULONG Core_ScissorEmpty(struct Core *c)
+{
+    LONG H;
+
+    H = (LONG) c->target.height;
+    if (c->sc_w <= 0 || c->sc_h <= 0 || c->sc_x >= (LONG) c->target.width
+        || c->sc_y >= H || c->sc_x + c->sc_w <= 0 || c->sc_y + c->sc_h <= 0)
+        return 1;
+    return 0;
+}
+
+static LONG ValidateOnce(struct Core *c)
 {
     struct R2Cs *cs;
     ULONG d;
+    ULONG gen;
     ULONG units;
     ULONG u;
     ULONG v[2];
@@ -403,6 +415,7 @@ LONG Core_Validate(struct Core *c)
     d = c->dirty;
     if ((d & ~D_VTXFMT) == 0)
         return R2_OK;
+    gen = c->rebase_gen;
     cs = c->cs;
     c->stat_state_emits++;
     if (c->no_shadow)
@@ -499,6 +512,20 @@ LONG Core_Validate(struct Core *c)
         c->hw_mv_ver = c->mv[c->mv_top].ver;
         c->hw_proj_ver = c->proj[c->proj_top].ver;
     }
-    c->dirty = d & D_VTXFMT;
+    /* a frame dropped while this was written (a flush in one of the
+     * emitters): it went with the frame, and the rebase asked for all */
+    c->dirty = (c->rebase_gen == gen) ? (d & D_VTXFMT) : D_ALL;
     return cs->error;
+}
+
+LONG Core_Validate(struct Core *c)
+{
+    LONG e;
+
+    if ((c->dirty & ~D_VTXFMT) == 0)
+        return R2_OK;               /* most draws: nothing to send */
+    e = ValidateOnce(c);
+    if ((c->dirty & ~D_VTXFMT) != 0)
+        e = ValidateOnce(c);        /* into the fresh buffer: room enough */
+    return e;
 }

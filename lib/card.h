@@ -109,6 +109,7 @@ struct Card
     ULONG gen;                  /* the core's stream_gen they belong to */
     ULONG in_flush;
     ULONG vram_lock;            /* Card_VramBegin holds the heap */
+    ULONG reload_ucode;         /* a reset: the microcode again before the CP starts */
 
     ULONG check;                /* run the packet checker before the CP */
     struct R2ChkCfg cfg;
@@ -121,12 +122,18 @@ struct Card
     /* for the log */
     ULONG flushes, presents, dropped, moved, offboard, noscreen;
     ULONG dwords, fence_us_max, lock_us_max, lock_us_sum, vram_locks, cp_resets;
+    ULONG dwords_hi;            /* dwords carried past 2^32 */
+    ULONG lock_flushes;         /* the flushes lock_us_sum is the sum of */
     ULONG heap_offboard;        /* heap sizes P96 kept off the board at the open */
 };
+
+extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
 
 #define CARD_LOST_CHECKER  1    /* the checker refused a packet */
 #define CARD_LOST_FENCE    2    /* a fence timed out */
 #define CARD_LOST_CP       3    /* the CP would not start or stop */
+#define CARD_LOST_EMIT     4    /* a command did not fit or was malformed (R2_E*) */
+#define CARD_LOST_HEAP     5    /* P96 moved the heap off a 32-byte boundary */
 
 /* Open the GL screen (w x h, depth 16 or 32 asked) on a Radeon and set
  * everything up. CARD_OK, CARD_NOT_RADEON (nothing kept), or CARD_FAILED

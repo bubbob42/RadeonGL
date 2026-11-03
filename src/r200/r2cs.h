@@ -93,6 +93,11 @@ static __inline__ ULONG R2Cs_Out(ULONG swap, ULONG v)
  * R2_SWAPI(v): v byte-reversed, in place (v a ULONG variable). On GCC for
  * the 68k three register instructions; elsewhere the function. */
 #define R2_FBITS(f)    (*(const ULONG *) (const void *) &(f))
+#if defined(__SASC) && defined(_M68881)
+/* MEASURED: SAS/C with MATH=68881 keeps a float in an FPU register and
+ * reads its bits through such a pointer wrongly (union punning too) */
+#error "R2_FBITS needs a float in memory: no MATH=68881 for SAS/C builds"
+#endif
 
 #if defined(__GNUC__) && defined(__mc68000__)
 #define R2_SWAPI(v)    __asm__("rol.w #8,%0\n\tswap %0\n\trol.w #8,%0" : "+d" (v))

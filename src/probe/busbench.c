@@ -16,10 +16,13 @@
  * The card and the block come from Picasso96 (p96board.h): a friend bitmap
  * of the Workbench screen, locked for each timed run only (well under a
  * second). Every register access happens inside such a lock, which keeps
- * Radeon.card off the chip. Without a Radeon the register tests are
- * skipped. BusBench writes two registers: SCRATCH_REG5 with the value it
- * read from it, and PP_TFACTOR_0 (a 3D constant colour nobody else uses),
- * put back afterwards.
+ * Radeon.card off the chip. Without a Radeon, or when the register byte
+ * order stays undecided, the register tests are skipped; the FIFO tests
+ * also need an idle 3D engine first, and every FIFO wait is bounded (a
+ * stuck engine must not freeze the machine inside a lock). BusBench
+ * writes two registers: SCRATCH_REG5 with the value it read from it, and
+ * PP_TFACTOR_0 (a 3D constant colour nobody else uses), put back
+ * afterwards.
  *
  *   BusBench LOG/K,KB/N,NOWRITE/S
  */
@@ -27,6 +30,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/rdargs.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -53,6 +57,8 @@ struct Args
 #define MMIO_OPS 20000UL
 #define FIFO_STEP 32UL           /* writes between FIFO checks */
 #define REPS 3
+#define IDLE_US 100000UL         /* how long the 3D engine may take to go idle */
+#define FIFO_US 100000UL         /* the longest one FIFO wait may take */
 
 
 struct Bench
@@ -67,6 +73,7 @@ struct Bench
     ULONG sum;                   /* keeps every read alive */
     ULONG scratchVal;            /* SCRATCH_REG5 as found */
     ULONG fifoWaits;             /* FIFO checks that found fewer free slots than a step */
+    BOOL fifoStuck;              /* a FIFO wait ran out of time: no more FIFO writes */
 };
 
 typedef void (*BenchFn)(struct Bench *);
@@ -105,19 +112,62 @@ static void T_Mmio3D(struct Bench *b)
 }
 
 /* ... and as such a driver must: before every FIFO_STEP writes, wait until
- * RBBM_STATUS shows that many free slots. */
+ * RBBM_STATUS shows that many free slots. The wait is bounded: the clock
+ * is read every 256 polls (only when the FIFO is short, so the timed
+ * figure of a healthy card does not change), and a wait over FIFO_US
+ * stops the test with fifoStuck set. */
 static void T_Mmio3DChecked(struct Bench *b)
 {
     ULONG i;
     ULONG k;
+    ULONG polls;
+    ULONG start;
 
+    if (b->fifoStuck)
+        return;
     for (i = 0; i < MMIO_OPS; i += FIFO_STEP)
     {
+        polls = 0;
+        start = 0;
         while ((Mmio_Read(b->card->mmio, R_RBBM_STATUS) & R_RBBM_FIFOCNT_MASK) < FIFO_STEP)
+        {
             b->fifoWaits++;
+            if (polls == 0)
+                start = Clock_Now();
+            else if ((polls & 255) == 0 && Clock_Us(Clock_Since(start)) > FIFO_US)
+            {
+                b->fifoStuck = TRUE;
+                return;
+            }
+            polls++;
+        }
         for (k = 0; k < FIFO_STEP; k++)
             Mmio_Write(b->card->mmio, R_PP_TFACTOR_0, i + k);
     }
+}
+
+/* TRUE when the 3D engine goes idle (an empty FIFO, not active) within
+ * IDLE_US, as R2Cp_WaitIdle tests it. Inside a lock of its own. A busy
+ * engine (a Tri or CPRing run that left it stuck) does not drain the
+ * FIFO, and writes into a full FIFO stall the bus. */
+static BOOL EngineIdle(struct Bench *b)
+{
+    ULONG start;
+    ULONG v;
+    BOOL idle;
+
+    if (!P96Board_Lock(b->board))
+        return FALSE;
+    start = Clock_Now();
+    do
+    {
+        v = Mmio_Read(b->card->mmio, R_RBBM_STATUS);
+        idle = ((v & R_RBBM_FIFOCNT_MASK) == 64 && !(v & R_RBBM_ACTIVE)) ? TRUE : FALSE;
+    } while (!idle && Clock_Us(Clock_Since(start)) <= IDLE_US);
+    P96Board_Unlock(b->board);
+    if (!idle)
+        Log_Printf("  the 3D engine is not idle (RBBM_STATUS 0x%08lx): no FIFO tests\n", v);
+    return idle;
 }
 
 static void T_AperRead(struct Bench *b)
@@ -296,7 +346,9 @@ static void PutBack(struct Bench *b, ULONG tf)
 
     if (!P96Board_Lock(b->board))
         return;
-    Mmio_Write(b->card->mmio, R_PP_TFACTOR_0, tf);
+    /* through the FIFO: not when it never drained */
+    if (!b->fifoStuck)
+        Mmio_Write(b->card->mmio, R_PP_TFACTOR_0, tf);
     v = Mmio_Read(b->card->mmio, R_SCRATCH_REG5);
     t = Mmio_Read(b->card->mmio, R_PP_TFACTOR_0);
     P96Board_Unlock(b->board);
@@ -317,8 +369,11 @@ int main(void)
     ULONG v;
     ULONG tf;
     BOOL radeon;
+    BOOL fifo;
     int rc;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args.log = NULL;
     args.kb = NULL;
     args.nowrite = 0;
@@ -350,6 +405,7 @@ int main(void)
     b.sum = 0;
     b.scratchVal = 0;
     b.fifoWaits = 0;
+    b.fifoStuck = FALSE;
     tf = 0;
 
     if (!Clock_Open())
@@ -362,12 +418,21 @@ int main(void)
     P96Board_Report(&board);
     radeon = (BOOL)(P96Board_IsRadeon(&board) && board.memIoBase != NULL);
     R200_CardFromP96(&card, &board);
-    if (radeon && P96Board_Lock(&board))
+    if (radeon)
     {
-        v = R200_ReportEndian(&card);
-        P96Board_Unlock(&board);
+        v = MMIO_UNDECIDED;
+        if (P96Board_Lock(&board))
+        {
+            v = R200_ReportEndian(&card);
+            P96Board_Unlock(&board);
+        }
+        /* a register read the wrong way round makes every status test
+         * (the FIFO count, the idle bits) meaningless */
         if (v == MMIO_UNDECIDED)
-            Log_Printf("(register orientation undecided; MMIO figures still valid)\n");
+        {
+            Log_Printf("(register byte order undecided: no register tests)\n");
+            radeon = FALSE;
+        }
     }
 
     b.ram = AllocVec(b.bytes, MEMF_FAST | MEMF_PUBLIC);
@@ -388,11 +453,25 @@ int main(void)
         ReportLatency("read RBBM_STATUS", MMIO_OPS, us);
         us = RunTimed(&b, T_MmioWrite, TRUE);
         ReportLatency("write SCRATCH_REG5 (same value back)", MMIO_OPS, us);
-        us = RunTimed(&b, T_Mmio3D, TRUE);
-        ReportLatency("write PP_TFACTOR_0 (3D, through the FIFO)", MMIO_OPS, us);
-        us = RunTimed(&b, T_Mmio3DChecked, TRUE);
-        ReportLatency("the same, FIFO checked every 32 writes", MMIO_OPS, us);
-        Log_Printf("  FIFO checks that had to wait: %lu\n", b.fifoWaits);
+        fifo = EngineIdle(&b);
+        if (fifo)
+        {
+            us = RunTimed(&b, T_Mmio3DChecked, TRUE);
+            if (b.fifoStuck)
+                Log_Printf("  the FIFO did not drain within %lu ms: the FIFO tests stop\n",
+                           FIFO_US / 1000);
+            else
+            {
+                ReportLatency("write PP_TFACTOR_0, FIFO checked every 32 writes", MMIO_OPS, us);
+                Log_Printf("  FIFO checks that had to wait: %lu\n", b.fifoWaits);
+                /* unchecked only after the checked run proved the FIFO drains */
+                if (EngineIdle(&b))
+                {
+                    us = RunTimed(&b, T_Mmio3D, TRUE);
+                    ReportLatency("the same, unchecked (an idle engine drains it)", MMIO_OPS, us);
+                }
+            }
+        }
         PutBack(&b, tf);
     }
     else

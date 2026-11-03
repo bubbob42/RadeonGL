@@ -60,10 +60,17 @@ static void Fill(struct R2Ring *r, ULONG *p, ULONG n)
     R2E_Nop(&tmp, n, (r->flags & R2RING_TYPE2_FILL) == 0);
 }
 
+/* CP_RB_RPTR moves from where it was towards what was committed, never
+ * past it: anything else (a failed bus read gives 0xffffffff) is no news,
+ * not space the CP has not fetched yet (audit 2026-11-03). */
 static void ReadRptr(struct R2Ring *r)
 {
-    r->rptr = r->hw->read_reg(r->hw->hw, R_CP_RB_RPTR) & (r->size - 1);
+    ULONG v;
+
+    v = r->hw->read_reg(r->hw->hw, R_CP_RB_RPTR) & (r->size - 1);
     r->stats.rptr_reads++;
+    if (((v - r->rptr) & (r->size - 1)) <= ((r->committed - r->rptr) & (r->size - 1)))
+        r->rptr = v;
 }
 
 /* The writer has to wait for the GPU: read CP_RB_RPTR again, unless the

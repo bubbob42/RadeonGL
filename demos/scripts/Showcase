@@ -1,0 +1,5 @@
+FailAt 21
+Stack 32000
+Echo "Showcase: Spinner, Glow and Landscape in turn; space for the next one."
+Echo "Esc ends it."
+C/Showcase

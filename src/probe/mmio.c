@@ -5,7 +5,9 @@
 #include "mmio.h"
 #include "r200regs.h"
 
-BOOL Mmio_Swap = TRUE;
+/* no swap until decided: registers read native inside a lock (MEASURED on
+ * the A4000D, and what Picasso96 says) */
+BOOL Mmio_Swap = FALSE;
 
 ULONG Mmio_Swap32(ULONG v)
 {
@@ -61,6 +63,22 @@ ULONG Mmio_DetectSwap(APTR base, ULONG bar0_pci, ULONG *memsize)
     ULONG swapped;
 
     *memsize = 0;
+    /* the chip's PCI configuration mirror: ATI's vendor ID 0x1002 in the
+     * low half one way round only (lib/card.c decides the same way) */
+    raw = MMIO_RAW(base, R_PCI_MIRROR);
+    swapped = Mmio_Swap32(raw);
+    if ((raw & 0xffffUL) == 0x1002UL && (swapped & 0xffffUL) != 0x1002UL)
+        Mmio_Swap = FALSE;
+    else if ((swapped & 0xffffUL) == 0x1002UL && (raw & 0xffffUL) != 0x1002UL)
+        Mmio_Swap = TRUE;
+    else
+        goto by_memsize;
+    raw = Mmio_Read(base, R_CONFIG_MEMSIZE);
+    if (PlausibleMemSize(raw))
+        *memsize = raw;
+    return MMIO_BY_PCIMIRROR;
+
+by_memsize:
     raw = MMIO_RAW(base, R_CONFIG_MEMSIZE);
     swapped = Mmio_Swap32(raw);
     if (PlausibleMemSize(swapped) && !PlausibleMemSize(raw))

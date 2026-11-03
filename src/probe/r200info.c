@@ -14,7 +14,9 @@
  * It never writes a register. Run it twice: once with an idle Workbench,
  * once while dragging a window around, to see what Radeon.card changes
  * (SAMPLES=2 INTERVAL=8 does both in one go: drag during the pause, when
- * nothing is locked).
+ * nothing is locked). SAMPLES is 1 to 100, INTERVAL 0 to 600 seconds;
+ * Ctrl-C stops between samples. A Shell program: started from the
+ * Workbench (no console) it quits at once.
  *
  *   R200Info LOG/K,SAMPLES/N,INTERVAL/N
  */
@@ -23,6 +25,7 @@
 #include <exec/execbase.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/rdargs.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -36,6 +39,8 @@
 static const char ver[] = "$VER: R200Info 0.2 (02.11.2026)";
 
 #define TEMPLATE "LOG/K,SAMPLES/N,INTERVAL/N"
+#define MAX_SAMPLES  100
+#define MAX_INTERVAL 600
 
 struct Args
 {
@@ -63,6 +68,20 @@ static void ReportCpu(void)
     Log_Printf("CPU: %s, FPU: %s\n", cpu, fpu);
 }
 
+/* Waits secs seconds, a second at a time; TRUE when Ctrl-C came. */
+static BOOL Pause(LONG secs)
+{
+    LONG t;
+
+    for (t = 0; t < secs; t++)
+    {
+        if (CheckSignal(SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C)
+            return TRUE;
+        Delay(50);
+    }
+    return (BOOL)((CheckSignal(SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) != 0);
+}
+
 int main(void)
 {
     static struct P96Board board;     /* zero: P96Board_Close is right before Open */
@@ -77,6 +96,8 @@ int main(void)
     BOOL havePci;
     int rc;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args.log = NULL;
     args.samples = NULL;
     args.interval = NULL;
@@ -90,6 +111,12 @@ int main(void)
     interval = args.interval ? *args.interval : 5;
     if (samples < 1)
         samples = 1;
+    if (samples > MAX_SAMPLES)
+        samples = MAX_SAMPLES;
+    if (interval < 0)
+        interval = 0;
+    if (interval > MAX_INTERVAL)
+        interval = MAX_INTERVAL;
 
     if (!Log_Open(args.log))
         Log_Printf("R200Info: cannot write %s, console only\n", args.log);
@@ -131,14 +158,24 @@ int main(void)
     }
     R200_ReportEndian(&card);
     P96Board_Unlock(&board);
-    prev = AllocVec(R200_RegisterCount() * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
+    prev = NULL;
+    if (samples > 1)
+    {
+        prev = AllocVec(R200_RegisterCount() * sizeof(ULONG), MEMF_ANY | MEMF_CLEAR);
+        if (prev == NULL)
+            Log_Printf("R200Info: no memory to compare samples: changes are not marked\n");
+    }
     for (i = 0; i < samples; i++)
     {
         if (i > 0)
         {
-            Log_Printf("\n(sample %ld of %ld in %ld s -- move a window now)\n",
+            Log_Printf("\n(sample %ld of %ld in %ld s -- move a window now; Ctrl-C stops)\n",
                        i + 1, samples, interval);
-            Delay(interval * 50);
+            if (Pause(interval))
+            {
+                Log_Printf("***Break: no more samples\n");
+                break;
+            }
         }
         if (!P96Board_Lock(&board))
         {

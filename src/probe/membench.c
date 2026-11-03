@@ -17,6 +17,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <exec/execbase.h>
+#include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include "eclock.h"
@@ -146,6 +147,8 @@ int main(void)
     ULONG k;
     BOOL m16;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     Printf("%s\n", (LONG) (ver + 6));
     if (!Clock_Open())
     {

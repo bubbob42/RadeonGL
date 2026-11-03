@@ -1,0 +1,5 @@
+FailAt 21
+Stack 32000
+Echo "Landscape: a flight over rolling hills (vertex arrays, two textures)."
+Echo "Esc ends it."
+C/Landscape

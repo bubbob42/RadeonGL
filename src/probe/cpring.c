@@ -39,6 +39,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/rdargs.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -310,6 +311,11 @@ static int Run(struct Ctx *c, BOOL onlya)
         Log_Printf("CPRing: register byte order undecided: the CP is not touched\n");
         return RETURN_FAIL;
     }
+    if (!R200_CheckFamily(c->card))
+    {
+        Log_Printf("CPRing: not an R200-family chip: the R200 microcode is not loaded\n");
+        return RETURN_FAIL;
+    }
 
     Log_Section("Before");
     R2Cp_Save(&c->hw, &c->saved);
@@ -394,6 +400,8 @@ int main(void)
     ULONG t0;
     int rc;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args.log = NULL;
     args.fences = NULL;
     args.onlya = 0;

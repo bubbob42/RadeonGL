@@ -1,0 +1,5 @@
+FailAt 21
+Stack 32000
+Echo "Glow: sparks with comet tails inside tinted glass."
+Echo "Esc ends it."
+C/Glow

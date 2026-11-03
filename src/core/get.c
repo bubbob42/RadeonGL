@@ -9,7 +9,7 @@
 #include "core.h"
 #include "coreint.h"
 
-static ULONG Count(ULONG pname)
+ULONG Core_GetCount(ULONG pname)
 {
     switch (pname)
     {
@@ -129,7 +129,7 @@ void Core_GetFloatv(struct Core *c, ULONG pname, float *out)
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
-    for (i = 0; i < Count(pname); i++)
+    for (i = 0; i < Core_GetCount(pname); i++)
         out[i] = v[i];
 }
 
@@ -144,7 +144,7 @@ void Core_GetIntegerv(struct Core *c, ULONG pname, LONG *out)
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
-    n = Count(pname);
+    n = Core_GetCount(pname);
     for (i = 0; i < n; i++)
     {
         /* colours and depth values in [0, 1] map to the full integer range

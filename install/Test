@@ -1,0 +1,14 @@
+FailAt 21
+Echo "RadeonGL test: 300 frames on the Radeon at 640 x 480, then the frame rate."
+Echo "Esc on its screen stops it early."
+Echo ""
+Delete >NIL: RAM:RadeonGL-Test.log QUIET
+Set RadeonGLLog RAM:RadeonGL-Test.log
+C/GLSmoke
+UnSet RadeonGLLog
+Echo ""
+If EXISTS RAM:RadeonGL-Test.log
+  Echo "What the library saw (RAM:RadeonGL-Test.log):"
+  Echo ""
+  Type RAM:RadeonGL-Test.log
+EndIf

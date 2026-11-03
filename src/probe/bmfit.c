@@ -22,6 +22,7 @@
 #include <graphics/gfx.h>
 #include <libraries/Picasso96.h>
 #include <intuition/screens.h>
+#include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/graphics.h>
@@ -103,6 +104,8 @@ int main(void)
     ULONG fr;
     ULONG lg;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     Printf("%s\n", (LONG) (ver + 6));
     P96Base = OpenLibrary("Picasso96API.library", 2);
     if (P96Base == NULL)

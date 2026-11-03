@@ -16,6 +16,7 @@
  *    immediate packet like a glVertex.
  */
 
+#include <stddef.h>
 #include "core.h"
 #include "coreint.h"
 #include "r200reg.h"
@@ -295,6 +296,37 @@ static ULONG ColorBits(ULONG type, ULONG size, const UBYTE *p)
                       | (ULONG) (p)[3])
 #endif
 
+/* The low two bits of an address (size_t: a pointer may be wider than a
+ * ULONG on the test host). */
+#define LOW2(p) ((ULONG) ((size_t) (const void *) (p) & 3))
+
+/* Two 16-bit indices as one longword, the first in the high half: what a
+ * longword load gives on the 68k, built from the halves on the host. */
+#if defined(__GNUC__) && defined(__mc68000__)
+#define LOAD_PAIR(ix) (*(const ULONG *) (const void *) (ix))
+#else
+#define LOAD_PAIR(ix) (((ULONG) (ix)[0] << 16) | (ULONG) (ix)[1])
+#endif
+
+/* Kept out of line: GCC inlined the hashers and the index packer into
+ * Core_DrawElements, a 4.5 KB function with a frame pointer, where their
+ * loops lost their values to the stack (MEASURED on the A4000D: about 15
+ * cycles a hashed dword, with the loop counter in memory). SAS/C decides
+ * by itself. */
+#if defined(__GNUC__)
+#define UC_NOINLINE __attribute__((noinline))
+#else
+#define UC_NOINLINE
+#endif
+
+/* A constant in a data register: GCC multiplies by an immediate otherwise,
+ * an 8-byte instruction in the loop. */
+#if defined(__GNUC__) && defined(__mc68000__)
+#define UC_IN_REG(x) __asm__("" : "+d" (x))
+#else
+#define UC_IN_REG(x) ((void) 0)
+#endif
+
 /* GLQuake's models, straight through: a byte-swapped stream, x y z
  * floats, A R G B colour bytes, one coordinate set of floats. The colour
  * dword the GPU reads (a << 24 | b << 16 | g << 8 | r), byte-reversed, is
@@ -537,14 +569,128 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
 #define UK_MODEL 0x4d4f4431UL   /* key seeds per kind */
 #define UK_WORLD 0x574f5231UL
 #define UK_IDX   0x49445831UL
+#define UK_MODELRUN 0x4d4f4432UL   /* the same, hashed as one block */
+#define UK_WORLDRUN 0x574f5232UL
 
-/* Two hashes mixed with x (a: FNV-1a style, b: rotate and add). */
-#define UMIX(a, b, x) ((a) = ((a) ^ (x)) * 16777619UL, (b) = (((b) << 5) | ((b) >> 27)) + (x))
+/* Two hashes mixed with x (a: FNV-1a style, b: rotate and add). a rotates
+ * after the multiply: without it bit 31 of x reached bit 31 of a only, and
+ * two sign flips 64 dwords apart cancelled in every lane (MEASURED: a full
+ * key collision in one trial of five; audit 2026-11-03). */
+#define UROL(v, n) (((v) << (n)) | ((v) >> (32 - (n))))
+#define UMIX(a, b, x) ((a) = UROL(((a) ^ (x)) * 16777619UL, 16), (b) = UROL((b), 5) + (x))
 
-/* The source of the model packer (PackXyzArgbSt), into h[0], h[1]: a
- * function of its own so the loop keeps everything in registers. */
-static void HashModels(const UBYTE *vp, ULONG vs, const UBYTE *cp, ULONG cs, const UBYTE *tp,
-                       ULONG ts, ULONG count, ULONG *h)
+/* n dwords from p into h[0], h[1]. Four lanes -- UMIX's two for the even
+ * dwords, two more for the odd ones -- so that two multiplications are in
+ * flight on the 68060 instead of one chain; folded into two words at the
+ * end. */
+static UC_NOINLINE void HashRun(const ULONG *p, ULONG n, ULONG *h)
+{
+    ULONG a0;
+    ULONG a1;
+    ULONG b0;
+    ULONG b1;
+    ULONG x;
+    ULONG y;
+    ULONG prime;
+
+    prime = 16777619UL;
+    UC_IN_REG(prime);
+    a0 = h[0];
+    b0 = h[1];
+    a1 = a0 ^ 0x9e3779b9UL;
+    b1 = b0 ^ 0x7f4a7c15UL;
+#if defined(__GNUC__) && defined(__mc68000__)
+    /* The loop below by hand: in C the rotate (a swap) left GCC one data
+     * register short, and it shuffled the lanes through address registers
+     * every dword (MEASURED on the A4000D: 1.1 ms a GLQuake frame). Eight
+     * data registers, the same operations, the two multiplications apart. */
+    if (n >= 2)
+    {
+        ULONG k;
+
+        k = n >> 1;
+        __asm__ volatile (
+            "1:\n\t"
+            "move.l (%[p])+,%[x]\n\t"
+            "move.l (%[p])+,%[y]\n\t"
+            "eor.l %[x],%[a0]\n\t"
+            "eor.l %[y],%[a1]\n\t"
+            "mulu.l %[prime],%[a0]\n\t"
+            "rol.l #5,%[b0]\n\t"
+            "mulu.l %[prime],%[a1]\n\t"
+            "rol.l #5,%[b1]\n\t"
+            "swap %[a0]\n\t"
+            "add.l %[x],%[b0]\n\t"
+            "swap %[a1]\n\t"
+            "add.l %[y],%[b1]\n\t"
+            "subq.l #1,%[k]\n\t"
+            "bne.s 1b"
+            : [p] "+a" (p), [a0] "+d" (a0), [a1] "+d" (a1), [b0] "+d" (b0), [b1] "+d" (b1),
+              [k] "+d" (k), [x] "=&d" (x), [y] "=&d" (y)
+            : [prime] "d" (prime)
+            : "cc", "memory");
+        n &= 1;
+    }
+#else
+    for (; n >= 2; n -= 2)
+    {
+        x = p[0];
+        y = p[1];
+        p += 2;
+        a0 = UROL((a0 ^ x) * prime, 16);
+        a1 = UROL((a1 ^ y) * prime, 16);
+        b0 = UROL(b0, 5) + x;
+        b1 = UROL(b1, 5) + y;
+    }
+#endif
+    if (n != 0)
+    {
+        x = p[0];
+        a0 = UROL((a0 ^ x) * prime, 16);
+        b0 = UROL(b0, 5) + x;
+    }
+    h[0] = a0 ^ UROL(a1, 13);
+    h[1] = b0 + UROL(b1, 11);
+}
+
+/* Three arrays of one interleaved block: the same stride (dwords, under
+ * 1 KB), dword-aligned, and every array's bytes (len[i] of them) within
+ * one stride of the lowest array -- GLQuake's models (x y z, s t w, A R G B:
+ * 28 bytes) and world batches (x y z, s t, s t: 28 bytes). Then all a
+ * packer reads of count vertices lies in ONE run of dwords from *base,
+ * (count - 1) * stride + *span bytes long; *offs codes where each array
+ * starts in it. FALSE: not one block. */
+static ULONG OneBlock(const UBYTE *const *ptr, const ULONG *stride, const ULONG *len,
+                      const UBYTE **base, ULONG *span, ULONG *offs)
+{
+    const UBYTE *lo;
+    const UBYTE *hi;
+    ULONG i;
+
+    lo = ptr[0];
+    hi = ptr[0] + len[0];
+    for (i = 0; i < 3; i++)
+    {
+        if (stride[i] != stride[0] || (stride[i] & 3) != 0 || stride[i] >= 1024
+            || LOW2(ptr[i]) != 0)
+            return 0;
+        if (ptr[i] < lo)
+            lo = ptr[i];
+        if (ptr[i] + len[i] > hi)
+            hi = ptr[i] + len[i];
+    }
+    if ((ULONG) (hi - lo) > stride[0])
+        return 0;
+    *base = lo;
+    *span = (ULONG) (hi - lo);
+    *offs = (ULONG) (ptr[0] - lo) | ((ULONG) (ptr[1] - lo) << 10) | ((ULONG) (ptr[2] - lo) << 20);
+    return 1;
+}
+
+/* The source of the model packer (PackXyzArgbSt), into h[0], h[1], when
+ * its arrays are not one block. */
+static UC_NOINLINE void HashModels(const UBYTE *vp, ULONG vs, const UBYTE *cp, ULONG cs,
+                                   const UBYTE *tp, ULONG ts, ULONG count, ULONG *h)
 {
     const ULONG *v;
     ULONG a;
@@ -571,9 +717,9 @@ static void HashModels(const UBYTE *vp, ULONG vs, const UBYTE *cp, ULONG cs, con
     h[1] = b;
 }
 
-/* The source of the world packer (PackXyzCSt2). */
-static void HashWorld(const UBYTE *vp, ULONG vs, const UBYTE *t0, ULONG ts0, const UBYTE *t1,
-                      ULONG ts1, ULONG count, ULONG *h)
+/* The source of the world packer (PackXyzCSt2), when not one block. */
+static UC_NOINLINE void HashWorld(const UBYTE *vp, ULONG vs, const UBYTE *t0, ULONG ts0,
+                                  const UBYTE *t1, ULONG ts1, ULONG count, ULONG *h)
 {
     const ULONG *v;
     ULONG a;
@@ -602,36 +748,43 @@ static void HashWorld(const UBYTE *vp, ULONG vs, const UBYTE *t0, ULONG ts0, con
     h[1] = b;
 }
 
-/* 16-bit indices, two to a value. */
-static void HashIdx16(const UWORD *ix, ULONG n, ULONG *h)
+/* 16-bit indices: two to a dword through HashRun, from a dword boundary
+ * (a first index before it on its own, which the seed records). */
+static UC_NOINLINE void HashIdx16(const UWORD *ix, ULONG n, ULONG *h)
 {
-    ULONG a;
-    ULONG b;
     ULONG x;
 
-    a = h[0];
-    b = h[1];
-    for (; n >= 2; n -= 2, ix += 2)
+    if (n != 0 && LOW2(ix) != 0)
     {
-        x = ((ULONG) ix[1] << 16) | ix[0];
-        UMIX(a, b, x);
-    }
-    if (n != 0)
-    {
+        h[1] ^= 0x80000000UL;
         x = ix[0];
-        UMIX(a, b, x);
+        UMIX(h[0], h[1], x);
+        ix++;
+        n--;
     }
-    h[0] = a;
-    h[1] = b;
+    HashRun((const ULONG *) (const void *) ix, n / 2, h);
+    if ((n & 1) != 0)
+    {
+        x = ix[n - 1];
+        UMIX(h[0], h[1], x);
+    }
 }
 
 /* The key of the locked range's packed vertices: 1 in h[] for the layouts
  * the straight-through packers take (the same tests as PackFast), 0 for
- * the others (not cached). */
+ * the others (not cached). Arrays that form one interleaved block are
+ * hashed as one run of dwords (OneBlock), with the block's shape in the
+ * seed: the same bytes laid out otherwise pack otherwise. */
 static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, ULONG *h)
 {
     const struct CoreArray *t0;
     const struct CoreArray *t1;
+    const UBYTE *ptr[3];
+    ULONG stride[3];
+    ULONG len[3];
+    const UBYTE *base;
+    ULONG span;
+    ULONG offs;
     ULONG col;
 
     if (c->no_fast || !c->cs->swap || c->va.type != GL_FLOAT || c->va.size != 3)
@@ -641,23 +794,52 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
     if (units == 1 && c->ca.enabled && c->ca.type == MGL_UBYTE_ARGB && t0->enabled
         && t0->type == GL_FLOAT && t0->size >= 2)
     {
+        ptr[0] = Elem(&c->va, first);
+        stride[0] = c->va.stride ? c->va.stride : 12;
+        len[0] = 12;
+        ptr[1] = Elem(&c->ca, first);
+        stride[1] = c->ca.stride ? c->ca.stride : 4;
+        len[1] = 4;
+        ptr[2] = Elem(t0, first);
+        stride[2] = t0->stride ? t0->stride : t0->size * 4;
+        len[2] = 8;
+        if (OneBlock(ptr, stride, len, &base, &span, &offs))
+        {
+            h[0] = 2166136261UL ^ UK_MODELRUN ^ stride[0];
+            h[1] = UK_MODELRUN ^ lcount ^ (offs << 1);
+            HashRun((const ULONG *) (const void *) base, ((lcount - 1) * stride[0] + span) / 4, h);
+            return 1;
+        }
         h[0] = 2166136261UL ^ UK_MODEL;
         h[1] = UK_MODEL ^ lcount;
-        HashModels(Elem(&c->va, first), c->va.stride ? c->va.stride : 12,
-                   Elem(&c->ca, first), c->ca.stride ? c->ca.stride : 4,
-                   Elem(t0, first), t0->stride ? t0->stride : t0->size * 4, lcount, h);
+        HashModels(ptr[0], stride[0], ptr[1], stride[1], ptr[2], stride[2], lcount, h);
         return 1;
     }
     if (units == 3 && !c->ca.enabled && t0->enabled && t1->enabled && t0->type == GL_FLOAT
         && t1->type == GL_FLOAT && t0->size >= 2 && t1->size >= 2)
     {
         col = c->cur_color;
+        ptr[0] = Elem(&c->va, first);
+        stride[0] = c->va.stride ? c->va.stride : 12;
+        len[0] = 12;
+        ptr[1] = Elem(t0, first);
+        stride[1] = t0->stride ? t0->stride : t0->size * 4;
+        len[1] = 8;
+        ptr[2] = Elem(t1, first);
+        stride[2] = t1->stride ? t1->stride : t1->size * 4;
+        len[2] = 8;
+        if (OneBlock(ptr, stride, len, &base, &span, &offs))
+        {
+            h[0] = 2166136261UL ^ UK_WORLDRUN ^ stride[0];
+            h[1] = UK_WORLDRUN ^ lcount ^ (offs << 1);
+            UMIX(h[0], h[1], col);
+            HashRun((const ULONG *) (const void *) base, ((lcount - 1) * stride[0] + span) / 4, h);
+            return 1;
+        }
         h[0] = 2166136261UL ^ UK_WORLD;
         h[1] = UK_WORLD ^ lcount;
         UMIX(h[0], h[1], col);
-        HashWorld(Elem(&c->va, first), c->va.stride ? c->va.stride : 12,
-                  Elem(t0, first), t0->stride ? t0->stride : t0->size * 4,
-                  Elem(t1, first), t1->stride ? t1->stride : t1->size * 4, lcount, h);
+        HashWorld(ptr[0], stride[0], ptr[1], stride[1], ptr[2], stride[2], lcount, h);
         return 1;
     }
     return 0;
@@ -801,22 +983,46 @@ static ULONG *UWhere(struct Core *c, ULONG *heap, ULONG off, ULONG pos)
 }
 
 /* n 16-bit indices rebased to the lock, two to a dword in stream order,
- * each checked; FALSE if one is outside the lock. */
-static ULONG PackIdx16(struct Core *c, ULONG *p, const UWORD *ix16, ULONG n, ULONG first,
-                       ULONG lcount)
+ * each checked; FALSE if one is outside the lock (what was written then is
+ * referred to by nothing). */
+static UC_NOINLINE ULONG PackIdx16(struct Core *c, ULONG *p, const UWORD *ix16, ULONG n,
+                                   ULONG first, ULONG lcount)
 {
     ULONG i;
     ULONG a;
     ULONG b;
     ULONG g;
-    ULONG bad;
 
-    bad = 0;
+    if (c->cs->swap && first == 0 && LOW2(ix16) == 0)
+    {
+        /* GLQuake's case, glLockArrays(0, n): a pair is one longword, the
+         * first index in its high half; the GPU wants the first in the low
+         * half, each byte-swapped (R2_SWAPI of (b << 16 | a)) -- which is
+         * that longword with the bytes of each half swapped */
+        for (i = n / 2; i > 0; i--)
+        {
+            g = LOAD_PAIR(ix16);
+            ix16 += 2;
+            if ((g >> 16) >= lcount || (g & 0xffffUL) >= lcount)
+                return 0;
+            *p++ = ((g & 0x00ff00ffUL) << 8) | ((g >> 8) & 0x00ff00ffUL);
+        }
+        if ((n & 1) != 0)
+        {
+            g = ix16[0];
+            if (g >= lcount)
+                return 0;
+            R2_SWAPI(g);
+            *p = g;
+        }
+        return 1;
+    }
     for (i = 0; i + 1 < n; i += 2)
     {
         a = (ULONG) ix16[i] - first;
         b = (ULONG) ix16[i + 1] - first;
-        bad |= (a >= lcount) | (b >= lcount);
+        if (a >= lcount || b >= lcount)
+            return 0;
         g = (b << 16) | (a & 0xffffUL);
         if (c->cs->swap)
             R2_SWAPI(g);
@@ -825,13 +1031,14 @@ static ULONG PackIdx16(struct Core *c, ULONG *p, const UWORD *ix16, ULONG n, ULO
     if (i < n)
     {
         a = (ULONG) ix16[i] - first;
-        bad |= (a >= lcount);
+        if (a >= lcount)
+            return 0;
         g = a & 0xffffUL;
         if (c->cs->swap)
             R2_SWAPI(g);
         *p = g;
     }
-    return (bad == 0) ? 1UL : 0UL;
+    return 1;
 }
 
 /* DrawLocked through the cache (16-bit indices). FALSE: not drawn (the
@@ -1049,6 +1256,9 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     ibytes = (((n + 1) / 2) * 4 + 31) & ~31UL;
     if (vbytes + ibytes > c->stream_size)
         return 0;                   /* never fits: the general way */
+    /* the room for the state and the draw before any address is taken: a
+     * flush that drops the frame here rebases everything first */
+    CORE_ROOM(c, CORE_DRAW_DW);
     if (c->ucache_on && !c->no_ucache && type == GL_UNSIGNED_SHORT)
         return DrawCached(c, mode, n, (const UWORD *) idx, first, lcount, units, vd);
     upload = !LockCurrent(c, units);
@@ -1175,7 +1385,7 @@ void Core_DrawArrays(struct Core *c, ULONG mode, LONG first, LONG count)
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
-    if (!c->va.enabled || count == 0)
+    if (!c->va.enabled || count == 0 || CORE_SCISSOR_EMPTY(c))
         return;
     Core_Begin(c, mode);
     for (i = 0; i < count; i++)
@@ -1204,7 +1414,7 @@ void Core_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, const
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
-    if (!c->va.enabled || count == 0 || idx == NULL)
+    if (!c->va.enabled || count == 0 || idx == NULL || CORE_SCISSOR_EMPTY(c))
         return;
     if (DrawLocked(c, mode, count, type, idx))
         return;

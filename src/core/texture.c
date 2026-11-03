@@ -26,6 +26,7 @@
  * or as type -- GLQuake uploads its lightmaps as the former.
  */
 
+#include <stddef.h>
 #include "core.h"
 #include "coreint.h"
 #include "r200reg.h"
@@ -149,6 +150,17 @@ ULONG Core_IsTexture(struct Core *c, ULONG name)
     return (name != 0 && name < CORE_MAX_TEX && c->tex[name] != NULL) ? 1UL : 0UL;
 }
 
+/* Two 16-bit source texels from one longword load (Pair16, below). */
+#if defined(__GNUC__) && defined(__mc68000__)
+#define LOAD_TEX32(q) (*(const ULONG *) (const void *) (q))
+#else
+#define LOAD_TEX32(q) (((ULONG) (q)[0] << 24) | ((ULONG) (q)[1] << 16) | ((ULONG) (q)[2] << 8) \
+                       | (ULONG) (q)[3])
+#endif
+/* q on a longword boundary (size_t: a host pointer may be wider than a
+ * ULONG) */
+#define TEX_ALIGNED(q) ((((size_t) (const void *) (q)) & 3) == 0)
+
 static void Release(struct Core *c, struct CoreTex *t)
 {
     if (t->gpu != 0)
@@ -167,6 +179,17 @@ void Core_DeleteTextures(struct Core *c, LONG n, const ULONG *names)
     ULONG u;
     struct CoreTex *t;
 
+    if (IN_BEGIN(c))
+    {
+        /* GL forbids it; the hazard flush would also close the open packet */
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (n < 0)
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
     for (i = 0; i < n; i++)
     {
         if (names[i] == 0 || names[i] >= CORE_MAX_TEX || c->tex[names[i]] == NULL)
@@ -189,6 +212,11 @@ void Core_TexParameteri(struct Core *c, ULONG target, ULONG pname, LONG param)
     struct CoreTex *t;
     ULONG p;
 
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
     if (target != GL_TEXTURE_2D)
     {
         Core_Error(c, GL_INVALID_ENUM);
@@ -380,6 +408,18 @@ static ULONG In(struct Core *c, ULONG v)
     return v;
 }
 
+/* Two 16-bit source texels (big-endian bytes) from one longword load, as
+ * the dword VRAM holds them: the first texel in the low half, byte-reversed
+ * when tex_swap -- which is the load with the bytes of each half swapped.
+ * MEASURED on the A4000D: four byte loads, shifts and ors a dword cost as
+ * much as the bus writes they fed. */
+static ULONG Pair16(const struct Core *c, ULONG w)
+{
+    if (c->tex_swap)
+        return ((w & 0x00ff00ffUL) << 8) | ((w >> 8) & 0x00ff00ffUL);
+    return (w << 16) | (w >> 16);
+}
+
 /* 16-bit source texels already in the storage layout (GLQuake's 4444
  * lightmaps, every frame): two a dword, the generic path's dword without
  * its per-texel work. A texel in slot 0 is the dword's low half. */
@@ -399,15 +439,77 @@ static void WriteRow16(struct Core *c, ULONG *dst, ULONG first, ULONG w, const U
         i = 1;
     }
     p = row + i * 2;
-    for (; i + 2 <= w; i += 2)
-    {
-        *dst++ = Out(c, ((ULONG) p[0] << 8) | p[1] | ((ULONG) p[2] << 24) | ((ULONG) p[3] << 16));
-        p += 4;
-    }
+    if (TEX_ALIGNED(p))
+        for (; i + 2 <= w; i += 2)
+        {
+            *dst++ = Pair16(c, LOAD_TEX32(p));
+            p += 4;
+        }
+    else
+        for (; i + 2 <= w; i += 2)
+        {
+            *dst++ = Out(c, ((ULONG) p[0] << 8) | p[1] | ((ULONG) p[2] << 24) | ((ULONG) p[3] << 16));
+            p += 4;
+        }
     if (i < w)
     {
         texel = ((ULONG) p[0] << 8) | p[1];
         *dst = Out(c, (In(c, *dst) & 0xffff0000UL) | texel);
+    }
+}
+
+/* 8-bit texels that need no conversion (luminance into GL_LUMINANCE or
+ * GL_INTENSITY: GLQuake's -lm_LUMINANCE lightmaps): texel k of a dword is
+ * byte k in VRAM, so a longword load of four source bytes is already the
+ * dword the 68k writes when it swaps (tex_swap), and the byte-reversed one
+ * when it does not. MEASURED on the A4000D: through the general way these
+ * lightmaps cost more than the 16-bit ones. Partial dwords at the ends
+ * keep the bytes beside them. */
+static void WriteRow8(struct Core *c, ULONG *dst, ULONG first, ULONG w, const UBYTE *row)
+{
+    ULONG i;
+    ULONG k;
+    ULONG v;
+    ULONG acc;
+    ULONG mask;
+    const UBYTE *p;
+
+    i = 0;
+    if (first != 0)
+    {
+        acc = 0;
+        mask = 0;
+        for (; i < w && first + i < 4; i++)
+        {
+            acc |= (ULONG) row[i] << ((first + i) * 8);
+            mask |= 0xffUL << ((first + i) * 8);
+        }
+        *dst = Out(c, (In(c, *dst) & ~mask) | acc);
+        dst++;
+    }
+    p = row + i;
+    if (TEX_ALIGNED(p))
+        for (; i + 4 <= w; i += 4, p += 4)
+        {
+            v = LOAD_TEX32(p);
+            if (!c->tex_swap)
+                R2_SWAPI(v);
+            *dst++ = v;
+        }
+    else
+        for (; i + 4 <= w; i += 4, p += 4)
+            *dst++ = Out(c, (ULONG) p[0] | ((ULONG) p[1] << 8) | ((ULONG) p[2] << 16)
+                            | ((ULONG) p[3] << 24));
+    if (i < w)
+    {
+        acc = 0;
+        mask = 0;
+        for (k = 0; i < w; i++, k++)
+        {
+            acc |= (ULONG) row[i] << (k * 8);
+            mask |= 0xffUL << (k * 8);
+        }
+        *dst = Out(c, (In(c, *dst) & ~mask) | acc);
     }
 }
 
@@ -438,6 +540,11 @@ static void WriteRow(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG 
         && ((src == SRC_4444 && t->base == GL_RGBA) || (src == SRC_565 && t->base == GL_RGB)))
     {
         WriteRow16(c, dst, first, w, row);
+        return;
+    }
+    if (cpp == 1 && bpp == 1 && src == SRC_L && (t->base == GL_LUMINANCE || t->base == GL_INTENSITY))
+    {
+        WriteRow8(c, dst, first, w, row);
         return;
     }
     acc = 0;

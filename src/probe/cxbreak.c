@@ -21,6 +21,7 @@
 #include <exec/execbase.h>
 #include <exec/tasks.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/rdargs.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -118,6 +119,8 @@ int main(void)
     LONG tries;
     int rc;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args[0] = 0;
     args[1] = 0;
     rda = ReadArgs(TEMPLATE, args, NULL);

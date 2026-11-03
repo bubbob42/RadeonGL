@@ -240,6 +240,7 @@ static void test_mesa_blit(void)
     struct R2ChkError err;
     ULONG verts[12];
     ULONG *draw;
+    ULONG *re_cntl;
     ULONG i;
     LONG e;
 
@@ -272,6 +273,7 @@ static void test_mesa_blit(void)
     R2E_Texture(&cs, 0, &t);
     /* emit_cb_setup: 640 x 480 RGB565 */
     R2E_Reg(&cs, R_RE_AUX_SCISSOR_CNTL, 0);
+    re_cntl = cs.ptr + 1;
     R2E_Reg(&cs, R_RE_CNTL, 0);
     R2E_Scissor(&cs, 0, 0, 639, 479);
     R2E_Reg(&cs, R_RB3D_PLANEMASK, 0xffffffffUL);
@@ -286,6 +288,13 @@ static void test_mesa_blit(void)
     CHECK_INT(R2E_Immd(&cs, R_VF_PRIM_RECT_LIST, 4, 3, verts), R2_OK);
     CHECK_HEX(draw[0], 0xc00c3500UL);
     CHECK_HEX(draw[1], 0x00030038UL);   /* RADEON_CP_VC_CNTL_PRIM_WALK_RING | RECT_LIST | 3 << 16 */
+    /* Mesa's RE_CNTL 0: whether the box then clips is not known, so the
+     * checker wants SCISSOR_ENABLE, as RadeonGL's present sends it (audit
+     * 2026-11-03) */
+    R2Chk_Reset(&st);
+    CHECK_INT(CheckBuf(buf, (ULONG) (cs.ptr - buf), 0, 0, &st, &err), R2CE_VALUE);
+    CHECK_HEX(err.what, R_RE_CNTL);
+    *re_cntl = R_SCISSOR_ENABLE;
     R2Chk_Reset(&st);
     e = CheckBuf(buf, (ULONG) (cs.ptr - buf), 0, 0, &st, &err);
     CHECK_INT(e, R2CE_OK);
@@ -1056,6 +1065,188 @@ static void test_cp(void)
     CHECK_INT(R2Cp_WaitIdle(&cpf_hw, 300), R2_OK);
 }
 
+/* The streams the audit of 2026-11-03 slipped past the checker: each must
+ * now be refused, and the same stream with RadeonGL's own values pass. */
+static ULONG hb[8192];
+
+static LONG HardRun(struct R2Cs *cs)
+{
+    struct R2ChkState st;
+    struct R2ChkError err;
+    LONG e;
+
+    R2Chk_Reset(&st);
+    e = CheckBuf(hb, (ULONG) (cs->ptr - hb), 0, 0, &st, &err);
+    if (e == R2CE_OK)
+        e = R2Chk_End(&st, &err);
+    return e;
+}
+
+static void HardSetup(struct R2Cs *cs)
+{
+    R2Cs_InitBuffer(cs, hb, 8192, 0);
+    R2E_TclDefaults(cs);
+    R2E_RasterDefaults(cs);
+    R2E_ColorTarget(cs, COLOR_GPU, 640, 0);
+    R2E_DepthTarget(cs, DEPTH_GPU, 640);
+    R2E_Scissor(cs, 0, 0, 639, 479);
+    R2E_Reg(cs, R_RB3D_CNTL, R_COLOR_FORMAT_ARGB8888 | R_Z_ENABLE);
+    R2E_Reg(cs, R_PP_CNTL, R_TEX_BLEND_0_ENABLE);
+    R2E_VertexFormat(cs, FMT0_XYZC, 0, 0, 0, R_OUTPUT_XYZW | R_OUTPUT_COLOR_0);
+}
+
+static void HardTri(struct R2Cs *cs)
+{
+    ULONG v[12];
+
+    memset(v, 0, sizeof(v));
+    R2E_Immd(cs, TRI_CNTL, 4, 3, v);
+}
+
+static void HardTex(struct R2Cs *cs, ULONG filter, ULONG format, ULONG format_x, ULONG size,
+                    ULONG pitch, ULONG offset)
+{
+    struct R2Tex t;
+
+    memset(&t, 0, sizeof(t));
+    t.filter = filter;
+    t.format = format;
+    t.format_x = format_x;
+    t.size = size;
+    t.pitch = pitch;
+    t.offset = offset;
+    R2E_Texture(cs, 0, &t);
+    R2E_Reg(cs, R_PP_CNTL, R_TEX_BLEND_0_ENABLE | R_TEX_0_ENABLE);
+    HardTri(cs);
+}
+
+static void test_checker_hardening(void)
+{
+    struct R2Cs cs;
+    struct R2Aos aos;
+    ULONG *p;
+
+    HardSetup(&cs);
+    HardTri(&cs);
+    CHECK_INT(HardRun(&cs), R2CE_OK);           /* the control */
+
+    /* SE_VF_MAX_VTX_INDX 0x20000000: 4 * (2 * (n - 1) + 2) wrapped to 0 */
+    HardSetup(&cs);
+    R2E_VertexFormat(&cs, 0, 0, 0, 0, R_OUTPUT_XYZW);
+    aos.comps = 2;
+    aos.stride = 2;
+    aos.gpu = VTX_GPU + VTX_SIZE - 8;
+    R2E_LoadVbpntr(&cs, 1, &aos);
+    R2E_DrawIndexed(&cs, TRI_CNTL, 3, IDX_GPU, 0x20000000UL);
+    CHECK_INT(HardRun(&cs), R2CE_ARRAYS);
+
+    /* NPOT pitches whose (pitch + 32) * h wraps; mip levels on NPOT */
+    HardSetup(&cs);
+    HardTex(&cs, 0, R_TXFORMAT_ARGB8888 | R_TXFORMAT_NON_POWER2, R_LOD_BIAS_CORRECTION,
+            255 | (1UL << 16), 0x80000000UL - 32, TEX_GPU + TEX_SIZE - 32);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+    HardSetup(&cs);
+    HardTex(&cs, 0, R_TXFORMAT_ARGB8888 | R_TXFORMAT_NON_POWER2, 0,
+            255 | (255UL << 16), 0x01000000UL - 32, TEX_GPU + TEX_SIZE - 32);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+    HardSetup(&cs);
+    HardTex(&cs, 10UL << 16, R_TXFORMAT_ARGB8888 | R_TXFORMAT_NON_POWER2, 0,
+            1023 | (1023UL << 16), 4096 - 32, TEX_GPU);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+    HardSetup(&cs);
+    HardTex(&cs, 0, R_TXFORMAT_ARGB8888 | R_TXFORMAT_NON_POWER2, R_LOD_BIAS_CORRECTION,
+            255 | (255UL << 16), 1024 - 32, TEX_GPU);
+    CHECK_INT(HardRun(&cs), R2CE_OK);           /* the present's kind */
+
+    /* a 256 x 256 texture as a volume 2048 deep (PP_TXFORMAT_X) */
+    HardSetup(&cs);
+    HardTex(&cs, 0, R_TXFORMAT_ARGB8888 | (8UL << R_TXFORMAT_WIDTH_SHIFT)
+            | (8UL << R_TXFORMAT_HEIGHT_SHIFT), (2UL << 16) | 11, 0, 0,
+            TEX_GPU + TEX_SIZE - 256 * 256 * 4);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+    /* a tiled texture */
+    HardSetup(&cs);
+    HardTex(&cs, 0, R_TXFORMAT_ARGB8888 | (8UL << R_TXFORMAT_WIDTH_SHIFT)
+            | (8UL << R_TXFORMAT_HEIGHT_SHIFT), 0, 0, 0, TEX_GPU | 4);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+
+    /* PP_CNTL_X's second-pass lookups */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_PP_CNTL_X, 0x3f);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+
+    /* the scissor: off, and x2 past the pitch */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_RE_CNTL, R_PERSPECTIVE_ENABLE);
+    HardTri(&cs);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+    HardSetup(&cs);
+    R2E_Scissor(&cs, 0, 0, 2047, 479);
+    HardTri(&cs);
+    CHECK_INT(HardRun(&cs), R2CE_TARGET);
+
+    /* stencil (no depth check without Z_ENABLE before) */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_RB3D_CNTL, R_COLOR_FORMAT_ARGB8888 | R_STENCIL_ENABLE);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+    /* a tiled depth buffer */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_RB3D_DEPTHPITCH, 640 | (1UL << 16));
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+
+    /* SE_VTX_FMT_1: count code 7, a bit above the six counts */
+    HardSetup(&cs);
+    R2E_VertexFormat(&cs, FMT0_XYZC, 7, 0, 0, R_OUTPUT_XYZW | R_OUTPUT_COLOR_0);
+    CHECK_INT(HardRun(&cs), R2CE_FORMAT);
+    HardSetup(&cs);
+    R2E_VertexFormat(&cs, FMT0_XYZC, 1UL << 20, 0, 0, R_OUTPUT_XYZW | R_OUTPUT_COLOR_0);
+    CHECK_INT(HardRun(&cs), R2CE_FORMAT);
+    HardSetup(&cs);
+    R2E_VertexFormat(&cs, FMT0_XYZC, 2 | (2UL << 3), 0, 0, R_OUTPUT_XYZW | R_OUTPUT_COLOR_0);
+    CHECK_INT(HardRun(&cs), R2CE_OK);           /* two units of s t */
+
+    /* WAIT_UNTIL on the display (CRTC_PFLIP, OV0_FLIP); the fence's own */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_WAIT_UNTIL, 1UL | (1UL << 11));
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_WAIT_UNTIL, R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN);
+    CHECK_INT(HardRun(&cs), R2CE_OK);
+
+    /* SE_VF_MIN_VTX_INDX: off the whitelist */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_SE_VF_MIN_VTX_INDX, 0x100);
+    CHECK_INT(HardRun(&cs), R2CE_REG);
+
+    /* LOAD_VBPNTR's attribute bit 15 */
+    HardSetup(&cs);
+    R2E_VertexFormat(&cs, 0, 0, 0, 0, R_OUTPUT_XYZW);
+    p = cs.ptr;
+    p[0] = R2_PKT3(R2_OP_3D_LOAD_VBPNTR, 2);
+    p[1] = 1;
+    p[2] = 2 | (2UL << 8) | (1UL << 15);
+    p[3] = VTX_GPU;
+    cs.ptr = p + 4;
+    CHECK_INT(HardRun(&cs), R2CE_ARRAYS);
+
+    /* PKT0 header bits 13-14 */
+    HardSetup(&cs);
+    p = cs.ptr;
+    p[0] = R2_PKT0(R_PP_TFACTOR_0, 0) | 0x2000UL;
+    p[1] = 0;
+    cs.ptr = p + 2;
+    CHECK_INT(HardRun(&cs), R2CE_REG);
+
+    /* a DRAW_INDX_2 at the very end: its INDX_BUFFER never comes */
+    HardSetup(&cs);
+    R2E_VertexFormat(&cs, 0, 0, 0, 0, R_OUTPUT_XYZW);
+    aos.gpu = VTX_GPU;
+    R2E_LoadVbpntr(&cs, 1, &aos);
+    R2E_DrawIndexed(&cs, TRI_CNTL, 3, IDX_GPU, 3);
+    cs.ptr -= 4;                                /* without INDX_BUFFER */
+    CHECK_INT(HardRun(&cs), R2CE_INDX);
+}
+
 int main(void)
 {
     test_headers();
@@ -1068,6 +1259,7 @@ int main(void)
     test_immd();
     test_arrays();
     test_rejects();
+    test_checker_hardening();
     test_ring_basic();
     RingStress(1, 97, 0, 0, "swap, NOP filler, slow GPU");
     RingStress(0, 97, R2RING_TYPE2_FILL, 0, "no swap, PACKET2 filler, slow GPU");

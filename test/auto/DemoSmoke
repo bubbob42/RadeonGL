@@ -1,0 +1,81 @@
+; DemoSmoke -- the demonstrators (demos/, `gmake demos rgl-lib`) through the
+; RadeonGL minigl.library from DEV:Libs/RadeonGL -- on a 68030 machine
+; (gmake autotest AUTOTEST_CPU=030) the 68020/68030 builds, DEV:For030/Demos/C
+; and DEV:Libs/RadeonGL030 -- with the null card (no
+; Radeon in the emulator), the packet checker on: each runs a fixed number
+; of frames and must end with rc 0 and "GL error 0x0"; its library log
+; (typed below) must say "RadeonGL null card" and "checker errors: 0", and
+; list no slot called but not implemented. Spinner, Glow and Landscape also
+; record frame 60 (RadeonGLDump: DEV:Test/demo-<name>.r2d) for r200view. Showcase runs every scene
+; (SCENEFRAMES). Last, Esc: Spinner without a frame count (capped at 30000
+; so a broken Esc cannot hang the run; the null card draws 3000 in 9 s) gets the Esc key through
+; input.device (DEV:Test/InputPoke, raw key 69) and must end long before
+; 30000 frames.
+;   gmake demos rgl-lib && gmake autotest T=DemoSmoke
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 100000
+Avail >NIL: FLUSH
+Set demos DEV:Demos
+Set glib DEV:Libs/RadeonGL
+CPU CHECK 68040 >NIL:
+If WARN
+  Set demos DEV:For030/Demos/C
+  Set glib DEV:Libs/RadeonGL030
+EndIf
+Echo "demos: $demos, library: $glib" >>DEV:Test/auto.log
+Version $glib/minigl.library FULL >>DEV:Test/auto.log
+Assign LIBS: $glib ADD
+Delete >NIL: DEV:Test/demo-#? RAM:demo-esc.#? QUIET
+
+Echo "=== Spinner FRAMES=120 ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/demo-spinner-lib.log
+SetEnv RadeonGLDump 60
+SetEnv RadeonGLDumpFile DEV:Test/demo-spinner.r2d
+$demos/Spinner FRAMES=120 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/demo-spinner-lib.log >>DEV:Test/auto.log
+
+Echo "=== Glow FRAMES=120 ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/demo-glow-lib.log
+SetEnv RadeonGLDump 60
+SetEnv RadeonGLDumpFile DEV:Test/demo-glow.r2d
+$demos/Glow FRAMES=120 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/demo-glow-lib.log >>DEV:Test/auto.log
+
+Echo "=== Landscape FRAMES=120 ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/demo-landscape-lib.log
+SetEnv RadeonGLDump 60
+SetEnv RadeonGLDumpFile DEV:Test/demo-landscape.r2d
+$demos/Landscape FRAMES=120 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/demo-landscape-lib.log >>DEV:Test/auto.log
+
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo "=== Showcase FRAMES=150 SCENEFRAMES=50 DEPTH=32 ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/demo-showcase-lib.log
+$demos/Showcase FRAMES=150 SCENEFRAMES=50 DEPTH=32 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/demo-showcase-lib.log >>DEV:Test/auto.log
+
+Echo "=== Spinner, ended by Esc ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/demo-esc-lib.log
+Echo >RAM:demo-esc.run "$demos/Spinner FRAMES=30000 >RAM:demo-esc.out"
+Echo >>RAM:demo-esc.run "Echo >RAM:demo-esc.done done"
+Run >NIL: Execute RAM:demo-esc.run
+Wait 6
+DEV:Test/InputPoke KEY=69
+Execute DEV:Test/WaitDone RAM:demo-esc.done
+Type RAM:demo-esc.out >>DEV:Test/auto.log
+Type DEV:Test/demo-esc-lib.log >>DEV:Test/auto.log
+
+Assign LIBS: $glib REMOVE
+UnSetEnv RadeonGLLog
+Delete >NIL: RAM:demo-esc.#? QUIET
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

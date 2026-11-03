@@ -1,0 +1,5 @@
+FailAt 21
+Stack 32000
+Echo "Spinner: a textured torus turning in depth, lit per vertex."
+Echo "Esc ends it."
+C/Spinner

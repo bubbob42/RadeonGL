@@ -135,6 +135,16 @@ LONG R2Cp_Start(const struct R2Hw *hw, ULONG ring_gpu, ULONG ring_dw, ULONG flag
     return R2_OK;
 }
 
+/* us microseconds on the host's clock (a reset bit held). */
+static void Hold(const struct R2Hw *hw, ULONG us)
+{
+    ULONG t;
+
+    t = hw->clock_us(hw->hw);
+    while (hw->clock_us(hw->hw) - t < us)
+        ;
+}
+
 LONG R2Cp_Stop(const struct R2Hw *hw, const struct R2CpSaved *s, ULONG timeout_us,
                ULONG *reset)
 {
@@ -147,10 +157,12 @@ LONG R2Cp_Stop(const struct R2Hw *hw, const struct R2CpSaved *s, ULONG timeout_u
     err = R2Cp_WaitIdle(hw, timeout_us);
     if (err != R2_OK)
     {
-        /* the CP alone; Rd() makes the write reach the chip before the
-         * bit is cleared again (Linux reads RBBM_SOFT_RESET back too) */
+        /* the CP alone; Rd() makes the write reach the chip, and the bit
+         * is held 200 us before it is cleared again (Linux reads
+         * RBBM_SOFT_RESET back and waits too) */
         Wr(hw, R_RBBM_SOFT_RESET, R_SOFT_RESET_CP);
         (void) Rd(hw, R_RBBM_SOFT_RESET);
+        Hold(hw, 200);
         Wr(hw, R_RBBM_SOFT_RESET, 0);
         (void) Rd(hw, R_RBBM_SOFT_RESET);
         *reset = 1;

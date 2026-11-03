@@ -12,6 +12,7 @@
 
 #include <exec/types.h>
 #include <exec/execbase.h>
+#include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 
@@ -31,6 +32,8 @@ int main(void)
     ULONG t;
     UWORD op;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     Printf("%s\n", (LONG) (ver + 6));
     base = (UBYTE *) SysBase;
     n = ((struct Library *) SysBase)->lib_NegSize / 6;

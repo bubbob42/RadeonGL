@@ -1,0 +1,174 @@
+; InstallRun -- the release package's Installer (DEV:Release/RadeonGL,
+; `gmake release-drawer`), unattended, twice, then the installed Test and
+; CardReport. NOVICE: every question takes the script's default.
+;
+; Run A meets a FOREIGN LIBS:minigl.library (a decoy text file): it must be
+; kept as LIBS:minigl.library.old, RadeonGL's put in its place. Run B meets
+; RadeonGL's own: nothing is renamed, the .old stays the decoy. A decoy
+; LIBS:Picasso96/Radeon.card (the Installer only checks that it exists)
+; keeps the "no Radeon driver" page away in A and B; run C has none and
+; must show that page (a (message) page: Proceed where About is) and go on.
+; The emulator has no Radeon: Test must run on the null card, CardReport
+; must say the board is not a Radeon.
+;
+; Run E: a NOVICE reinstall with RadeonGLCheck=0 set must keep it.
+; On a 68030 machine (gmake autotest AUTOTEST_CPU=030) the Installer must
+; pick the 68020/68030 build, and InstallCheck says so.
+;
+; WARNING: this writes LIBS:, LIBS:Picasso96, SYS:Utilities and ENVARC:
+; INSIDE THE AUTOTEST HDF, which survives the reboot. What was there is
+; saved in RAM:InstSave first and put back at the end.
+;
+;   gmake release-drawer && gmake autotest T=InstallRun
+; LIMIT 480
+FailAt 1000
+Wait 8
+Assign >NIL: T: RAM:
+Echo "=== machine ===" >DEV:Test/auto.log
+DEV:Test/ScreenInfo >>DEV:Test/auto.log
+Version LIBS:Picasso96API.library >>DEV:Test/auto.log
+Set inst SYS:System/Installer
+If NOT EXISTS $inst
+  Set inst SYS:Utilities/Installer
+EndIf
+Version $inst >>DEV:Test/auto.log
+Assign >NIL: Work: EXISTS
+If WARN
+  Set dest SYS:Utilities/RadeonGL
+  If NOT EXISTS SYS:Utilities
+    Set dest SYS:RadeonGL
+  EndIf
+Else
+  Set dest Work:RadeonGL
+EndIf
+Echo "expected drawer: $dest" >>DEV:Test/auto.log
+
+; ---- what is there now, saved; a clean slate, and the decoys -----------
+Delete >NIL: RAM:InstSave ALL QUIET
+MakeDir RAM:InstSave
+Copy >NIL: LIBS:minigl.library#? RAM:InstSave/ QUIET
+Copy >NIL: ENVARC:RadeonGLCheck RAM:InstSave/ QUIET
+Delete >NIL: $dest ALL QUIET
+Delete >NIL: $dest.info QUIET
+Delete >NIL: LIBS:minigl.library LIBS:minigl.library.old LIBS:minigl.library.old1 QUIET
+Delete >NIL: ENVARC:RadeonGLCheck ENV:RadeonGLCheck QUIET
+; (its text must not say RadeonGL: Search would take it for ours)
+Echo >LIBS:minigl.library "a decoy: some other minigl.library"
+Set madecard 0
+If NOT EXISTS LIBS:Picasso96/Radeon.card
+  Echo >LIBS:Picasso96/Radeon.card "a decoy Radeon driver"
+  Set madecard 1
+EndIf
+Delete >NIL: RAM:InstDone#? DEV:Test/inst-#?.ppm QUIET
+Stack 20000
+
+; ---- run A: over a foreign minigl.library -------------------------------
+Echo "=== A: first run (NOVICE), a foreign minigl.library in LIBS: ===" >>DEV:Test/auto.log
+CD DEV:Release/RadeonGL
+Run >NIL: Execute DEV:Test/InstallClicks RAM:InstDone1 a
+FailAt 100
+$inst SCRIPT DEV:Release/RadeonGL/Install APPNAME "RadeonGL" MINUSER NOVICE DEFUSER NOVICE NOPRETEND NOLOG
+Echo "  Installer RC $RC (0 = it reached its own (exit) page)" >>DEV:Test/auto.log
+FailAt 1000
+Echo >RAM:InstDone1 done
+Execute DEV:Test/InstallCheck $dest
+
+; ---- run B: over its own ------------------------------------------------
+Echo "=== B: second run (NOVICE), RadeonGL's minigl.library in LIBS: ===" >>DEV:Test/auto.log
+Wait 6
+Run >NIL: Execute DEV:Test/InstallClicks RAM:InstDone2 b
+FailAt 100
+$inst SCRIPT DEV:Release/RadeonGL/Install APPNAME "RadeonGL" MINUSER NOVICE DEFUSER NOVICE NOPRETEND NOLOG
+Echo "  Installer RC $RC (0 = it reached its own (exit) page)" >>DEV:Test/auto.log
+FailAt 1000
+Echo >RAM:InstDone2 done
+Execute DEV:Test/InstallCheck $dest
+Wait 6
+
+; ---- run C: no Radeon driver: the warning page, then on -----------------
+Echo "=== C: third run (NOVICE), no LIBS:Picasso96/Radeon.card ===" >>DEV:Test/auto.log
+If $madecard EQ 1
+  Delete >NIL: LIBS:Picasso96/Radeon.card QUIET
+EndIf
+CD DEV:Release/RadeonGL
+Run >NIL: Execute DEV:Test/InstallClicksMsg RAM:InstDone3 c
+FailAt 100
+$inst SCRIPT DEV:Release/RadeonGL/Install APPNAME "RadeonGL" MINUSER NOVICE DEFUSER NOVICE NOPRETEND NOLOG
+Echo "  Installer RC $RC (0 = it reached its own (exit) page)" >>DEV:Test/auto.log
+FailAt 1000
+Echo >RAM:InstDone3 done
+Execute DEV:Test/InstallCheck $dest
+Wait 6
+
+; ---- run D: another foreign library, an .old there already -------------
+Echo "=== D: fourth run (NOVICE), a foreign library again, .old taken ===" >>DEV:Test/auto.log
+Echo >LIBS:minigl.library "a second decoy: yet another minigl.library"
+CD DEV:Release/RadeonGL
+Run >NIL: Execute DEV:Test/InstallClicksMsg RAM:InstDone4 d
+FailAt 100
+$inst SCRIPT DEV:Release/RadeonGL/Install APPNAME "RadeonGL" MINUSER NOVICE DEFUSER NOVICE NOPRETEND NOLOG
+Echo "  Installer RC $RC (0 = it reached its own (exit) page)" >>DEV:Test/auto.log
+FailAt 1000
+Echo >RAM:InstDone4 done
+Execute DEV:Test/InstallCheck $dest
+Search >NIL: LIBS:minigl.library.old1 "a second decoy" QUIET
+If WARN
+  Echo "  FAILED LIBS:minigl.library.old1 is not the second foreign library" >>DEV:Test/auto.log
+Else
+  Echo "  ok     LIBS:minigl.library.old1 is the second foreign library" >>DEV:Test/auto.log
+EndIf
+Wait 6
+
+; ---- run E: a reinstall keeps the user's RadeonGLCheck=0 -----------------
+Echo "=== E: fifth run (NOVICE), RadeonGLCheck=0 set: it must stay ===" >>DEV:Test/auto.log
+SetEnv SAVE RadeonGLCheck 0
+CD DEV:Release/RadeonGL
+Run >NIL: Execute DEV:Test/InstallClicksMsg RAM:InstDone5 e
+FailAt 100
+$inst SCRIPT DEV:Release/RadeonGL/Install APPNAME "RadeonGL" MINUSER NOVICE DEFUSER NOVICE NOPRETEND NOLOG
+Echo "  Installer RC $RC (0 = it reached its own (exit) page)" >>DEV:Test/auto.log
+FailAt 1000
+Echo >RAM:InstDone5 done
+Search >NIL: ENVARC:RadeonGLCheck "0" QUIET
+If WARN
+  Echo "  FAILED ENVARC:RadeonGLCheck=0 lost" >>DEV:Test/auto.log
+Else
+  Echo "  ok     ENVARC:RadeonGLCheck=0 kept" >>DEV:Test/auto.log
+EndIf
+Delete >NIL: ENVARC:RadeonGLCheck ENV:RadeonGLCheck QUIET
+Wait 6
+
+; ---- the test drive: the windows a user sees, and the manual ------------
+Echo "=== the drawers on Workbench (DEV:Test/layout-<n>.ppm) ===" >>DEV:Test/auto.log
+SYS:Rexxc/rx >>DEV:Test/auto.log DEV:Test/ShowDrawers.rexx DEV:Release/RadeonGL $dest $dest/Demos $dest/Licences
+Run >NIL: SYS:Utilities/MultiView $dest/RadeonGL.guide
+Wait 6
+DEV:Test/Grab 0 0 800 600 DEV:Test/layout-guide.ppm
+SYS:Rexxc/rx "if show('P','MULTIVIEW.1') then address 'MULTIVIEW.1' 'QUIT'"
+Wait 2
+
+; ---- the installed drawer at work ---------------------------------------
+Echo "=== Test (the installed script; the null card here) ===" >>DEV:Test/auto.log
+CD $dest
+Execute Test >>DEV:Test/auto.log
+Echo "  Test RC $RC" >>DEV:Test/auto.log
+Echo "=== CardReport ===" >>DEV:Test/auto.log
+Execute CardReport >>DEV:Test/auto.log
+Echo "  CardReport RC $RC" >>DEV:Test/auto.log
+CD DEV:
+
+; ---- put everything back ------------------------------------------------
+Delete >NIL: $dest ALL QUIET
+Delete >NIL: $dest.info QUIET
+Delete >NIL: LIBS:minigl.library LIBS:minigl.library.old LIBS:minigl.library.old1 QUIET
+Delete >NIL: ENVARC:RadeonGLCheck ENV:RadeonGLCheck RAM:RadeonGL-#? QUIET
+If $madecard EQ 1
+  Delete >NIL: LIBS:Picasso96/Radeon.card QUIET
+EndIf
+Copy >NIL: RAM:InstSave/minigl.library#? LIBS: QUIET
+Copy >NIL: RAM:InstSave/RadeonGLCheck ENVARC: QUIET
+Copy >NIL: RAM:InstSave/RadeonGLCheck ENV: QUIET
+Delete >NIL: RAM:InstSave ALL QUIET
+Avail >NIL: FLUSH
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

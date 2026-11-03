@@ -1,0 +1,18 @@
+; GLQuakeNullLum -- GLQuake's 8-bit luminance lightmaps (-lm_LUMINANCE,
+; through RunNullX) on the null card: checker-clean, GL error 0, frame 400
+; dumped for r200view. MEASURED question (2026-11-03): half the lightmap
+; bytes of the default ARGB4444 -- is the bus the cost?
+; LIMIT 600
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/nullx-#?
+Echo "=== demo1 -lm_LUMINANCE ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 -lm_LUMINANCE
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

@@ -283,7 +283,8 @@ static void ReportRadeon(const struct PciCard *card, BOOL havePci, APTR scrMem, 
                radeon.how == MMIO_UNDECIDED ? (CONST_STRPTR)"UNDECIDED"
                : Mmio_Swap ? (CONST_STRPTR)"little-endian, the 68k swaps"
                            : (CONST_STRPTR)"right as read (no swap)",
-               radeon.how == MMIO_BY_MEMSIZE ? (CONST_STRPTR)"by CONFIG_MEMSIZE"
+               radeon.how == MMIO_BY_PCIMIRROR ? (CONST_STRPTR)"by the PCI mirror's vendor ID"
+               : radeon.how == MMIO_BY_MEMSIZE ? (CONST_STRPTR)"by CONFIG_MEMSIZE"
                : radeon.how == MMIO_BY_APER  ? (CONST_STRPTR)"by CONFIG_APER_0_BASE against BAR0"
                : radeon.how == MMIO_BY_APERSIZE ? (CONST_STRPTR)"by CONFIG_APER_SIZE"
                                                 : (CONST_STRPTR)"no test decided");
@@ -329,6 +330,7 @@ static ULONG LockCost(struct BitMap *bm, ULONG pairs, ULONG *moved, LONG *pri)
     ULONG i;
 
     *moved = 0;
+    *pri = FindTask(NULL)->tc_Node.ln_Pri;   /* also when the first lock fails */
     last = NULL;
     t0 = Clock_Now();
     for (i = 0; i < pairs; i++)
@@ -337,7 +339,7 @@ static ULONG LockCost(struct BitMap *bm, ULONG pairs, ULONG *moved, LONG *pri)
         if (lock == 0)
             break;
         if (i == 0)
-            *pri = FindTask(NULL)->tc_Node.ln_Pri;
+            *pri = FindTask(NULL)->tc_Node.ln_Pri;  /* inside the first lock */
         else if (ri.Memory != last)
             (*moved)++;
         last = ri.Memory;
@@ -590,6 +592,8 @@ int main(void)
     BOOL havePci;
     int rc;
 
+    if (((struct Process *) FindTask(NULL))->pr_CLI == 0)
+        return RETURN_FAIL;     /* the Workbench: no console to report to */
     args.log = NULL;
     args.hold = NULL;
     args.pairs = NULL;

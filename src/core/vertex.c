@@ -93,6 +93,7 @@ void Vtx_Split(struct Core *c)
     ULONG vd;
     ULONG i;
     ULONG k;
+    ULONG gen;
     ULONG *src;
 
     n = c->nverts;
@@ -143,6 +144,15 @@ void Vtx_Split(struct Core *c)
             save[i * vd + k] = src[k];
     }
     Close(c, keep);
+    /* the room first: a frame dropped in this flush took the state with
+     * it, which then goes ahead of the new packet */
+    gen = c->rebase_gen;
+    CORE_ROOM(c, 2 + vd * (CORE_IMMD_VERTS + 1));
+    if (c->rebase_gen != gen)
+    {
+        Core_Validate(c);
+        Hw_VertexFormat(c, c->units_on);
+    }
     Open(c);
     if (c->vptr == NULL)
         return;
@@ -168,14 +178,26 @@ void Core_Begin(struct Core *c, ULONG mode)
         return;
     }
     units = Core_UnitsOn(c);
-    Core_Validate(c);
-    Hw_VertexFormat(c, units);
-    Core_MarkTextures(c, units);
     c->units_on = units;
     c->vtx_dw = 4 + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);
     c->prim = mode;
     c->hwprim = Vtx_HwPrim(mode);
+    if (CORE_SCISSOR_EMPTY(c))
+    {
+        /* nothing to draw: the vertices go nowhere (Emit, Close) */
+        c->vbase = NULL;
+        c->vptr = NULL;
+        c->vlimit = NULL;
+        c->nverts = 0;
+        c->vfast = 0;
+        return;
+    }
+    CORE_ROOM(c, 2 + c->vtx_dw * (CORE_IMMD_VERTS + 1));
+    Core_Validate(c);
+    Hw_VertexFormat(c, units);
+    Core_MarkTextures(c, units);
     Open(c);
+    c->vfast = (c->cs->swap && c->vbase != NULL) ? 1UL : 0UL;
 }
 
 void Core_End(struct Core *c)
@@ -200,6 +222,7 @@ void Core_End(struct Core *c)
     c->prim = CORE_NO_PRIM;
     c->vbase = NULL;
     c->vptr = NULL;
+    c->vfast = 0;
 }
 
 /* x, y, z: float bit patterns */

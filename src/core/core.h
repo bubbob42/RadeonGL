@@ -42,11 +42,18 @@
 #define CORE_P_DEPTH      8
 #define CORE_T_DEPTH      8
 #define CORE_IMMD_VERTS   256     /* vertices reserved per glBegin; more are split */
+#define CORE_STATE_MAX    512     /* dwords the whole state takes at most (MEASURED 182: test_state_max) */
+#define CORE_DRAW_DW      64      /* an array draw's packets after the state */
 #define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
-#define CORE_UCACHE_BYTES (512UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
-#define CORE_UQ           256             /* cache entries, oldest first */
+#define CORE_UCACHE_BYTES (1024UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
+#define CORE_UQ           1024            /* cache entries, oldest first */
 #define CORE_UDIRTY       32              /* staged: ranges for the back end to copy */
-#define CORE_USLOTS       256             /* their lookup table (a power of two) */
+#define CORE_USLOTS       16384           /* their lookup table (a power of two): an insert
+                                           * takes its slot from whatever held it, so a
+                                           * small table loses live entries (MEASURED
+                                           * 2026-11-03: 256 slots cost misses; at 4096 a
+                                           * new hash function cost 22% more misses by
+                                           * which entries happened to collide) */
 
 /* One upload the cache holds: its key (two hashes of the packed dwords and
  * their count, a kind folded into the second) and where it is. */
@@ -186,6 +193,7 @@ struct Core
     ULONG error;            /* first error since glGetError, GL_NO_ERROR = 0 */
     ULONG tex_swap;         /* texel dwords stored byte-reversed (no aperture swap) */
     ULONG epoch;            /* GPU-idle epoch: bumped whenever the GPU is known idle */
+    ULONG rebase_gen;       /* counts Core_Forget: the GPU's state, or what was emitted, is gone */
 
     /* enables and state, in GL terms */
     ULONG enables;
@@ -237,6 +245,7 @@ struct Core
     ULONG prim;             /* GL mode, or CORE_NO_PRIM */
     ULONG hwprim;           /* R_VF_PRIM_* */
     ULONG units_on;         /* bit n: the vertex carries texture set n */
+    ULONG vfast;            /* glVertex may write straight into the packet (vtxfast.h) */
     ULONG vtx_dw;           /* dwords a vertex */
     ULONG *vbase;           /* first vertex of the open packet */
     ULONG *vptr;            /* where the next vertex goes */
@@ -328,6 +337,18 @@ void  Core_Error(struct Core *c, ULONG err);
 /* Emit every dirty register block (before a draw; tests call it too). */
 LONG  Core_Validate(struct Core *c);
 
+/* Room for the whole state and ndw dwords of draw packets, made BEFORE a
+ * draw validates or computes an address: a flush -- and a frame the back
+ * end drops, which asks for the whole state again (Core_Rebase) -- happens
+ * here, never between the state and its draw. A macro: every draw passes
+ * here (MEASURED: a call per draw cost GLQuake ~0.4 ms a frame). */
+#define CORE_ROOM(c, ndw) ((void) R2_ROOM((c)->cs, CORE_STATE_MAX + (ndw)))
+
+/* glScissor's box is empty while the scissor test is on: draws and clears
+ * touch nothing (the R200's box cannot be empty: hwstate.c). */
+ULONG Core_ScissorEmpty(struct Core *c);
+#define CORE_SCISSOR_EMPTY(c) (((c)->enables & EN_SCISSOR) && Core_ScissorEmpty(c))
+
 /* The host knows the GPU has finished everything emitted so far (a frame's
  * fence passed): every texture may be rewritten without waiting. */
 void  Core_GpuIdle(struct Core *c);
@@ -354,6 +375,11 @@ void  Core_UCacheCopied(struct Core *c);
  * addresses, and the whole state is emitted again. What was emitted before
  * holds the old addresses: the back end drops it. */
 void  Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gpu);
+
+/* The GPU's state is gone (a reset of its 3D blocks), or what was emitted
+ * never reached it (a dropped frame: Core_Rebase calls it): the whole state
+ * is emitted again, and a draw being built sends it ahead of itself. */
+void  Core_Forget(struct Core *c);
 
 /* --- State (state.c) ------------------------------------------------------------ */
 
@@ -468,6 +494,7 @@ void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y);
 /* --- Queries (get.c) --------------------------------------------------------------- */
 
 void Core_GetFloatv(struct Core *c, ULONG pname, float *out);
+ULONG Core_GetCount(ULONG pname);    /* values a glGet of pname returns */
 void Core_GetIntegerv(struct Core *c, ULONG pname, LONG *out);
 const char *Core_GetString(struct Core *c, ULONG name);
 

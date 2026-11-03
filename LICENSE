@@ -1,6 +1,67 @@
-MIT License
+RadeonGL -- licence
+===================
 
-Copyright (c) 2026 bubbob42
+RadeonGL is a minigl.library for the ATI Radeon R200 family on Picasso96.
+Copyright (c) 2026 Marcus Gerards.
+
+Which licence applies
+---------------------
+
+1. minigl.library as a whole -- the RadeonGL library, as shipped -- is
+   distributed under the Hyperion MiniGL Open Source License (section A).
+   It incorporates MiniGL: the shared-library shell (lib/shell.c follows
+   Steffen Haeuser's minigl.library shell) and the minigl.library 29.1
+   programming interface (the dispatch table, ABI 5, and the client SDK
+   headers in sdk/minigl-29.1), both under that licence. The demonstrators
+   and the card test (GLSmoke) link the SDK's import library, so as built
+   programs they fall under section A as well.
+
+2. As that licence requires:
+   - RadeonGL may only be compiled for, or incorporated in, code running
+     on AmigaOS;
+   - the functional source code of all modifications and improvements is
+     made publicly available to the Amiga developer community: RadeonGL's
+     complete source code is published at
+         https://github.com/bubbob42/RadeonGL
+     Anyone who changes RadeonGL and distributes the result must publish
+     the source code of those changes in the same way.
+
+3. RadeonGL's own code -- everything not derived from MiniGL or from a
+   third party: the GL core (src/core), the R200 layer (src/r200), the
+   card back end (lib/card.c, lib/rgl.c, lib/nullcard.c), the probes
+   (src/probe), the demonstrators (demos), the test programs and the tools
+   -- is in addition available under the MIT licence (section B), so that
+   it may be reused outside MiniGL too. Inside minigl.library, section A's
+   conditions apply to the whole.
+
+4. Third-party parts keep their own licences (section C).
+
+
+A. Hyperion MiniGL Open Source License
+--------------------------------------
+
+(C) 2000-2002 Hyperion
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will Hyperion or the authors be held liable for
+any damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, subject to the following conditions:
+
+1. MiniGL may only be compiled for/incorporated in code running on
+   AmigaOS. This only applies to MiniGL, you are free to port an
+   application using MiniGL to another OpenGL implementation on other
+   platforms.
+
+2. The functional source-code of all and any modifications and improvements
+   must be made publically available to the Amiga developer community.
+
+
+B. MIT licence (RadeonGL's own code)
+-----------------------------------
+
+Copyright (c) 2026 Marcus Gerards
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +80,142 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+C. Third-party parts
+--------------------
+
+C.1 The R200 command processor microcode (src/r200/r2ucode.c, generated
+    from linux-firmware radeon/R200_cp.bin): Copyright 2007-2009 Advanced
+    Micro Devices, Inc., MIT licence -- the full text is in
+    sdk/radeon-firmware/LICENSE (R200-Microcode.txt in the package).
+
+C.2 The R200 register and packet definitions (src/r200/r200reg.h,
+    r2pm4.h) follow these MIT-licensed headers; their notices, verbatim:
+
+    - Linux drivers/gpu/drm/radeon/radeon_reg.h (Linux 6.6) and
+      xf86-video-ati src/radeon_reg.h (6.14), the same notice:
+        Copyright 2000 ATI Technologies Inc., Markham, Ontario, and
+                       VA Linux Systems Inc., Fremont, California.
+
+        All Rights Reserved.
+
+        Permission is hereby granted, free of charge, to any person obtaining
+        a copy of this software and associated documentation files (the
+        "Software"), to deal in the Software without restriction, including
+        without limitation on the rights to use, copy, modify, merge,
+        publish, distribute, sublicense, and/or sell copies of the Software,
+        and to permit persons to whom the Software is furnished to do so,
+        subject to the following conditions:
+
+        The above copyright notice and this permission notice (including the
+        next paragraph) shall be included in all copies or substantial
+        portions of the Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+        EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+        MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+        NON-INFRINGEMENT.  IN NO EVENT SHALL ATI, VA LINUX SYSTEMS AND/OR
+        THEIR SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+        WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+        DEALINGS IN THE SOFTWARE.
+
+    - Linux drivers/gpu/drm/radeon/radeon_drv.h (Linux 4.4):
+         radeon_drv.h -- Private header for radeon driver -*- linux-c -*-
+
+        Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+        Copyright 2000 VA Linux Systems, Inc., Fremont, California.
+        All rights reserved.
+
+        Permission is hereby granted, free of charge, to any person obtaining a
+        copy of this software and associated documentation files (the "Software"),
+        to deal in the Software without restriction, including without limitation
+        the rights to use, copy, modify, merge, publish, distribute, sublicense,
+        and/or sell copies of the Software, and to permit persons to whom the
+        Software is furnished to do so, subject to the following conditions:
+
+        The above copyright notice and this permission notice (including the next
+        paragraph) shall be included in all copies or substantial portions of the
+        Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+        PRECISION INSIGHT AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+        OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+        ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+        DEALINGS IN THE SOFTWARE.
+
+        Authors:
+           Kevin E. Martin <martin@valinux.com>
+           Gareth Hughes <gareth@valinux.com>
+
+    - Mesa src/mesa/drivers/dri/r200/r200_reg.h (Mesa 21.3):
+        Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
+
+        The Weather Channel (TM) funded Tungsten Graphics to develop the
+        initial release of the Radeon 8500 driver under the XFree86 license.
+        This notice must be preserved.
+
+        Permission is hereby granted, free of charge, to any person obtaining
+        a copy of this software and associated documentation files (the
+        "Software"), to deal in the Software without restriction, including
+        without limitation the rights to use, copy, modify, merge, publish,
+        distribute, sublicense, and/or sell copies of the Software, and to
+        permit persons to whom the Software is furnished to do so, subject to
+        the following conditions:
+
+        The above copyright notice and this permission notice (including the
+        next paragraph) shall be included in all copies or substantial
+        portions of the Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+        EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+        MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+        IN NO EVENT SHALL THE COPYRIGHT OWNER(S) AND/OR ITS SUPPLIERS BE
+        LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+        OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+        WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+    - Linux drivers/gpu/drm/radeon/r100d.h and r200.c (Linux 6.6):
+        Copyright 2008 Advanced Micro Devices, Inc.
+        Copyright 2008 Red Hat Inc.
+        Copyright 2009 Jerome Glisse.
+
+        Permission is hereby granted, free of charge, to any person obtaining a
+        copy of this software and associated documentation files (the "Software"),
+        to deal in the Software without restriction, including without limitation
+        the rights to use, copy, modify, merge, publish, distribute, sublicense,
+        and/or sell copies of the Software, and to permit persons to whom the
+        Software is furnished to do so, subject to the following conditions:
+
+        The above copyright notice and this permission notice shall be included in
+        all copies or substantial portions of the Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+        THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+        OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+        ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+        OTHER DEALINGS IN THE SOFTWARE.
+
+        Authors: Dave Airlie
+                 Alex Deucher
+                 Jerome Glisse
+
+C.3 Not compiled into the library:
+    - sdk/minigl-29.1: the MiniGL 29.1 client SDK, which the demos and the
+      card test link (sdk/minigl-29.1/licences); in the repository and in
+      the release archive's Source drawer;
+    - sdk/ahi and sdk/cgx (AHI and CyberGraphX headers, their README
+      files): in the repository only;
+    - the openpci.library developer files (THOR-Software licence), which
+      the hardware probes need: neither in the repository nor in the
+      package. They may travel only as Thomas Richter's own archive (Aminet
+      driver/other/openpci68k.lha); README.md says where they go.
+
+GLQuake, the program RadeonGL is measured with, is not part of this
+repository or of the package (GNU General Public License version 2; by
+Frank Wille and Steffen Haeuser, after id Software's Quake).

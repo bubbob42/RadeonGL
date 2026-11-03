@@ -1,0 +1,7 @@
+FailAt 21
+Echo "RadeonGL card report: reads the Radeon under the Workbench screen."
+Echo "Nothing is written to the card."
+Echo ""
+C/R200Info LOG=RAM:RadeonGL-Report.txt
+Echo ""
+Echo "The report is RAM:RadeonGL-Report.txt -- please add it to a bug report."

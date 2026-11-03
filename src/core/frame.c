@@ -43,8 +43,9 @@ void Core_Clear(struct Core *c, ULONG mask)
         mask &= ~GL_DEPTH_BUFFER_BIT;   /* glDepthMask(FALSE) masks clears too */
     if ((mask & GL_COLOR_BUFFER_BIT) && c->color_mask == 0)
         mask &= ~GL_COLOR_BUFFER_BIT;
-    if (mask == 0)
-        return;
+    if (mask == 0 || CORE_SCISSOR_EMPTY(c))
+        return;                     /* the scissor box limits clears too */
+    CORE_ROOM(c, CORE_DRAW_DW);
     Core_Validate(c);               /* scissor, target and the rest up to date */
     cs = c->cs;
 

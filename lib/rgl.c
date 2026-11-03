@@ -56,9 +56,21 @@
 #include "r200reg.h"
 #include "nullcard.h"
 #include "card.h"
+#include "vtxfast.h"
+#include "../src/RadeonGL_rev.h"
 
+/* The library keeps minigl.library's version (29.1: what clients ask for);
+ * the date and the RadeonGL release come from the project's revision file,
+ * which only `gmake release` bumps. The CPU says which of the two builds it
+ * is (Makefile: RGL_CPU_040). */
+#ifdef RGL_CPU_040
+#define RGL_CPU "68040/68060"
+#else
+#define RGL_CPU "68020/68030 + 68881/68882"
+#endif
 const char Back_IdString[] =
-    "$VER: minigl.library 29.1 (02.11.2026) RadeonGL (R200 through P96; null card without one), dispatch ABI 5\r\n";
+    "$VER: minigl.library 29.1 (" DATE ") " VERS " (R200 through P96; null card without one), "
+    "dispatch ABI 5, for the " RGL_CPU "\r\n";
 
 /* The fake GPU address map of the null card. */
 #define RING_GPU    0x00100000UL
@@ -99,6 +111,9 @@ GLcontext Rgl_CurrentContext = 0;
 static struct Rgl *rgl = NULL;
 static ULONG choose_depth = 16;     /* mglChoosePixelDepth */
 static ULONG unimpl_early[(DISPATCH_SLOTS + 31) / 32];
+/* a context is being made or freed: one at a time, and none while another
+ * is torn down (P96Base, TimerBase and the card's globals are shared) */
+static ULONG rgl_busy = 0;
 
 /* --- Memory and the core's environment ------------------------------------------ */
 
@@ -251,8 +266,13 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, ", without the screen on the board: "); PutU(f, k->noscreen); Put(f, "\n");
     Put(f, "frames dropped: "); PutU(f, k->dropped); Put(f, " (bitmaps moved "); PutU(f, k->moved);
     Put(f, ", off the board "); PutU(f, k->offboard); Put(f, ")\n");
-    Put(f, "dwords: "); PutU(f, k->dwords); Put(f, "\n");
-    Put(f, "lock per flush: mean "); PutU(f, k->flushes ? k->lock_us_sum / k->flushes : 0);
+    Put(f, "dwords: ");
+    if (k->dwords_hi != 0)
+    {
+        PutU(f, k->dwords_hi); Put(f, " x 2^32 + ");
+    }
+    PutU(f, k->dwords); Put(f, "\n");
+    Put(f, "lock per flush: mean "); PutU(f, k->lock_flushes ? k->lock_us_sum / k->lock_flushes : 0);
     Put(f, " us, max "); PutU(f, k->lock_us_max); Put(f, " us; fence wait max ");
     PutU(f, k->fence_us_max); Put(f, " us\n");
     Put(f, "heap locks for texture uploads and the stream: "); PutU(f, k->vram_locks);
@@ -261,6 +281,11 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, r->core.stream_direct ? "into video RAM, a lock a draw\n"
                                  : "staged in fast RAM, copied at the flush\n");
     Put(f, "CP resets: "); PutU(f, k->cp_resets); Put(f, "\n");
+    if (Card_ScreensLeft != 0)
+    {
+        Put(f, "GL screens left open by a window on them (since the library loaded): ");
+        PutU(f, Card_ScreensLeft); Put(f, "\n");
+    }
     Put(f, "idle waits (flushes for texture hazards and stream wraps): ");
     PutU(f, r->core.stat_idle_waits); Put(f, "\n");
     Put(f, "locked draws: "); PutU(f, r->core.stat_lock_draws); Put(f, ", uploads: ");
@@ -268,7 +293,7 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     PutU(f, r->core.stat_stream_bytes); Put(f, "\n");
     PutCache(f, &r->core);
     Put(f, "texture heap: "); PutU(f, k->heap_size >> 20);
-    Put(f, k->b[CARD_HEAP].bpp == 4 ? " MB, a 32-bit bitmap" : " MB, in the screen's format");
+    Put(f, k->b[CARD_HEAP].p96 ? " MB, a 32-bit bitmap" : " MB, in the screen's format");
     Put(f, " (sizes P96 kept off the board first: "); PutU(f, k->heap_offboard); Put(f, ")\n");
     Put(f, "texture heap used at the end: "); PutU(f, r->core.heap.used);
     Put(f, ", at most: "); PutU(f, r->core.heap.peak);
@@ -284,7 +309,14 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     {
         Put(f, "CONTEXT LOST: ");
         Put(f, k->lost == CARD_LOST_CHECKER ? "the checker refused a packet"
-             : k->lost == CARD_LOST_FENCE ? "a fence timed out" : "the CP would not start or stop");
+             : k->lost == CARD_LOST_FENCE ? "a fence timed out"
+             : k->lost == CARD_LOST_EMIT ? "a command did not fit or was malformed (R2_E "
+             : k->lost == CARD_LOST_HEAP ? "Picasso96 moved the texture heap off a 32-byte boundary"
+             : "the CP would not start or stop");
+        if (k->lost == CARD_LOST_EMIT)
+        {
+            PutU(f, (ULONG) -k->err_code); Put(f, ")");
+        }
         Put(f, "\n");
         if (k->lost == CARD_LOST_CHECKER)
         {
@@ -437,6 +469,8 @@ static void WriteDump(struct Rgl *r)
 
 static void FreeRgl(struct Rgl *r)
 {
+    ULONG i;
+
     if (r->card.rec != NULL)
         FreeVec(r->card.rec);
     Core_Free(&r->core);
@@ -452,6 +486,10 @@ static void FreeRgl(struct Rgl *r)
     if (r->ring_mem != NULL)
         FreeVec(r->ring_mem);
     FreeVec(r);
+    /* what one program chose is not the next one's */
+    choose_depth = 16;
+    for (i = 0; i < (DISPATCH_SLOTS + 31) / 32; i++)
+        unimpl_early[i] = 0;
 }
 
 void Back_Init(void)
@@ -507,14 +545,15 @@ static BOOL NullCardOpen(struct Rgl *r, ULONG w, ULONG h, ULONG check, struct Co
     return TRUE;
 }
 
-/* The null card's window: the client takes its input from it. */
-static void NullCardWindow(struct Rgl *r)
+/* The null card's window: the client takes its input from it (GLQuake
+ * reads mglGetWindowHandle unchecked). FALSE: none. */
+static BOOL NullCardWindow(struct Rgl *r)
 {
     struct Screen *scr;
 
     scr = LockPubScreen(NULL);
     if (scr == NULL)
-        return;
+        return FALSE;
     r->win = OpenWindowTags(NULL,
         WA_PubScreen, (ULONG) scr,
         WA_Left, 20,
@@ -529,6 +568,7 @@ static void NullCardWindow(struct Rgl *r)
         WA_NoCareRefresh, TRUE,
         TAG_DONE);
     UnlockPubScreen(NULL, scr);
+    return (BOOL) (r->win != NULL);
 }
 
 void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
@@ -547,11 +587,21 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
 
     (void) offx;
     (void) offy;
-    if (rgl != NULL || w <= 0 || h <= 0 || w > 2048 || h > 2048)
+    if (w <= 0 || h <= 0 || w > 2048 || h > 2048)
         return NULL;
+    Forbid();
+    i = (rgl == NULL && !rgl_busy) ? 1UL : 0UL;
+    if (i)
+        rgl_busy = 1;
+    Permit();
+    if (!i)
+        return NULL;                /* one program at a time */
     r = (struct Rgl *) AllocVec(sizeof(*r), MEMF_ANY | MEMF_CLEAR);
     if (r == NULL)
+    {
+        rgl_busy = 0;
         return NULL;
+    }
     r->owner = FindTask(NULL);
     n = GetVar((STRPTR) "RadeonGLLog", (STRPTR) r->log, sizeof(r->log), 0);
     if (n <= 0)
@@ -573,6 +623,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         {
             Refused(r, res == CARD_FAILED ? why : "there is no R200 Radeon on a P96 board");
             FreeRgl(r);
+            rgl_busy = 0;
             return NULL;
         }
     }
@@ -584,6 +635,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         if (!NullCardOpen(r, (ULONG) w, (ULONG) h, check, &t))
         {
             FreeRgl(r);
+            rgl_busy = 0;
             return NULL;
         }
         n = GetVar((STRPTR) "RadeonGLDump", (STRPTR) r->dump_path, sizeof(r->dump_path), 0);
@@ -604,6 +656,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
                   r->real ? r->rad.heap_size : r->heap_size) != GL_NO_ERROR)
     {
         FreeRgl(r);
+        rgl_busy = 0;
         return NULL;
     }
     if (r->real)
@@ -629,39 +682,63 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     /* RadeonGLUploadCache=0: every locked upload written again (A/B) */
     if (GetVar((STRPTR) "RadeonGLUploadCache", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
         r->core.no_ucache = 1;
-    if (!r->real)
-        NullCardWindow(r);
+    if (!r->real && !NullCardWindow(r))
+    {
+        FreeRgl(r);
+        rgl_busy = 0;
+        return NULL;
+    }
     rgl = r;
+    rgl_busy = 0;
     return (void *) r;
 }
 
+/* Only the owner deletes its context. The SDK's mglDeleteContext reads
+ * the library's ONE currentContext pointer, shared by every opener, and
+ * zeroes it before the call: a second program whose mglCreateContext was
+ * refused (GLQuake's VID_Shutdown deletes unconditionally) would otherwise
+ * free the first one's context under it (audit 2026-11-03). */
 void Hook_MGLDeleteContext(GLcontext context)
 {
     struct Rgl *r;
+    ULONG mine;
 
     (void) context;
+    Forbid();
     r = rgl;
-    if (r == NULL)
+    mine = (r != NULL && r->owner == FindTask(NULL) && !rgl_busy) ? 1UL : 0UL;
+    if (mine)
+    {
+        rgl_busy = 1;
+        rgl = NULL;
+    }
+    else if (r != NULL)
+        Rgl_CurrentContext = (GLcontext) r;     /* the wrapper zeroed it */
+    Permit();
+    if (!mine)
         return;
+    Rgl_CurrentContext = 0;
     if (!r->real)
         R2Ring_Idle(&r->ring);
     WriteLog(r);
-    rgl = NULL;
-    Rgl_CurrentContext = 0;
     FreeRgl(r);
+    rgl_busy = 0;
 }
 
-/* LibClose: the owner died without mglDeleteContext. No file I/O here. */
+/* LibClose: the owner's last close without mglDeleteContext (shell.c
+ * counts its opens). No file I/O here. */
 void Back_ClientGone(struct Task *task)
 {
     struct Rgl *r;
 
     r = rgl;
-    if (r == NULL || r->owner != task)
+    if (r == NULL || r->owner != task || rgl_busy)
         return;
+    rgl_busy = 1;
     rgl = NULL;
     Rgl_CurrentContext = 0;
     FreeRgl(r);
+    rgl_busy = 0;
 }
 
 void Hook_MGLSwitchDisplay(GLcontext context)
@@ -828,15 +905,35 @@ void Hook_GLEnd(GLcontext context) { (void) context; GUARD; Core_End(C); }
 
 void Hook_GLVertex4f(GLcontext context, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
+    struct Core *c;
+    ULONG bx, by, bz;
+
     (void) context; GUARD;
+    c = C;
     if (FB(w) == 0x3f800000UL)
-        Core_VertexBits(C, FB(x), FB(y), FB(z));
+    {
+        bx = FB(x);
+        by = FB(y);
+        bz = FB(z);
+        CORE_VERTEX_FAST(c, bx, by, bz);    /* glVertex3f arrives here (w 1) */
+    }
     else
-        Core_Vertex4f(C, x, y, z, w);
+        Core_Vertex4f(c, x, y, z, w);
 }
 
 void Hook_GLVertex2fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_VertexBits(C, FV(v, 0), FV(v, 1), 0); }
-void Hook_GLVertex3fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_VertexBits(C, FV(v, 0), FV(v, 1), FV(v, 2)); }
+void Hook_GLVertex3fv(GLcontext context, GLfloat *v)
+{
+    struct Core *c;
+    ULONG bx, by, bz;
+
+    (void) context; GUARD;
+    c = C;
+    bx = FV(v, 0);
+    by = FV(v, 1);
+    bz = FV(v, 2);
+    CORE_VERTEX_FAST(c, bx, by, bz);
+}
 void Hook_GLVertex4fv(GLcontext context, GLfloat *v) { (void) context; GUARD; Core_Vertex4f(C, v[0], v[1], v[2], v[3]); }
 void Hook_GLTexCoord2f(GLcontext context, GLfloat s, GLfloat t) { (void) context; GUARD; CORE_TEXCOORD_BITS(C, 0, FB(s), FB(t)); }
 void Hook_GLTexCoord2fv(GLcontext context, GLfloat *v) { (void) context; GUARD; CORE_TEXCOORD_BITS(C, 0, FV(v, 0), FV(v, 1)); }
@@ -882,6 +979,7 @@ void Hook_GLNormal3fv(GLcontext context, GLfloat *n) { (void) context; GUARD; Co
 void Hook_MGLSetState(GLcontext context, GLenum cap, GLboolean state)
 {
     (void) context;
+    GUARD;
     Core_Enable(C, cap, state);
     NOTE("glEnable/glDisable", cap);
 }
@@ -1085,16 +1183,23 @@ void Hook_GLGetBooleanv(GLcontext context, GLenum pname, GLboolean *params)
 {
     float v[16];
     ULONG i;
+    ULONG e0;
+    ULONG e1;
 
     (void) context;
     GUARD;
     for (i = 0; i < 16; i++)
         v[i] = 0.0f;
+    /* GL leaves params alone when pname is refused */
+    e0 = rgl->core.error;
+    rgl->core.error = GL_NO_ERROR;
     Core_GetFloatv(C, pname, v);
-    params[0] = (v[0] != 0.0f) ? GL_TRUE : GL_FALSE;
-    for (i = 1; i < 16 && (pname == GL_MODELVIEW_MATRIX || pname == GL_PROJECTION_MATRIX
-                           || pname == GL_TEXTURE_MATRIX || (i < 4 && (pname == GL_VIEWPORT
-                           || pname == GL_COLOR_WRITEMASK || pname == GL_SCISSOR_BOX))); i++)
+    e1 = rgl->core.error;
+    rgl->core.error = (e0 != GL_NO_ERROR) ? e0 : e1;
+    NOTE("glGetBooleanv", pname);
+    if (e1 != GL_NO_ERROR)
+        return;
+    for (i = 0; i < Core_GetCount(pname); i++)
         params[i] = (v[i] != 0.0f) ? GL_TRUE : GL_FALSE;
 }
 
@@ -1107,5 +1212,27 @@ const GLubyte *Hook_GLGetString(GLcontext context, GLenum name)
 }
 
 GLenum Hook_GLGetError(GLcontext context) { (void) context; return rgl ? (GLenum) Core_GetError(C) : GL_NO_ERROR; }
-void Hook_GLFlush(GLcontext context) { (void) context; GUARD; R2Ring_Commit(&rgl->ring); }
-void Hook_GLFinish(GLcontext context) { (void) context; GUARD; R2Ring_Idle(&rgl->ring); }
+/* glFlush: on the Radeon a frame's commands run at mglSwitchDisplay, which
+ * a double-buffered context must reach before anything shows; the null
+ * card hands its ring over. glFinish: everything so far run and finished
+ * (a flush of its own on the Radeon). */
+void Hook_GLFlush(GLcontext context)
+{
+    (void) context;
+    GUARD;
+    if (!rgl->real)
+        R2Ring_Commit(&rgl->ring);
+}
+
+void Hook_GLFinish(GLcontext context)
+{
+    (void) context;
+    GUARD;
+    if (IN_BEGIN(C))
+    {
+        Core_Error(C, GL_INVALID_OPERATION);
+        return;
+    }
+    if (rgl->real ? Card_Flush(&rgl->rad, FALSE) == R2_OK : R2Ring_Idle(&rgl->ring) == R2_OK)
+        Core_GpuIdle(C);
+}
