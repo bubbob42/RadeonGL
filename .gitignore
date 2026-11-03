@@ -66,3 +66,23 @@ reference/*.doc
 # AHI and CyberGraphX headers: only GLQuake used them (../RadeonGL-GLQuake)
 /sdk/ahi/
 /sdk/cgx/
+
+# tools/ the build never calls (the user, 2026-11-03): icon makers, analysis
+# and the starter's own; the build's 14 scripts stay in the repository
+/tools/README.md
+/tools/amiga_icon.py
+/tools/census.py
+/tools/gen_glconst.py
+/tools/icon_crop.py
+/tools/icon_sheet.py
+/tools/icontool.py
+/tools/make_gencat_icon.py
+/tools/make_guide_icon.py
+/tools/make_install_icon.py
+/tools/make_release_icon.py
+/tools/make_run_icons.py
+/tools/merge_glowicon.py
+/tools/png_read.py
+/tools/ppm2png.py
+/tools/profile.py
+/tools/vamos-retry
