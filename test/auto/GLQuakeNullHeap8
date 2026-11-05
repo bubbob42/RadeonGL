@@ -1,0 +1,21 @@
+; GLQuakeNullHeap8 -- GLQuakeNull1 on an 8 MB texture heap (RadeonGLHeapMax),
+; the heap RadeonGL 0.4 got on an 8-bit Workbench. demo1 needs about 8.7 MB:
+; textures are refused, and the run must still end (0.4 froze there on the
+; A4000D). The library log must show "allocations refused" above 0.
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/null-#?
+Echo "=== demo1, 8 MB heap ===" >>DEV:Test/auto.log
+SetEnv RadeonGLHeapMax 8
+Run >NIL: Execute DEV:Test/RunNull demo1
+Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
+UnSetEnv RadeonGLHeapMax
+Type DEV:Test/null-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo1-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

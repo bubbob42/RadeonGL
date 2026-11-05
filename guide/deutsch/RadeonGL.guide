@@ -1,5 +1,5 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.4 (3.11.2026)
+@$VER: RadeonGL.guide 0.5 (5.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
@@ -548,6 +548,10 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.5 (5.11.2026)
+    * 16 MB für Texturen auch auf einer 8- oder 16-Bit-Workbench: 0.4
+      bekam dort 8 MB, und GLQuake zeigte weiße Menütexte und fror ein
 
 0.4 (3.11.2026)
     * erste Veröffentlichung

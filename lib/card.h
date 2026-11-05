@@ -152,6 +152,8 @@ struct Card
 
 extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
 extern ULONG Card_NoHeap32;     /* test switch (RadeonGLHeap32=0): skip the 32-bit heap */
+extern ULONG Card_HeapMax;      /* test switch (RadeonGLHeapMax=MB): a smaller heap; 0 = 16 MB */
+extern ULONG Card_HeapNarrow;   /* test switch (RadeonGLHeapNarrow=1): only 0.4's narrow heap, which froze */
 
 #define CARD_LOST_CHECKER  1    /* the checker refused a packet */
 #define CARD_LOST_FENCE    2    /* a fence timed out */

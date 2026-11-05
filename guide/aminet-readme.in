@@ -5,6 +5,7 @@ Type:         driver/video
 Version:      @VERSION@
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
+Replaces:     driver/video/RadeonGL.lha
 Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
               Picasso96 3.6+ (Radeon.card); a 68040 or 68060 with FPU,
               or a 68020/68030 with 68881/68882 (a second build);
@@ -135,6 +136,9 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.5 (5.11.2026)
+  - 16 MB of textures on 8- and 16-bit Workbenches too
 
 0.4 (3.11.2026)
   - first release

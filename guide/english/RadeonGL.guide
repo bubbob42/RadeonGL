@@ -1,5 +1,5 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.4 (3.11.2026)
+@$VER: RadeonGL.guide 0.5 (5.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
@@ -518,6 +518,10 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.5 (5.11.2026)
+    * 16 MB of texture memory on an 8- or 16-bit Workbench too: 0.4 got
+      8 MB there, and GLQuake showed white menu text and froze
 
 0.4 (3.11.2026)
     * first release

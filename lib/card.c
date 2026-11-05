@@ -453,6 +453,8 @@ static LONG Peek(APTR ctx, ULONG gpu, ULONG *val)
 /* GL screens a visitor window kept open at Card_Close (for the log). */
 ULONG Card_ScreensLeft = 0;
 ULONG Card_NoHeap32 = 0;
+ULONG Card_HeapMax = 0;
+ULONG Card_HeapNarrow = 0;
 
 /* --- the command buffer --------------------------------------------------------------- */
 
@@ -1009,6 +1011,7 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
     ULONG id;
     ULONG fmt;
     ULONG size;
+    ULONG top;
     ULONG want;
     BOOL ok;
 
@@ -1126,17 +1129,22 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
     /* the heap, until P96 places one on the board (a bitmap it cannot or
      * will not place stays in fast RAM): 16 MB as a 32-bit friend of a
      * 32-bit Workbench; else the GL screen's format, 16 MB down to 4 MB in
-     * 2 MB steps, each with wide rows as a friend, then moved on by a blit;
-     * last RadeonGL 0.4's 4096-byte rows, 16, 8, 4 MB */
+     * 2 MB steps, each with wide rows as a friend, then moved on by a blit.
+     * Nothing else: RadeonGL 0.4's 4096-byte rows (16, 8, 4 MB) froze
+     * GLQuake on the A4000D's 8-bit Workbench every time, at 8 MB, where
+     * the same 8 MB with 8192-byte rows ran demo1 through (2026-11-05,
+     * 0.4 and this code alike); a refusal beats a freeze. The narrow heap
+     * stays for investigation only (RadeonGLHeapNarrow=1). */
+    top = (Card_HeapMax >= 4 && Card_HeapMax < 16) ? Card_HeapMax << 20 : 16UL << 20;
     ok = FALSE;
-    if (!Card_NoHeap32)
-        ok = HeapTry(k, 16UL << 20, CARD_HEAP_WB32);
-    for (size = 16UL << 20; !ok && size >= (4UL << 20); size -= 2UL << 20)
+    if (!Card_NoHeap32 && !Card_HeapNarrow)
+        ok = HeapTry(k, top, CARD_HEAP_WB32);
+    for (size = top; !ok && !Card_HeapNarrow && size >= (4UL << 20); size -= 2UL << 20)
     {
         if (HeapTry(k, size, CARD_HEAP_WIDE) || HeapTry(k, size, CARD_HEAP_BLIT))
             ok = TRUE;
     }
-    for (size = 16UL << 20; !ok && size >= (4UL << 20); size >>= 1)
+    for (size = top; !ok && Card_HeapNarrow && size >= (4UL << 20); size >>= 1)
     {
         if (HeapTry(k, size, CARD_HEAP_NARROW))
             ok = TRUE;

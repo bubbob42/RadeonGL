@@ -523,15 +523,17 @@ void Back_Init(void)
 
 /* The null card's ring and heap in fast RAM, and its checker. FALSE when
  * there is no memory for them. */
-static BOOL NullCardOpen(struct Rgl *r, ULONG w, ULONG h, ULONG check, struct CoreTarget *t)
+static BOOL NullCardOpen(struct Rgl *r, ULONG w, ULONG h, ULONG check, ULONG heap_max,
+                         struct CoreTarget *t)
 {
     struct R2ChkCfg cfg;
     ULONG pitch;
     ULONG i;
 
     r->ring_mem = (ULONG *) AllocVec(RING_DW * 4, MEMF_ANY | MEMF_CLEAR);
-    /* the texture heap: as much of 32 MB as there is */
-    for (r->heap_size = 32UL << 20; r->heap_size >= (4UL << 20); r->heap_size >>= 1)
+    /* the texture heap: as much of 32 MB as there is (or of RadeonGLHeapMax) */
+    r->heap_size = (heap_max >= 4 && heap_max < 32) ? heap_max << 20 : 32UL << 20;
+    for (; r->heap_size >= (4UL << 20); r->heap_size >>= 1)
     {
         r->heap_mem = (ULONG *) AllocVec(r->heap_size, MEMF_ANY);
         if (r->heap_mem != NULL)
@@ -604,6 +606,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     char why[96];
     char which[12];
     ULONG check;
+    ULONG heap_max;
     ULONG res;
     LONG n;
     ULONG i;
@@ -635,6 +638,12 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     check = 1;
     if (GetVar((STRPTR) "RadeonGLCheck", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
         check = 0;
+    /* a test switch: RadeonGLHeapMax=n caps the texture heap at n MB (4 and
+     * up), to try a game on the heap a smaller board or Workbench gives */
+    heap_max = 0;
+    n = GetVar((STRPTR) "RadeonGLHeapMax", (STRPTR) flag, sizeof(flag), 0);
+    for (i = 0; n > 0 && i < (ULONG) n && flag[i] >= '0' && flag[i] <= '9'; i++)
+        heap_max = heap_max * 10 + (ULONG) (flag[i] - '0');
 
     /* the Radeon, unless told otherwise; the null card without one */
     which[0] = 0;
@@ -646,6 +655,10 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
          * 32-bit Workbench takes the way an 8- or 16-bit one must */
         Card_NoHeap32 = (GetVar((STRPTR) "RadeonGLHeap32", (STRPTR) flag, sizeof(flag), 0) > 0
                          && flag[0] == '0') ? 1UL : 0UL;
+        Card_HeapMax = heap_max;
+        /* RadeonGLHeapNarrow=1: straight to the last rung, 0.4's narrow heap */
+        Card_HeapNarrow = (GetVar((STRPTR) "RadeonGLHeapNarrow", (STRPTR) flag, sizeof(flag), 0) > 0
+                           && flag[0] == '1') ? 1UL : 0UL;
         res = Card_Open(&r->rad, (ULONG) w, (ULONG) h, choose_depth, check, why, sizeof(why));
         if (res == CARD_FAILED
             || (res == CARD_NOT_RADEON && (which[0] == 'r' || which[0] == 'R')))
@@ -661,7 +674,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         Card_Target(&r->rad, &t);
     else
     {
-        if (!NullCardOpen(r, (ULONG) w, (ULONG) h, check, &t))
+        if (!NullCardOpen(r, (ULONG) w, (ULONG) h, check, heap_max, &t))
         {
             FreeRgl(r);
             rgl_busy = 0;
