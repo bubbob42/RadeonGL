@@ -75,23 +75,23 @@ Picasso96. Frames a second:
 
 | Demo | Screen | Check on | Check off | Direct | Direct, 8-bit lightmaps |
 |---|---|---:|---:|---:|---:|
-| demo1 | 320 x 240 | 18.7 | 23.7 | 24.2 | 24.9 |
-| demo2 | 320 x 240 |  | 21.1 |  | 21.7 |
-| demo3 | 320 x 240 |  | 20.9 |  | 22.3 |
-| demo1 | 640 x 480 |  | 21.4 |  | 22.5 |
-| demo1 | 1280 x 720 |  | 18.4 |  | 19.8 |
+| demo1 | 320 x 240 | 19.1 | 24.4 | 24.9 | 25.7 |
+| demo2 | 320 x 240 |  | 21.7 |  | 22.3 |
+| demo3 | 320 x 240 |  | 21.5 |  | 22.9 |
+| demo1 | 640 x 480 |  | 23.7 |  | 24.9 |
+| demo1 | 1280 x 720 |  | 23.5 |  | 24.4 |
 
 - **Check on:** RadeonGL as installed. **Check off:** `RadeonGLCheck=0`.
 - **Direct:** `RadeonGLDirect=1` as well: about eight short Picasso96 locks
   a frame instead of one.
 - **8-bit lightmaps:** GLQuake started with `-lm_LUMINANCE` (id's own
   default; the Amiga port changed it to 16 bit).
-- **The 68020/68030 build**, on the same 68060 for comparison: demo1 16.8
-  (check on), 22.1 (check off), 23.2 (direct, 8-bit lightmaps). A real
+- **The 68020/68030 build**, on the same 68060 for comparison: demo1 17.1
+  (check on), 22.8 (check off), 23.7 (direct, 8-bit lightmaps). A real
   68030 is far slower than that.
 
-The 68060 sets the pace, not the Radeon: sixteen times the pixels cost a
-few frames a second.
+The 68060 sets the pace, not the Radeon: sixteen times the pixels cost
+about one frame a second.
 
 ## Requirements
 

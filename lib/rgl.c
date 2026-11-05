@@ -293,6 +293,14 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, r->core.stream_direct ? "into video RAM, a lock a draw\n"
                                  : "staged in fast RAM, copied at the flush\n");
     Put(f, "CP resets: "); PutU(f, k->cp_resets); Put(f, "\n");
+    if (k->overlap)
+    {
+        Put(f, "overlap: on; frames the Radeon finished after the unlock: "); PutU(f, k->ov_frames);
+        Put(f, ", of them still drawing when the next lock got through: "); PutU(f, k->ov_waits);
+        Put(f, "\n");
+    }
+    else
+        Put(f, "overlap: off (RadeonGLOverlap=0)\n");
     if (Card_ScreensLeft != 0)
     {
         Put(f, "GL screens left open by a window on them (since the library loaded): ");
@@ -651,8 +659,8 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     res = CARD_NOT_RADEON;
     if (which[0] != 'n' && which[0] != 'N')
     {
-        /* a test switch: RadeonGLHeap32=0 skips the 32-bit heap, so a
-         * 32-bit Workbench takes the way an 8- or 16-bit one must */
+        /* a test switch: RadeonGLHeap32=0 skips the last-resort heap as a
+         * friend of a 32-bit Workbench (card.c, the heap ladder) */
         Card_NoHeap32 = (GetVar((STRPTR) "RadeonGLHeap32", (STRPTR) flag, sizeof(flag), 0) > 0
                          && flag[0] == '0') ? 1UL : 0UL;
         Card_HeapMax = heap_max;
@@ -670,6 +678,11 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         }
     }
     r->real = (res == CARD_OK) ? 1 : 0;
+    /* RadeonGLOverlap=0: every flush waits for the Radeon before the
+     * unlock (card.h) */
+    if (r->real)
+        r->rad.overlap = (GetVar((STRPTR) "RadeonGLOverlap", (STRPTR) flag, sizeof(flag), 0) > 0
+                          && flag[0] == '0') ? 0UL : 1UL;
     if (r->real)
         Card_Target(&r->rad, &t);
     else
@@ -1275,6 +1288,6 @@ void Hook_GLFinish(GLcontext context)
         Core_Error(C, GL_INVALID_OPERATION);
         return;
     }
-    if (rgl->real ? Card_Flush(&rgl->rad, FALSE) == R2_OK : R2Ring_Idle(&rgl->ring) == R2_OK)
+    if (rgl->real ? Card_WaitIdle(&rgl->rad) == R2_OK : R2Ring_Idle(&rgl->ring) == R2_OK)
         Core_GpuIdle(C);
 }

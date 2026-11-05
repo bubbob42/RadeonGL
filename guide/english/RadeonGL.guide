@@ -1,12 +1,12 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.5 (5.11.2026)
+@$VER: RadeonGL.guide 0.6 (5.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
 
 @node Main "RadeonGL"
 
-@{b}RadeonGL 0.4@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
+@{b}RadeonGL 0.6@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
 
 RadeonGL is a minigl.library that draws with the 3D engine of an ATI
 Radeon from the R200 family, on a graphics card that Picasso96 drives. It
@@ -279,6 +279,13 @@ that is not set means the default.
 @{b}RadeonGLLocked@{ub}  (default: on)
     0 draws a program's vertex arrays the slow, direct way (for
     comparing, or if indexed drawing misbehaves).
+
+@{b}RadeonGLOverlap@{ub}  (default: on)
+    0 makes every frame wait until the Radeon has drawn it before
+    RadeonGL lets go of the card. On, the Radeon finishes a frame while
+    the processor builds the next: GLQuake demo1 at 1280 x 720 went from
+    19.9 to 23.5 fps on the test machine. Off is for comparing, or if
+    pictures go wrong.
 @endnode
 
 @node Speed "Speed"
@@ -294,22 +301,22 @@ MHz on a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2,
 Picasso96), frames a second:
 
     Demo   Screen       Check on  Check off  Direct  Direct, 8-bit LM
-    demo1  320 x 240        18.7       23.7    24.2              24.9
-    demo2  320 x 240           -       21.1       -              21.7
-    demo3  320 x 240           -       20.9       -              22.3
-    demo1  640 x 480           -       21.4       -              22.5
-    demo1  1280 x 720          -       18.4       -              19.8
+    demo1  320 x 240        19.1       24.4    24.9              25.7
+    demo2  320 x 240           -       21.7       -              22.3
+    demo3  320 x 240           -       21.5       -              22.9
+    demo1  640 x 480           -       23.7       -              24.9
+    demo1  1280 x 720          -       23.5       -              24.4
 
 Check on: RadeonGL as installed. Check off: RadeonGLCheck=0. Direct:
 RadeonGLDirect=1 as well. 8-bit LM: 8-bit lightmaps, GLQuake started with
 -lm_LUMINANCE (id's own default; the Amiga port changed it to 16 bit).
 
 The build for the 68020/68030, on the same 68060 for comparison: demo1
-16.8 (check on), 22.1 (check off), 23.2 (direct, 8-bit LM). A real 68030
+17.1 (check on), 22.8 (check off), 23.7 (direct, 8-bit LM). A real 68030
 is far slower than that; its figures will follow.
 
-The Radeon is not what sets the pace: sixteen times the pixels cost only
-a few frames a second. The 68060 is: it runs the game, prepares every
+The Radeon is not what sets the pace: sixteen times the pixels cost
+about one frame a second. The 68060 is: it runs the game, prepares every
 draw for the card, and writes the commands and vertices into the card's
 memory over the Zorro bus at about 9 MB a second.
 
@@ -518,6 +525,12 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.6 (5.11.2026)
+    * the Radeon finishes a frame while the processor builds the next:
+      GLQuake demo1 at 1280 x 720 from 19.9 to 23.5 fps (RadeonGLOverlap)
+    * the texture memory goes beside the program's own screen, whatever
+      the Workbench's screen mode
 
 0.5 (5.11.2026)
     * 16 MB of texture memory on an 8- or 16-bit Workbench too: 0.4 got

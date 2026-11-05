@@ -118,6 +118,18 @@ struct Card
     ULONG vram_lock;            /* Card_VramBegin holds the heap */
     ULONG reload_ucode;         /* a reset: the microcode again before the CP starts */
 
+    /* The overlap (on unless RadeonGLOverlap=0): a flush kicks the frame and
+     * unlocks without waiting; the Radeon finishes it while the 68k builds
+     * the next. The next lock of any bitmap settles it (fence, CP stop,
+     * resets) before anything is written: a P96 lock waits for the 3D
+     * engine anyway (Overlap probe B), and Radeon.card's 2D is right with
+     * the CP on (C). Card_WaitIdle and Card_Close wait as before. */
+    ULONG overlap;
+    ULONG pending;              /* a kicked frame not yet settled */
+    ULONG pend_seq;             /* its fence */
+    ULONG drop_next;            /* a settle reset the engine: the commands built are stale */
+    ULONG ov_frames, ov_waits;  /* for the log: frames left running; settles that waited */
+
     ULONG check;                /* run the packet checker before the CP */
     struct R2ChkCfg cfg;
     struct R2ChkState chk;

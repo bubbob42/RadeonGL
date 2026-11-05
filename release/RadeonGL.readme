@@ -2,7 +2,7 @@ Short:        minigl.library for R200 Radeons on P96
 Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
 Author:       marcus.gerards@googlemail.com (Marcus Gerards)
 Type:         driver/video
-Version:      0.5
+Version:      0.6
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
@@ -12,7 +12,7 @@ Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
               AmigaOS 3.1+ (tested on 3.2).
 Kurz:         minigl.library fuer R200-Radeons an P96
 
-RadeonGL 0.5  --  5.11.2026
+RadeonGL 0.6  --  5.11.2026
 
 
 WHAT IT IS
@@ -82,17 +82,17 @@ CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96), frames
 a second:
 
     Demo   Screen       Check on  Check off  Direct  Direct, 8-bit LM
-    demo1  320 x 240        18.7       23.7    24.2              24.9
-    demo2  320 x 240           -       21.1       -              21.7
-    demo3  320 x 240           -       20.9       -              22.3
-    demo1  640 x 480           -       21.4       -              22.5
-    demo1  1280 x 720          -       18.4       -              19.8
+    demo1  320 x 240        19.1       24.4    24.9              25.7
+    demo2  320 x 240           -       21.7       -              22.3
+    demo3  320 x 240           -       21.5       -              22.9
+    demo1  640 x 480           -       23.7       -              24.9
+    demo1  1280 x 720          -       23.5       -              24.4
 
 Check on: RadeonGL as installed. Check off: RadeonGLCheck=0. Direct:
 RadeonGLDirect=1 as well. 8-bit LM: 8-bit lightmaps, GLQuake started with
 -lm_LUMINANCE (id's own default; the Amiga port changed it to 16 bit).
 The 68060 sets the pace, not the Radeon. The 68020/68030 build on the
-same 68060: 16.8 / 22.1 / 23.2 (check on / off / direct, 8-bit LM).
+same 68060: 17.1 / 22.8 / 23.7 (check on / off / direct, 8-bit LM).
 
 
 INSTALLATION
@@ -136,6 +136,10 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.6 (5.11.2026)
+  - up to 18% faster: the Radeon draws while the CPU builds the next frame
+  - texture memory independent of the Workbench's screen mode
 
 0.5 (5.11.2026)
   - 16 MB of textures on 8- and 16-bit Workbenches too

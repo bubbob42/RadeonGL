@@ -572,7 +572,72 @@ static void CopyUCache(struct Card *k)
 
 /* --- the flush ------------------------------------------------------------------------ */
 
-LONG Card_Flush(struct Card *k, BOOL present)
+/* The CP off again, everything as found; the 3D blocks reset only if the
+ * engine stays busy. TRUE when a reset discarded the 3D state: the core
+ * sends everything again (not while closing: the core is gone), the
+ * checker starts over, and the next lock loads the microcode before the
+ * CP starts. */
+static BOOL StopCp(struct Card *k, BOOL closing)
+{
+    ULONG tf;
+    ULONG reset;
+
+    tf = R2Cp_Stop(&k->hw, &k->saved, TIMEOUT_US, &reset);
+    if (reset)
+        k->cp_resets++;
+    if (tf != R2_OK && !Reset3D(k))
+        k->lost = CARD_LOST_CP;
+    if (!reset && tf == R2_OK)
+        return FALSE;
+    if (!closing)
+    {
+        Core_Forget(k->core);
+        R2Chk_Reset(&k->chk);
+    }
+    k->reload_ucode = 1;
+    return TRUE;
+}
+
+/* The frame the last flush kicked (k->pending): its fence, then the CP
+ * off. The caller holds a lock, so P96 draws nothing meanwhile. After a
+ * reset the commands built since that flush assumed state the engine has
+ * lost: the next flush drops them (drop_next). */
+static void Settle(struct Card *k, BOOL closing)
+{
+    ULONG t0;
+    ULONG us;
+
+    k->pending = 0;
+    if (!R2Ring_FenceDone(&k->ring, k->pend_seq))
+        k->ov_waits++;
+    t0 = HwClock(k);
+    if (R2Ring_WaitFence(&k->ring, k->pend_seq) != R2_OK)
+        k->lost = CARD_LOST_FENCE;
+    us = HwClock(k) - t0;
+    if (us > k->fence_us_max)
+        k->fence_us_max = us;
+    if (StopCp(k, closing) && !closing)
+        k->drop_next = 1;
+}
+
+/* Settle outside a flush, under a lock of its own (the ring's, wherever
+ * P96 has it). */
+static void SettleAlone(struct Card *k, BOOL closing)
+{
+    BOOL locked;
+
+    if (!k->pending)
+        return;
+    locked = LockBm(k, CARD_RING, TRUE);
+    k->clock_base = Ticks();
+    Settle(k, closing);
+    if (locked)
+        UnlockBm(k, CARD_RING);
+}
+
+/* One flush. wait: the old way, the Radeon done before the unlock (always
+ * without the overlap); else the frame is kicked and left running. */
+static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
 {
     struct CoreScreen s;
     volatile ULONG *dst;
@@ -585,10 +650,8 @@ LONG Card_Flush(struct Card *k, BOOL present)
     ULONG n;
     ULONG i;
     ULONG t0;
-    ULONG tf;
     ULONG us;
     ULONG seq;
-    ULONG reset;
     ULONG tail;
     BOOL scr_ok;
     LONG e;
@@ -646,7 +709,24 @@ LONG Card_Flush(struct Card *k, BOOL present)
         || !LockBm(k, CARD_HEAP, FALSE))
     {
         UnlockAll(k);
+        SettleAlone(k, FALSE);
         k->offboard++;
+        Drop(k);
+        k->drop_next = 0;
+        k->in_flush = 0;
+        return R2_OK;
+    }
+
+    /* 1b. the frame the last flush kicked: done before anything is written
+     * (the lock has waited for the 3D engine already, probe B) */
+    if (k->pending)
+        Settle(k, FALSE);
+    if (k->lost != 0)
+        goto unlock;
+    if (k->drop_next)
+    {
+        UnlockAll(k);
+        k->drop_next = 0;
         Drop(k);
         k->in_flush = 0;
         return R2_OK;
@@ -784,6 +864,23 @@ LONG Card_Flush(struct Card *k, BOOL present)
     e = CopyCommands(k, n);
     if (e == R2_OK)
         e = R2Ring_Fence(&k->ring, &seq);
+    if (k->dwords + n < k->dwords)
+        k->dwords_hi++;
+    k->dwords += n;
+    if (e == R2_OK && !wait)
+    {
+        /* 7. the overlap: the CP gets all of it, the locks go, and the
+         * Radeon draws on while the 68k builds the next frame; the next
+         * lock settles it */
+        e = R2Ring_Commit(&k->ring);
+        if (e == R2_OK)
+        {
+            k->pending = 1;
+            k->pend_seq = seq;
+            k->ov_frames++;
+            goto unlock;
+        }
+    }
     t0 = HwClock(k);
     if (e == R2_OK)
         e = R2Ring_WaitFence(&k->ring, seq);
@@ -792,29 +889,12 @@ LONG Card_Flush(struct Card *k, BOOL present)
         k->fence_us_max = us;
     if (e == R2_OK)
         tail = us;
-    if (k->dwords + n < k->dwords)
-        k->dwords_hi++;
-    k->dwords += n;
     if (e != R2_OK)
         k->lost = CARD_LOST_FENCE;
 
 stop:
-    /* 7. the CP off again, everything as found; the 3D blocks reset only if
-     * the engine stays busy */
-    tf = R2Cp_Stop(&k->hw, &k->saved, TIMEOUT_US, &reset);
-    if (reset)
-        k->cp_resets++;
-    if (tf != R2_OK && !Reset3D(k))
-        k->lost = CARD_LOST_CP;
-    if (reset || tf != R2_OK)
-    {
-        /* a reset discarded the 3D state and perhaps the microcode: the
-         * core sends everything again, the checker starts over, and the
-         * next lock loads the microcode before the CP starts */
-        Core_Forget(k->core);
-        R2Chk_Reset(&k->chk);
-        k->reload_ucode = 1;
-    }
+    /* 7. without the overlap: the CP off again before the unlock */
+    (void) StopCp(k, FALSE);
 unlock:
     UnlockAll(k);
     if (tail != ~0UL)
@@ -837,9 +917,22 @@ unlock:
 
 /* --- the core's hooks ----------------------------------------------------------------- */
 
+LONG Card_Flush(struct Card *k, BOOL present)
+{
+    return CardFlush(k, present, (BOOL) !k->overlap);
+}
+
+/* Everything built drawn, the Radeon idle: a texture hazard, a stream
+ * wrap, glFinish. */
 LONG Card_WaitIdle(struct Card *k)
 {
-    return Card_Flush(k, FALSE);
+    LONG e;
+
+    if (k->in_flush)
+        return R2_OK;
+    e = CardFlush(k, FALSE, TRUE);
+    SettleAlone(k, FALSE);
+    return (k->lost != 0) ? R2_ETIMEOUT : e;
 }
 
 ULONG *Card_VramBegin(struct Card *k)
@@ -849,6 +942,12 @@ ULONG *Card_VramBegin(struct Card *k)
     OvLock(k, CARD_OV_VRAM);
     if (!LockBm(k, CARD_HEAP, TRUE))
         return NULL;
+    if (k->pending)
+    {
+        /* the kicked frame may still read what is about to be written */
+        k->clock_base = Ticks();
+        Settle(k, FALSE);
+    }
     k->vram_lock = 1;
     k->vram_locks++;
     return (ULONG *) HeapCpu(k);
@@ -1127,21 +1226,23 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
         return CARD_FAILED;
     }
     /* the heap, until P96 places one on the board (a bitmap it cannot or
-     * will not place stays in fast RAM): 16 MB as a 32-bit friend of a
-     * 32-bit Workbench; else the GL screen's format, 16 MB down to 4 MB in
-     * 2 MB steps, each with wide rows as a friend, then moved on by a blit.
-     * Nothing else: RadeonGL 0.4's 4096-byte rows (16, 8, 4 MB) froze
+     * will not place stays in fast RAM): the GL screen's format, 16 MB down
+     * to 4 MB in 2 MB steps, each with wide rows as a friend of the GL
+     * screen, then moved on by a blit. The Workbench has no say: only where
+     * neither gets the full size does a 32-bit friend of a 32-bit Workbench
+     * get a try at it (RadeonGL 0.4/0.5 tried that first; the wide friend
+     * got 16 MB on the board on the A4000D's 8- and 32-bit Workbench alike,
+     * 2026-11-05). Nothing else: RadeonGL 0.4's 4096-byte rows (16, 8, 4 MB) froze
      * GLQuake on the A4000D's 8-bit Workbench every time, at 8 MB, where
      * the same 8 MB with 8192-byte rows ran demo1 through (2026-11-05,
      * 0.4 and this code alike); a refusal beats a freeze. The narrow heap
      * stays for investigation only (RadeonGLHeapNarrow=1). */
     top = (Card_HeapMax >= 4 && Card_HeapMax < 16) ? Card_HeapMax << 20 : 16UL << 20;
     ok = FALSE;
-    if (!Card_NoHeap32 && !Card_HeapNarrow)
-        ok = HeapTry(k, top, CARD_HEAP_WB32);
     for (size = top; !ok && !Card_HeapNarrow && size >= (4UL << 20); size -= 2UL << 20)
     {
-        if (HeapTry(k, size, CARD_HEAP_WIDE) || HeapTry(k, size, CARD_HEAP_BLIT))
+        if (HeapTry(k, size, CARD_HEAP_WIDE) || HeapTry(k, size, CARD_HEAP_BLIT)
+            || (size == top && !Card_NoHeap32 && HeapTry(k, size, CARD_HEAP_WB32)))
             ok = TRUE;
     }
     for (size = top; !ok && Card_HeapNarrow && size >= (4UL << 20); size >>= 1)
@@ -1233,6 +1334,7 @@ void Card_Close(struct Card *k)
 
     UnlockAll(k);
     k->vram_lock = 0;
+    SettleAlone(k, TRUE);           /* the last frame drawn, the CP off */
     WaitBlit();
     for (i = 0; i < CARD_SCREEN; i++)
         FreeBm(k, i);
