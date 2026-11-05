@@ -40,6 +40,12 @@ Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== Tri_sasc ===" >>DEV:Test/auto.log
 DEV:Probe/C/Tri_sasc LOG=DEV:Test/probe-tri-sasc.log NOSHOW >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== Overlap ===" >>DEV:Test/auto.log
+DEV:Probe/C/Overlap LOG=DEV:Test/probe-overlap.log >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== Overlap_sasc ===" >>DEV:Test/auto.log
+DEV:Probe/C/Overlap_sasc LOG=DEV:Test/probe-overlap-sasc.log >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
 Echo "=== LockBench ===" >>DEV:Test/auto.log
 DEV:Probe/C/LockBench LOG=DEV:Test/probe-lockbench.log >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log

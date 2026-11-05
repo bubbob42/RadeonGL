@@ -102,6 +102,54 @@ static ULONG Ticks(void)
 }
 
 /* seconds first, then the remainder in two steps (eclock.c) */
+static ULONG TicksUs(ULONG t);
+
+/* The overlap statistic (card.h): an unlock after a fence arms it, the
+ * next lock of any bitmap reads it. */
+#define CARD_OV_FRAME 0         /* the next lock is a frame's flush */
+#define CARD_OV_FLUSH 1         /* a flush without a present: a texture hazard, a stream wrap */
+#define CARD_OV_VRAM  2         /* a heap lock: a texture upload, the direct stream */
+
+#ifdef CARD_OVERLAP_STAT
+static void OvUnlock(struct Card *k, ULONG tail)
+{
+    k->ov_unlock = Ticks();
+    k->ov_tail = tail;
+    k->ov_armed = 1;
+}
+
+static void OvLock(struct Card *k, ULONG kind)
+{
+    ULONG gap;
+
+    if (!k->ov_armed)
+        return;
+    k->ov_armed = 0;
+    gap = TicksUs(Ticks() - k->ov_unlock);
+    k->ov_n++;
+    k->ov_tail_sum += k->ov_tail;
+    k->ov_gap_sum += gap;
+    k->ov_save_sum += gap < k->ov_tail ? gap : k->ov_tail;
+    k->ov_by[kind]++;
+    if (k->ov_gap_sum > 0x40000000UL || k->ov_tail_sum > 0x40000000UL)
+    {
+        /* hours of play, or a long pause: halve everything, the means stay */
+        k->ov_n /= 2;
+        k->ov_tail_sum /= 2;
+        k->ov_gap_sum /= 2;
+        k->ov_save_sum /= 2;
+        k->ov_by[0] /= 2;
+        k->ov_by[1] /= 2;
+        k->ov_by[2] /= 2;
+    }
+}
+#else
+/* the release build: nothing in the frame's path (2026-11-05, "GLQuake must
+ * not get slower") */
+#define OvUnlock(k, tail) ((void) (k), (void) (tail))
+#define OvLock(k, kind) ((void) (k))
+#endif
+
 static ULONG TicksUs(ULONG t)
 {
     ULONG s;
@@ -273,6 +321,73 @@ static BOOL AllocHeap32(struct Card *k, ULONG bytes)
     return (BOOL) (b->bm != NULL);
 }
 
+/* The heap in the GL screen's format, rows of row bytes: a friend of the
+ * GL screen, or (blit) a bitmap without a friend that a 1 x 1 blit from the
+ * GL screen moves onto the board (MEASURED for 32 bit, BmFit way B). For a
+ * Workbench that is not 32-bit: a reporter's 8-bit Workbench (2026-11-05)
+ * left RadeonGL 0.4 with 8 MB, P96 keeping the 16 MB friend of 2048 x 4096
+ * off the board, and GLQuake's demo1 needs about 8.7 MB. */
+static void FreeBm(struct Card *k, ULONG i);
+static BOOL OnBoard(struct Card *k, ULONG i);
+
+static BOOL AllocHeapScreen(struct Card *k, ULONG bytes, ULONG row, BOOL blit)
+{
+    struct BitMap *sbm;
+    struct CardBm *b;
+    ULONG rows;
+
+    sbm = k->scr->RastPort.BitMap;
+    b = &k->b[CARD_HEAP];
+    rows = (bytes + row - 1) / row;
+    b->bytes = bytes;
+    b->bpp = k->bpp;
+    b->p96 = blit ? 1 : 0;
+    if (blit)
+        b->bm = p96AllocBitMap(row / k->bpp, rows, k->bpp * 8, BMF_MINPLANES, NULL,
+                               p96GetBitMapAttr(sbm, P96BMA_RGBFORMAT));
+    else
+        b->bm = AllocBitMap(row / k->bpp, rows, GetBitMapAttr(sbm, BMA_DEPTH), BMF_MINPLANES, sbm);
+    if (b->bm != NULL && !p96GetBitMapAttr(b->bm, P96BMA_ISP96))
+    {
+        FreeBm(k, CARD_HEAP);
+        return FALSE;
+    }
+    if (b->bm != NULL && blit)
+    {
+        BltBitMap(sbm, 0, 0, b->bm, 0, 0, 1, 1, 0xc0, 0xff, NULL);
+        WaitBlit();
+    }
+    return (BOOL) (b->bm != NULL);
+}
+
+/* One try at the heap: size bytes one way. TRUE when it is on the board
+ * (then heap_size and heap_way are set); every try goes to the log. */
+static BOOL HeapTry(struct Card *k, ULONG size, ULONG way)
+{
+    BOOL ok;
+
+    if (way == CARD_HEAP_WB32)
+        ok = AllocHeap32(k, size + 8192);
+    else if (way == CARD_HEAP_NARROW)
+        ok = AllocData(k, CARD_HEAP, size + 4096);
+    else
+        ok = AllocHeapScreen(k, size + 8192, 8192, (BOOL) (way == CARD_HEAP_BLIT));
+    if (ok)
+        ok = OnBoard(k, CARD_HEAP);
+    if (k->heap_try_n < CARD_HEAP_TRIES)
+        k->heap_try[k->heap_try_n++] = (UBYTE) (((size >> 20) << 3) | (way << 1) | (ok ? 1 : 0));
+    if (!ok)
+    {
+        if (k->b[CARD_HEAP].bm != NULL)
+            k->heap_offboard++;
+        FreeBm(k, CARD_HEAP);
+        return FALSE;
+    }
+    k->heap_size = size;
+    k->heap_way = way;
+    return TRUE;
+}
+
 static void FreeBm(struct Card *k, ULONG i)
 {
     if (k->b[i].bm == NULL)
@@ -337,6 +452,7 @@ static LONG Peek(APTR ctx, ULONG gpu, ULONG *val)
 
 /* GL screens a visitor window kept open at Card_Close (for the log). */
 ULONG Card_ScreensLeft = 0;
+ULONG Card_NoHeap32 = 0;
 
 /* --- the command buffer --------------------------------------------------------------- */
 
@@ -471,6 +587,7 @@ LONG Card_Flush(struct Card *k, BOOL present)
     ULONG us;
     ULONG seq;
     ULONG reset;
+    ULONG tail;
     BOOL scr_ok;
     LONG e;
 
@@ -488,6 +605,7 @@ LONG Card_Flush(struct Card *k, BOOL present)
     k->flushes++;
     e = R2_OK;
     scr_ok = FALSE;
+    tail = ~0UL;
 
     /* 0. every packet through the checker before the CP sees one -- outside
      * the lock (the GUI waits while it is held), against the addresses the
@@ -519,6 +637,7 @@ LONG Card_Flush(struct Card *k, BOOL present)
         }
     }
     k->clock_base = Ticks();
+    OvLock(k, present ? CARD_OV_FRAME : CARD_OV_FLUSH);
 
     /* 1. the locks: target, ring, heap, on the board */
     if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
@@ -669,6 +788,8 @@ LONG Card_Flush(struct Card *k, BOOL present)
     us = HwClock(k) - t0;
     if (us > k->fence_us_max)
         k->fence_us_max = us;
+    if (e == R2_OK)
+        tail = us;
     if (k->dwords + n < k->dwords)
         k->dwords_hi++;
     k->dwords += n;
@@ -694,6 +815,8 @@ stop:
     }
 unlock:
     UnlockAll(k);
+    if (tail != ~0UL)
+        OvUnlock(k, tail);
     us = HwClock(k);
     if (us > k->lock_us_max)
         k->lock_us_max = us;
@@ -721,6 +844,7 @@ ULONG *Card_VramBegin(struct Card *k)
 {
     if (k->in_flush)
         return (k->b[CARD_HEAP].mem != NULL) ? (ULONG *) HeapCpu(k) : NULL;
+    OvLock(k, CARD_OV_VRAM);
     if (!LockBm(k, CARD_HEAP, TRUE))
         return NULL;
     k->vram_lock = 1;
@@ -886,6 +1010,7 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
     ULONG fmt;
     ULONG size;
     ULONG want;
+    BOOL ok;
 
     *k = zero;
     Why(why, whylen, "");
@@ -998,31 +1123,31 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
         Card_Close(k);
         return CARD_FAILED;
     }
-    /* the heap: 16 MB as a 32-bit bitmap first; else in the screen's
-     * format, 16 MB halving to 4 MB; each until P96 places it on the board
-     * (a bitmap too tall or too big for the board stays in fast RAM) */
-    size = 16UL << 20;
-    if (!(AllocHeap32(k, size + 8192) && OnBoard(k, CARD_HEAP)))
+    /* the heap, until P96 places one on the board (a bitmap it cannot or
+     * will not place stays in fast RAM): 16 MB as a 32-bit friend of a
+     * 32-bit Workbench; else the GL screen's format, 16 MB down to 4 MB in
+     * 2 MB steps, each with wide rows as a friend, then moved on by a blit;
+     * last RadeonGL 0.4's 4096-byte rows, 16, 8, 4 MB */
+    ok = FALSE;
+    if (!Card_NoHeap32)
+        ok = HeapTry(k, 16UL << 20, CARD_HEAP_WB32);
+    for (size = 16UL << 20; !ok && size >= (4UL << 20); size -= 2UL << 20)
     {
-        if (k->b[CARD_HEAP].bm != NULL)
-            k->heap_offboard++;
-        FreeBm(k, CARD_HEAP);
-        for (size = 16UL << 20; size >= (4UL << 20); size >>= 1)
-        {
-            if (AllocData(k, CARD_HEAP, size + 4096) && OnBoard(k, CARD_HEAP))
-                break;
-            if (k->b[CARD_HEAP].bm != NULL)
-                k->heap_offboard++;
-            FreeBm(k, CARD_HEAP);
-        }
+        if (HeapTry(k, size, CARD_HEAP_WIDE) || HeapTry(k, size, CARD_HEAP_BLIT))
+            ok = TRUE;
     }
-    if (k->b[CARD_HEAP].bm == NULL)
+    for (size = 16UL << 20; !ok && size >= (4UL << 20); size >>= 1)
+    {
+        if (HeapTry(k, size, CARD_HEAP_NARROW))
+            ok = TRUE;
+    }
+    if (!ok)
     {
         Why(why, whylen, "no texture heap of 4 MB or more on the board");
         Card_Close(k);
         return CARD_FAILED;
     }
-    k->heap_size = size;
+    size = k->heap_size;
 
     /* buffers in fast RAM */
     k->cmd = (ULONG *) AllocVec(CARD_CMD_DW * 4, MEMF_ANY);

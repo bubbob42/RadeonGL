@@ -256,6 +256,7 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
 {
     struct Card *k;
     const char *name;
+    ULONG i;
 
     k = &r->rad;
     Put(f, "RadeonGL on the Radeon (PCI "); PutX(f, k->pci_id); Put(f, ")\n");
@@ -275,6 +276,17 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, "lock per flush: mean "); PutU(f, k->lock_flushes ? k->lock_us_sum / k->lock_flushes : 0);
     Put(f, " us, max "); PutU(f, k->lock_us_max); Put(f, " us; fence wait max ");
     PutU(f, k->fence_us_max); Put(f, " us\n");
+#ifdef CARD_OVERLAP_STAT
+    Put(f, "overlap estimate: "); PutU(f, k->ov_n);
+    Put(f, " unlocks after a fence; the GPU's tail at the unlock: mean ");
+    PutU(f, k->ov_n ? k->ov_tail_sum / k->ov_n : 0);
+    Put(f, " us; the next lock after a mean "); PutU(f, k->ov_n ? k->ov_gap_sum / k->ov_n : 0);
+    Put(f, " us (a frame's flush "); PutU(f, k->ov_by[0]);
+    Put(f, ", a flush mid-frame "); PutU(f, k->ov_by[1]);
+    Put(f, ", a heap lock "); PutU(f, k->ov_by[2]);
+    Put(f, "); the GPU running on after the unlock would save a mean ");
+    PutU(f, k->ov_n ? k->ov_save_sum / k->ov_n : 0); Put(f, " us a flush\n");
+#endif
     Put(f, "heap locks for texture uploads and the stream: "); PutU(f, k->vram_locks);
     Put(f, ", writes lost (heap out of reach): "); PutU(f, r->core.stat_vram_lost); Put(f, "\n");
     Put(f, "locked-array stream: ");
@@ -293,8 +305,21 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     PutU(f, r->core.stat_stream_bytes); Put(f, "\n");
     PutCache(f, &r->core);
     Put(f, "texture heap: "); PutU(f, k->heap_size >> 20);
-    Put(f, k->b[CARD_HEAP].p96 ? " MB, a 32-bit bitmap" : " MB, in the screen's format");
+    Put(f, k->heap_way == CARD_HEAP_WB32 ? " MB, a 32-bit friend of the Workbench"
+           : k->heap_way == CARD_HEAP_WIDE ? " MB, the screen's format, a friend, 8192-byte rows"
+           : k->heap_way == CARD_HEAP_BLIT ? " MB, the screen's format, moved on by a blit"
+           : " MB, the screen's format, 4096-byte rows");
     Put(f, " (sizes P96 kept off the board first: "); PutU(f, k->heap_offboard); Put(f, ")\n");
+    Put(f, "heap tries:");
+    for (i = 0; i < k->heap_try_n; i++)
+    {
+        Put(f, " "); PutU(f, k->heap_try[i] >> 3);
+        Put(f, ((k->heap_try[i] >> 1) & 3) == CARD_HEAP_WB32 ? " MB 32-bit "
+               : ((k->heap_try[i] >> 1) & 3) == CARD_HEAP_WIDE ? " MB wide "
+               : ((k->heap_try[i] >> 1) & 3) == CARD_HEAP_BLIT ? " MB blit " : " MB narrow ");
+        Put(f, (k->heap_try[i] & 1) ? "ON;" : "off;");
+    }
+    Put(f, "\n");
     Put(f, "texture heap used at the end: "); PutU(f, r->core.heap.used);
     Put(f, ", at most: "); PutU(f, r->core.heap.peak);
     Put(f, "; allocations refused: "); PutU(f, r->core.heap.fails); Put(f, "\n");
@@ -617,6 +642,10 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     res = CARD_NOT_RADEON;
     if (which[0] != 'n' && which[0] != 'N')
     {
+        /* a test switch: RadeonGLHeap32=0 skips the 32-bit heap, so a
+         * 32-bit Workbench takes the way an 8- or 16-bit one must */
+        Card_NoHeap32 = (GetVar((STRPTR) "RadeonGLHeap32", (STRPTR) flag, sizeof(flag), 0) > 0
+                         && flag[0] == '0') ? 1UL : 0UL;
         res = Card_Open(&r->rad, (ULONG) w, (ULONG) h, choose_depth, check, why, sizeof(why));
         if (res == CARD_FAILED
             || (res == CARD_NOT_RADEON && (which[0] == 'r' || which[0] == 'R')))

@@ -758,6 +758,17 @@ dist/Probe/C/Tri: $(TRI_OBJS)
 	$(GCC_CC) -noixemul -m68060 -m68881 $^ -o $@ -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
+# Overlap: may the R200 keep drawing after the unlock? Tri's scene and
+# safety rules, the same objects (docs/probes.md).
+OVERLAP_OBJS := $(addprefix build/probe060/,$(addsuffix .o,$(PROBE_COMMON) overlap triscene texscene)) \
+                $(addprefix build/probe060/r200/,$(addsuffix .o,$(PROBE_R200) r2check)) \
+                $(addprefix build/probe060/core/,$(addsuffix .o,$(CORE_MODULES)))
+
+dist/Probe/C/Overlap: $(OVERLAP_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul -m68060 -m68881 $^ -o $@ -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
 # SAS/C builds of the same sources: dist/Probe/C/<Tool>_sasc. Every link
 # runs under tools/slink-guard: slink 6.57 under vamos can crash or hang in
 # its exit path AFTER writing a complete executable (layout-dependent; met
@@ -823,6 +834,12 @@ dist/Probe/C/Tri_sasc: build/probe-sasc/tri.o build/probe-sasc/triscene.o build/
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/Overlap_sasc: build/probe-sasc/overlap.o build/probe-sasc/triscene.o build/probe-sasc/texscene.o \
+                           $(PROBE_SC_OBJS) $(PROBE_SC_R200_OBJS) build/probe-sasc/r200/r2check.o \
+                           $(addprefix build/core-sasc/,$(addsuffix .o,$(CORE_MODULES))) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:scm.lib lib:sc.lib lib:amiga.lib
+
 # The scripts write their report next to themselves (DEV:Probe/<Tool>.log),
 # where the host reads it from the share afterwards. They run the GCC
 # builds; the _sasc builds sit beside them in C/.
@@ -831,7 +848,8 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
         dist/Probe/C/LockBench dist/Probe/C/BmFit dist/Probe/C/ExecMap dist/Probe/C/MemBench \
         dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
         dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc dist/Probe/C/BmFit_sasc \
-        dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc
+        dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc \
+        dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -857,6 +875,14 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
 	@printf 'echo "It reads Radeon registers inside locks and writes none. Keep Workbench quiet."\n' >> dist/Probe/LockBench
 	@printf 'DEV:Probe/C/LockBench LOG=DEV:Probe/LockBench.log\n' >> dist/Probe/LockBench
 	@printf 'echo "Done. The report is DEV:Probe/LockBench.log"\n' >> dist/Probe/LockBench
+	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/Overlap
+	@printf 'echo "Overlap: may the Radeon keep drawing after P96 bitmaps are unlocked? Three tests,"\n' >> dist/Probe/Overlap
+	@printf 'echo "about ten seconds. It runs the command processor and the 3D engine, and P96 fills."\n' >> dist/Probe/Overlap
+	@printf 'echo "Keep the Workbench quiet: no window moves until it says Done."\n' >> dist/Probe/Overlap
+	@printf 'DEV:Probe/C/CxBreak\n' >> dist/Probe/Overlap
+	@printf 'DEV:Probe/C/Overlap LOG=DEV:Probe/Overlap.log\n' >> dist/Probe/Overlap
+	@printf 'echo "Done. The report is DEV:Probe/Overlap.log"\n' >> dist/Probe/Overlap
+	@cp icons/run.info dist/Probe/Overlap.info
 	@cp icons/run.info dist/Probe/CPRing.info
 	@cp icons/run.info dist/Probe/Tri.info
 	@cp icons/run.info dist/Probe/LockBench.info
@@ -865,7 +891,8 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
 	@grep -q '^Probe/CPRing$$' dist/.backdrop || printf 'Probe/CPRing\n' >> dist/.backdrop
 	@grep -q '^Probe/Tri$$' dist/.backdrop || printf 'Probe/Tri\n' >> dist/.backdrop
 	@grep -q '^Probe/LockBench$$' dist/.backdrop || printf 'Probe/LockBench\n' >> dist/.backdrop
-	@echo "probes: staged DEV:Probe/R200Info + BusBench + CPRing + Tri + LockBench (scripts, icons, C/)"
+	@grep -q '^Probe/Overlap$$' dist/.backdrop || printf 'Probe/Overlap\n' >> dist/.backdrop
+	@echo "probes: staged DEV:Probe/R200Info + BusBench + CPRing + Tri + LockBench + Overlap (scripts, icons, C/)"
 
 # --- minigl.library, census back end (docs/census.md) ------------------------
 # Draws nothing; counts what a dispatch-ABI-5 client asks for. The table is
@@ -1005,7 +1032,10 @@ RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' l
 RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
               -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
               -fno-strict-aliasing -m68060 -m68881 -DRGL_CPU_040 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl \
-              -Isrc/core -Isrc/r200 -I$(P96_INC)
+              -Isrc/core -Isrc/r200 -I$(P96_INC) $(RGL_DEFS)
+# RGL_DEFS=-DCARD_OVERLAP_STAT: a measurement build with the overlap estimate
+# in the log (lib/card.c); remove build/rgl first, the objects do not see it
+RGL_DEFS   ?=
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_MODULES))) \

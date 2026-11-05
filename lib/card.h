@@ -51,6 +51,13 @@
 #define CARD_RESERVE  2048UL    /* of it kept for the present and the fence */
 #define CARD_ROW      4096UL    /* bytes a row of the data bitmaps */
 
+/* The texture heap's ways (Card_Open tries them in this order) */
+#define CARD_HEAP_WB32    0     /* 32 bit, a friend of a 32-bit Workbench (RadeonGL 0.4) */
+#define CARD_HEAP_WIDE    1     /* the GL screen's format, 8192-byte rows, its friend */
+#define CARD_HEAP_BLIT    2     /* the same rows without a friend, moved on by a blit */
+#define CARD_HEAP_NARROW  3     /* the GL screen's format, 4096-byte rows (RadeonGL 0.4) */
+#define CARD_HEAP_TRIES   24
+
 /* Card_Open results */
 #define CARD_OK          0
 #define CARD_NOT_RADEON  1      /* no Radeon on the board P96 offers: use the null card */
@@ -125,9 +132,26 @@ struct Card
     ULONG dwords_hi;            /* dwords carried past 2^32 */
     ULONG lock_flushes;         /* the flushes lock_us_sum is the sum of */
     ULONG heap_offboard;        /* heap sizes P96 kept off the board at the open */
+
+    /* What letting the GPU run on after the unlock would win (a measurement
+     * for the overlap question, 2026-11-05): each flush's unlock notes the
+     * fence wait it just did (the GPU's tail); the next lock of any bitmap,
+     * where an overlapped GPU would be waited for, notes the time since.
+     * The smaller of the two is what overlapping would have saved. */
+    ULONG ov_unlock;            /* Ticks() at the unlock */
+    ULONG ov_tail;              /* that flush's fence wait, us */
+    ULONG ov_armed;             /* an unlock waits for its next lock */
+    ULONG ov_n, ov_tail_sum, ov_gap_sum, ov_save_sum;
+    ULONG ov_by[3];             /* that lock: a frame's flush, a flush mid-frame, a heap lock */
+
+    /* how the texture heap was placed (Card_Open): every try, for the log */
+    ULONG heap_way;             /* CARD_HEAP_* of the heap in use */
+    ULONG heap_try_n;
+    UBYTE heap_try[CARD_HEAP_TRIES]; /* (MB << 3) | (way << 1) | on the board */
 };
 
 extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
+extern ULONG Card_NoHeap32;     /* test switch (RadeonGLHeap32=0): skip the 32-bit heap */
 
 #define CARD_LOST_CHECKER  1    /* the checker refused a packet */
 #define CARD_LOST_FENCE    2    /* a fence timed out */
