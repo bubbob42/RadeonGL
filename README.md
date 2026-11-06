@@ -81,8 +81,9 @@ sets GL_INVALID_OPERATION; the library's log names every such call.
 
 ## GLQuake benchmarks
 
-GLQuake for R200 68k, the RadeonGL edition of GLQuake for
-`minigl.library` (1.0, a separate project and archive): its timedemos (all
+[GLQuake for R200 68k](https://github.com/bubbob42/RadeonGL-GLQuake), the
+RadeonGL edition of GLQuake for `minigl.library` (1.0, a separate project
+and archive, [release](https://github.com/bubbob42/RadeonGL-GLQuake/releases/tag/v1.0)): its timedemos (all
 frames, no sound) on the test machine, an A4000D with a 68060 at 50 MHz on
 a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6,
 RadeonGL 0.7 with its command check off (`RadeonGLCheck=0`, as GLQuake's
@@ -154,7 +155,11 @@ fetched from Aminet:
 | `gmake release-stage release-archive release-aminet release-drawer` | the release package: `dist/RadeonGL.lha`, the Aminet pair (copied to `release/`), `DEV:Release` |
 
 GLQuake, the program RadeonGL is measured with, is not part of this
-repository. To play it on RadeonGL, or to run its benchmarks, see
+repository: its RadeonGL edition, **GLQuake for R200 68k**, lives in
+[bubbob42/RadeonGL-GLQuake](https://github.com/bubbob42/RadeonGL-GLQuake)
+(source, Installer, the binary release `GLQuakeR200.lha`). It uses RadeonGL's
+static-arrays extension and is the fastest way to play Quake on RadeonGL.
+To play the Aminet GLQuake on RadeonGL, or to run its benchmarks, see
 [`glquake-bench/`](glquake-bench): start scripts with sound and LAN, where
 to get GLQuake, how to install it. For development, GLQuake's source lives
 beside this repository (`GLQUAKE_DIR`, default
