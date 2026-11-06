@@ -1,0 +1,64 @@
+; GLQInstallRun -- GLQuake for R200 68k's Installer (the package drawer staged
+; as DEV:Release/GLQuakeR200 by RadeonGL-GLQuake's tools/make_release.sh
+; --stage), unattended at NOVICE, twice:
+;   A: a fresh Quake drawer holding a decoy GLQuake (not this edition): it
+;      must be kept as GLQuake.old; GLQuake, GLQuake040, PlayQuake(.info),
+;      GLQuakeR200.ReadMe(.info) installed; no id1: the closing page says so.
+;   B: again: this edition's GLQuake is there now: nothing renamed, no
+;      GLQuake.old1, the .old is still the decoy.
+; The machine is a 68040: the closing page names GLQuake040.
+; WARNING: writes Work:Quake (or SYS:Quake) INSIDE THE AUTOTEST HDF; deleted
+; at the end.
+; LIMIT 420
+FailAt 1000
+Wait 8
+Assign >NIL: T: RAM:
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Set inst SYS:System/Installer
+If NOT EXISTS $inst
+  Set inst SYS:Utilities/Installer
+EndIf
+Version $inst >>DEV:Test/auto.log
+Assign >NIL: Work: EXISTS
+If WARN
+  Set dest SYS:Quake
+Else
+  Set dest Work:Quake
+EndIf
+Echo "expected drawer: $dest" >>DEV:Test/auto.log
+Delete >NIL: $dest ALL QUIET
+MakeDir $dest
+; (its text must not say "RadeonGL edition": Search would take it for ours)
+Echo >$dest/GLQuake "a decoy: some other glquake"
+Delete >NIL: RAM:InstDone#? DEV:Test/inst-#?.ppm QUIET
+Stack 20000
+
+Echo "=== A: first run (NOVICE), a decoy GLQuake in the drawer ===" >>DEV:Test/auto.log
+CD DEV:Release/GLQuakeR200
+Run >NIL: Execute DEV:Test/InstallClicks RAM:InstDone1 a
+FailAt 100
+$inst SCRIPT DEV:Release/GLQuakeR200/Install APPNAME "GLQuake for R200 68k" MINUSER NOVICE DEFUSER NOVICE NOPRETEND NOLOG
+Echo "  Installer RC $RC (0 = it reached its own (exit) page)" >>DEV:Test/auto.log
+FailAt 1000
+Echo >RAM:InstDone1 done
+List $dest LFORMAT "  %n %l" >>DEV:Test/auto.log
+Type $dest/GLQuake.old >>DEV:Test/auto.log
+Version $dest/GLQuake >>DEV:Test/auto.log
+Version $dest/GLQuake040 >>DEV:Test/auto.log
+
+Echo "=== B: second run (NOVICE), this edition there ===" >>DEV:Test/auto.log
+Wait 6
+Run >NIL: Execute DEV:Test/InstallClicks RAM:InstDone2 b
+FailAt 100
+$inst SCRIPT DEV:Release/GLQuakeR200/Install APPNAME "GLQuake for R200 68k" MINUSER NOVICE DEFUSER NOVICE NOPRETEND NOLOG
+Echo "  Installer RC $RC (0 = it reached its own (exit) page)" >>DEV:Test/auto.log
+FailAt 1000
+Echo >RAM:InstDone2 done
+List $dest LFORMAT "  %n %l" >>DEV:Test/auto.log
+Type $dest/GLQuake.old >>DEV:Test/auto.log
+
+CD RAM:
+Delete >NIL: $dest ALL QUIET
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
