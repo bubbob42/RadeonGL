@@ -76,26 +76,24 @@ and more. A missing one sets GL_INVALID_OPERATION; the log names it.
 
 GLQUAKE BENCHMARKS
 
-GLQuake for minigl.library (Frank Wille, Steffen Haeuser and Dennis
-Boon), its timedemos on the test machine (A4000D, 68060 at 50 MHz on a
-CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96), frames
-a second:
+GLQuake for R200 68k (game/shoot/GLQuakeR200, the RadeonGL edition of
+GLQuake for minigl.library, 1.0), its timedemos on the test machine
+(A4000D, 68060 at 50 MHz on a CyberStorm MK II, Mediator, Radeon 9200,
+AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.7, command check off
+(RadeonGLCheck=0), frames a second:
 
-    Demo   Screen       Check on  Check off  Direct  Direct, 8-bit LM
-    demo1  320 x 240        19.1       24.4    24.9              25.7
-    demo2  320 x 240           -       21.7       -              22.3
-    demo3  320 x 240           -       21.5       -              22.9
-    demo1  640 x 480           -       23.7       -              24.9
-    demo1  1280 x 720          -       23.5       -              24.4
+    Demo   320 x 240   640 x 480   1280 x 720
+    demo1       29.4        28.7         28.0
+    demo2       25.1           -         21.1
+    demo3       25.6           -         24.0
 
-Check on: RadeonGL as installed. Check off: RadeonGLCheck=0. Direct:
-RadeonGLDirect=1 as well. 8-bit LM: 8-bit lightmaps, GLQuake started with
--lm_LUMINANCE (id's own default; the Amiga port changed it to 16 bit).
-The 68060 sets the pace, not the Radeon. The 68020/68030 build on the
-same 68060: 17.1 / 22.8 / 23.7 (check on / off / direct, 8-bit LM).
+The Aminet source built for the 68060, on RadeonGL 0.6: demo1 24.4 /
+23.7 / 23.3, demo2 21.7 / - / 17.9, demo3 21.4 / - / 19.9. With the
+command check on (as installed) slower: 0.4 took demo1 from 24.4 to
+19.1. The 68060 sets the pace, not the Radeon.
 A tester's A4000D (BFG9060, 68060 at 75 MHz, Prometheus Firestorm PCI
-bridge, RadeonGL 0.6, check off, 8-bit LM, demo1 without sound): 43.0 at
-320 x 240, 41.5 at 640 x 480; direct 43.7 and 42.2. RadeonGL works with both the Mediator and the Prometheus.
+bridge, RadeonGL 0.6, check off, demo1 at 320 x 240 without sound):
+43.0 fps. RadeonGL works with both the Mediator and the Prometheus.
 
 
 INSTALLATION
@@ -139,6 +137,10 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.7 (6.11.2026)
+  - static arrays and index lists (own extension), 2 MB upload cache,
+    pointer hidden, card tests on 24-bit Workbenches
 
 0.6 (5.11.2026)
   - up to 18% faster: the Radeon draws while the CPU builds the next frame

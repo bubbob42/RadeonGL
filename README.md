@@ -81,27 +81,29 @@ sets GL_INVALID_OPERATION; the library's log names every such call.
 
 ## GLQuake benchmarks
 
-GLQuake for `minigl.library`, by Frank Wille, Steffen Häuser and Dennis
-Boon: its timedemos (all frames) on the test machine: an A4000D, 68060 at
-50 MHz on a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2,
-Picasso96. Frames a second:
+GLQuake for R200 68k, the RadeonGL edition of GLQuake for
+`minigl.library` (1.0, a separate project and archive): its timedemos (all
+frames, no sound) on the test machine, an A4000D with a 68060 at 50 MHz on
+a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6,
+RadeonGL 0.7 with its command check off (`RadeonGLCheck=0`, as GLQuake's
+start script sets it). Frames a second:
 
-| Demo | Screen | Check on | Check off | Direct | Direct, 8-bit lightmaps |
-|---|---|---:|---:|---:|---:|
-| demo1 | 320 x 240 | 19.1 | 24.4 | 24.9 | 25.7 |
-| demo2 | 320 x 240 |  | 21.7 |  | 22.3 |
-| demo3 | 320 x 240 |  | 21.5 |  | 22.9 |
-| demo1 | 640 x 480 |  | 23.7 |  | 24.9 |
-| demo1 | 1280 x 720 |  | 23.5 |  | 24.4 |
+| Demo | 320 x 240 | 640 x 480 | 1280 x 720 |
+|---|---:|---:|---:|
+| demo1 | 29.4 | 28.7 | 28.0 |
+| demo2 | 25.1 | | 21.1 |
+| demo3 | 25.6 | | 24.0 |
 
-- **Check on:** RadeonGL as installed. **Check off:** `RadeonGLCheck=0`.
-- **Direct:** `RadeonGLDirect=1` as well: about eight short Picasso96 locks
-  a frame instead of one.
-- **8-bit lightmaps:** GLQuake started with `-lm_LUMINANCE` (id's own
-  default; the Amiga port changed it to 16 bit).
-- **The 68020/68030 build**, on the same 68060 for comparison: demo1 17.1
-  (check on), 22.8 (check off), 23.7 (direct, 8-bit lightmaps). A real
-  68030 is far slower than that.
+- The same timedemos with the Aminet source (built for the 68060) on
+  RadeonGL 0.6: demo1 24.4 / 23.7 / 23.3, demo2 21.7 / - / 17.9,
+  demo3 21.4 / - / 19.9 -- the edition and 0.7 are 16 to 21% faster. The
+  Aminet binary itself is a 68020 build and slower still on a 68060.
+- **With the command check on** (RadeonGL as installed) every command
+  list is checked first: in 0.4 that took demo1 at 320 x 240 from 24.4
+  to 19.1 fps.
+- **The 68020/68030 build** (0.4, on the same 68060 for comparison):
+  demo1 17.1 with the check on, 22.8 with it off. A real 68030 is far
+  slower than that.
 
 The 68060 sets the pace, not the Radeon: sixteen times the pixels cost
 about one frame a second.

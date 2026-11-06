@@ -1,0 +1,21 @@
+; CpuCheck -- what the CPU command's CHECK reports on the autotest machine
+; (a 68040): GLQuake's PlayQuake picks GLQuake040 when CHECK 68060 warns.
+; LIMIT 300
+FailAt 21
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+CPU CHECK 68060 >NIL:
+If WARN
+  Echo "CHECK 68060: WARN (no 68060)" >>DEV:Test/auto.log
+Else
+  Echo "CHECK 68060: no warning" >>DEV:Test/auto.log
+EndIf
+CPU CHECK 68040 >NIL:
+If WARN
+  Echo "CHECK 68040: WARN" >>DEV:Test/auto.log
+Else
+  Echo "CHECK 68040: no warning" >>DEV:Test/auto.log
+EndIf
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

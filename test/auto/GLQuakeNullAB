@@ -2,8 +2,7 @@
 ; per run (edit the runs below as a comparison needs). Kept as
 ; DEV:Test/ab-<run>-f.r2d; render with build/host/r200view and compare.
 ; -anycpu: FS-UAE's machine is a 68040.
-; Now: whole world chunks (static index lists, GPU culling) against the
-; visible surfaces only (-noworldvawhole).
+; Now: the world walk with its own stack against -recursivewalk.
 ; Needs: gmake glquake-data rgl-lib.
 ; LIMIT 3000
 FailAt 1000
@@ -12,33 +11,29 @@ Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Stack 1000000
 Delete >NIL: DEV:Test/nullb-#? DEV:Test/ab-#?
-Echo "=== vis400: GLQuakeA frame 400 -noworldvawhole ===" >>DEV:Test/auto.log
-Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -noworldvawhole +host_framerate 0.05
+Echo "=== rec400: GLQuakeA frame 400 -recursivewalk ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -recursivewalk +host_framerate 0.05
 Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
 Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
-Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
-Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-vis400-f.r2d
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-rec400-f.r2d
 Delete >NIL: DEV:Test/nullb-#?
-Echo "=== whole400: GLQuakeA frame 400 -worldvacheck ===" >>DEV:Test/auto.log
-Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -worldvacheck +host_framerate 0.05
+Echo "=== it400: GLQuakeA frame 400 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu +host_framerate 0.05
 Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
 Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
-Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
-Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-whole400-f.r2d
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-it400-f.r2d
 Delete >NIL: DEV:Test/nullb-#?
-Echo "=== vis550: GLQuakeA frame 550 -noworldvawhole ===" >>DEV:Test/auto.log
-Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 550 -anycpu -noworldvawhole +host_framerate 0.05
+Echo "=== rec550: GLQuakeA frame 550 -recursivewalk ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 550 -anycpu -recursivewalk +host_framerate 0.05
 Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
 Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
-Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
-Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-vis550-f.r2d
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-rec550-f.r2d
 Delete >NIL: DEV:Test/nullb-#?
-Echo "=== whole550: GLQuakeA frame 550 ===" >>DEV:Test/auto.log
+Echo "=== it550: GLQuakeA frame 550 ===" >>DEV:Test/auto.log
 Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 550 -anycpu +host_framerate 0.05
 Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
 Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
-Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
-Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-whole550-f.r2d
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-it550-f.r2d
 Delete >NIL: DEV:Test/nullb-#?
 Echo "=== done ===" >>DEV:Test/auto.log
 Echo >DEV:Test/AutoDone done

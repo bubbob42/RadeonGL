@@ -1,5 +1,5 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.6 (5.11.2026)
+@$VER: RadeonGL.guide 0.7 (6.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
@@ -317,22 +317,24 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
 
 @{b}Geschwindigkeit@{ub}
 
-GLQuake für die minigl.library, von Frank Wille, Steffen Häuser und
-Dennis Boon: seine Timedemos (alle Bilder) auf dem Testrechner (A4000D,
-68060 bei 50 MHz auf einer CyberStorm MK II, Mediator, Radeon 9200,
-AmigaOS 3.2, Picasso96), Bilder pro Sekunde:
+GLQuake for R200 68k, die RadeonGL-Ausgabe von GLQuake für die
+minigl.library (1.0, ein eigenes Archiv): seine Timedemos (alle Bilder,
+ohne Ton) auf dem Testrechner (A4000D, 68060 bei 50 MHz auf einer
+CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6),
+RadeonGL 0.7 mit ausgeschalteter Prüfung (RadeonGLCheck=0, wie es das
+Startskript von GLQuake setzt), Bilder pro Sekunde:
 
-    Demo   Bildschirm   Prüfung an  Prüfung aus  Direkt  Direkt, 8-Bit-LT
-    demo1  320 x 240          19,1         24,4    24,9              25,7
-    demo2  320 x 240             -         21,7       -              22,3
-    demo3  320 x 240             -         21,5       -              22,9
-    demo1  640 x 480             -         23,7       -              24,9
-    demo1  1280 x 720            -         23,5       -              24,4
+    Demo   320 x 240   640 x 480   1280 x 720
+    demo1       29,4        28,7         28,0
+    demo2       25,1           -         21,1
+    demo3       25,6           -         24,0
 
-Prüfung an: RadeonGL wie installiert. Prüfung aus: RadeonGLCheck=0.
-Direkt: zusätzlich RadeonGLDirect=1. 8-Bit-LT: 8-Bit-Lichttexturen,
-GLQuake mit -lm_LUMINANCE gestartet (die Vorgabe von id; die
-Amiga-Portierung hat 16 Bit daraus gemacht).
+Dasselbe mit der Aminet-Quelle, für den 68060 übersetzt, auf RadeonGL
+0.6: demo1 24,4 / 23,7 / 23,3, demo2 21,7 / - / 17,9, demo3 21,4 / - /
+19,9. Das Aminet-Programm selbst ist für den 68020 übersetzt und auf
+einem 68060 noch langsamer. Mit eingeschalteter Prüfung (RadeonGL wie
+installiert) wird jede Befehlsliste vorher geprüft: in 0.4 senkte das
+demo1 bei 320 x 240 von 24,4 auf 19,1.
 
 Der A4000D eines Testers (BFG9060, 68060 bei 75 MHz, Prometheus
 Firestorm, RadeonGL 0.6, Prüfung aus, 8-Bit-LT, demo1 ohne Ton): 43,0
@@ -565,6 +567,17 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.7 (6.11.2026)
+    * der Mauszeiger verschwindet auf dem GL-Bildschirm, wenn ein Programm
+      das verlangt (mglSetPointer)
+    * der Upload-Cache wächst von 1 MB auf 2 MB Kartenspeicher: weniger
+      Daten über den Bus in jedem Bild
+    * GL_RGL_static_arrays, RadeonGLs eigene Erweiterung: zwei Hinweise
+      für Programme, deren Vertex-Arrays und Indexlisten sich nie ändern;
+      die RadeonGL-Ausgabe von GLQuake zeichnet ihre Welt damit
+    * die Kartentest-Werkzeuge laufen auch auf einer 24-Bit-Workbench
+    * auch mit der Prometheus-Firestorm-PCI-Brücke getestet
 
 0.6 (5.11.2026)
     * die Radeon zeichnet ein Bild fertig, während der Prozessor das
