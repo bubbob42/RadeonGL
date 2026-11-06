@@ -39,6 +39,7 @@ struct Sim
     ULONG pend_cntl, pend_nidx;
     /* statistics */
     ULONG tris, pixels, culled, unsupported;
+    ULONG points;                   /* point primitives drawn (r200view) */
 };
 
 void Sim_Init(struct Sim *s, ULONG *vram, ULONG vram_gpu, ULONG vram_size,

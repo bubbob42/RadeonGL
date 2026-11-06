@@ -1,0 +1,20 @@
+.KEY bin/A,demo/A,frame/A,extra/F
+.BRA {
+.KET }
+; RunNullB -- RunNullX with the GLQuake binary named first (A/B pictures of two builds):
+; -extensions, which turns on GLQuake's multitexture path): timedemo
+; {demo} on the null card, logs DEV:Test/nullb-{demo}.log and
+; DEV:Test/nullb-{demo}-lib.log, a done marker at the end.
+FailAt 1000
+CD DEV:Quake
+SetEnv RadeonGLLog DEV:Test/nullb-{demo}-lib.log
+SetEnv RadeonGLDump {frame}
+SetEnv RadeonGLDumpFile DEV:Test/nullb-{demo}-f400.r2d
+Assign LIBS: DEV:Libs/RadeonGL ADD
+{bin} {extra} -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/nullb-{demo}.log
+Echo "nullb {bin} {demo} rc=$RC" >>DEV:Test/nullb-{demo}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+UnSetEnv RadeonGLLog
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo >DEV:Test/nullb-{demo}.done done

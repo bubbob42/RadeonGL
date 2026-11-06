@@ -1,0 +1,27 @@
+; GLQuakeNullAB -- GLQuake builds on the null card, a frame of demo1 dumped
+; per run (edit the runs below as a comparison needs). Kept as
+; DEV:Test/ab-<run>-f.r2d; render with build/host/r200view and compare.
+; -anycpu: FS-UAE's machine is a 68040.
+; Now: gl_keeptjunctions 0 against the new default 1 (vertex counts).
+; Needs: gmake glquake-data rgl-lib.
+; LIMIT 1800
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/nullb-#? DEV:Test/ab-#?
+Echo "=== tj0: GLQuakeA frame 400 -worldvacheck +gl_keeptjunctions 0 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -worldvacheck +gl_keeptjunctions 0 +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-tj0-f.r2d
+Delete >NIL: DEV:Test/nullb-#?
+Echo "=== tj1: GLQuakeA frame 400 -worldvacheck ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -worldvacheck +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-tj1-f.r2d
+Delete >NIL: DEV:Test/nullb-#?
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

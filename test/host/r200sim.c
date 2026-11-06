@@ -611,6 +611,8 @@ static void Point(struct Sim *s, struct V p)
     float half;
     LONG x, y, x0, y0, x1, y1;
 
+    s->points++;
+
     if (REG(s, R_SE_VAP_CNTL) & R_VAP_TCL_ENABLE)
     {
         if (p.w <= 0 || p.z < -p.w)

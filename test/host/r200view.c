@@ -19,8 +19,8 @@ int main(int argc, char **argv)
     }
     if (Sim_RenderDump(argv[1], argv[2], &sim) != 0)
         return 1;
-    printf("r200view: %lu triangles, %lu pixels, %lu culled, %lu unsupported\n",
-           (unsigned long) sim.tris, (unsigned long) sim.pixels,
+    printf("r200view: %lu triangles, %lu points, %lu pixels, %lu culled, %lu unsupported\n",
+           (unsigned long) sim.tris, (unsigned long) sim.points, (unsigned long) sim.pixels,
            (unsigned long) sim.culled, (unsigned long) sim.unsupported);
     return 0;
 }

@@ -45,7 +45,12 @@
 #define CORE_STATE_MAX    512     /* dwords the whole state takes at most (MEASURED 182: test_state_max) */
 #define CORE_DRAW_DW      64      /* an array draw's packets after the state */
 #define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
-#define CORE_UCACHE_BYTES (1024UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
+#define CORE_UCACHE_BYTES (2048UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
+#define CORE_UCACHE_MIN   (1024UL * 1024)  /* when the heap has no room for the above */
+/* 2 MB since 2026-11-06: GLQuake's static world (GL_RGL_static_arrays) takes
+ * 663 KB, 775 KB with its T-junction points kept; with the models and indices
+ * of a frame that overflowed 1 MB, and what did not fit went through the
+ * stream every frame (MEASURED A4000D: +10 KB a frame, -6% at 320 x 240). */
 #define CORE_UQ           1024            /* cache entries, oldest first */
 #define CORE_UDIRTY       32              /* staged: ranges for the back end to copy */
 #define CORE_USLOTS       16384           /* their lookup table (a power of two): an insert

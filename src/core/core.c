@@ -47,8 +47,15 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     /* the upload cache: only beside a stream, and only if all of it fits */
     if (c->stream_size != 0)
     {
-        c->ucache_off = Heap_Alloc(c, CORE_UCACHE_BYTES, 32);
-        c->ucache_size = (c->ucache_off != 0xffffffffUL) ? CORE_UCACHE_BYTES : 0;
+        c->ucache_size = CORE_UCACHE_BYTES;
+        c->ucache_off = Heap_Alloc(c, c->ucache_size, 32);
+        if (c->ucache_off == 0xffffffffUL)
+        {
+            c->ucache_size = CORE_UCACHE_MIN;   /* a small heap: the old size */
+            c->ucache_off = Heap_Alloc(c, c->ucache_size, 32);
+        }
+        if (c->ucache_off == 0xffffffffUL)
+            c->ucache_size = 0;
         c->ucache_on = (c->ucache_size != 0) ? 1 : 0;   /* in place until Core_SetVram */
     }
 
@@ -117,7 +124,7 @@ void Core_Free(struct Core *c)
     }
     if (c->ushadow != NULL)
     {
-        c->env.free(c->env.env, c->ushadow, CORE_UCACHE_BYTES);
+        c->env.free(c->env.env, c->ushadow, c->ucache_size);
         c->ushadow = NULL;
     }
     c->ucache_on = 0;
@@ -157,7 +164,7 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
         else
         {
             if (c->ushadow == NULL)
-                c->ushadow = (ULONG *) c->env.alloc(c->env.env, CORE_UCACHE_BYTES);
+                c->ushadow = (ULONG *) c->env.alloc(c->env.env, c->ucache_size);
             if (c->ushadow != NULL)
             {
                 c->ucache_on = 1;
