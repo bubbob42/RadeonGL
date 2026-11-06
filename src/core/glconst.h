@@ -726,6 +726,10 @@
 #ifndef MGL_PERSPECTIVE_MAPPING
 #define MGL_PERSPECTIVE_MAPPING                  0x7015UL
 #endif
+/* RadeonGL's own hint (extension GL_RGL_static_arrays, array.c VertexKey) */
+#ifndef GL_RGL_STATIC_ARRAYS_HINT
+#define GL_RGL_STATIC_ARRAYS_HINT                0x52474c01UL
+#endif
 #ifndef MGL_W_ONE_HINT
 #define MGL_W_ONE_HINT                           0x7016UL
 #endif

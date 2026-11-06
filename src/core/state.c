@@ -361,8 +361,25 @@ void Core_ClearDepth(struct Core *c, double d)
 
 void Core_Hint(struct Core *c, ULONG target, ULONG mode)
 {
+    /* RadeonGL's static arrays (GL_RGL_static_arrays): GL_NICEST on,
+     * GL_DONT_CARE off, GL_FASTEST off and every address key forgotten */
+    if (target == GL_RGL_STATIC_ARRAYS_HINT)
+    {
+        if (mode == GL_NICEST)
+            c->static_arrays = 1;
+        else if (mode == GL_DONT_CARE)
+            c->static_arrays = 0;
+        else if (mode == GL_FASTEST)
+        {
+            c->static_arrays = 0;
+            c->static_gen++;
+        }
+        else
+            Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
     /* GL's five targets and MiniGL's two (glHint(MGL_W_ONE_HINT): GLQuake);
-     * every hint is accepted and changes nothing */
+     * every other hint is accepted and changes nothing */
     if ((target < GL_PERSPECTIVE_CORRECTION_HINT || target > GL_FOG_HINT)
         && target != MGL_W_ONE_HINT && target != MGL_FIXPOINTTRANS_HINT)
     {

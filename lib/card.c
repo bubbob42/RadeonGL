@@ -233,6 +233,9 @@ static BOOL LockBm(struct Card *k, ULONG i, BOOL any_place)
         return FALSE;
     b->mem = (UBYTE *) ri.Memory;
     b->bpr = (ULONG) ri.BytesPerRow;
+#if defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
+    rgl_bm[i] = (ULONG) b->mem;
+#endif
     if (b->mem == NULL || (!any_place && !p96GetBitMapAttr(b->bm, P96BMA_ISONBOARD)))
     {
         p96UnlockBitMap(b->bm, b->lock);
@@ -453,6 +456,10 @@ static LONG Peek(APTR ctx, ULONG gpu, ULONG *val)
 /* GL screens a visitor window kept open at Card_Close (for the log). */
 ULONG Card_ScreensLeft = 0;
 ULONG Card_NoHeap32 = 0;
+#if defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
+volatile ULONG rgl_where, rgl_where2, rgl_pending;
+volatile ULONG rgl_bm[CARD_NBM];
+#endif
 ULONG Card_HeapMax = 0;
 ULONG Card_HeapNarrow = 0;
 
@@ -607,6 +614,7 @@ static void Settle(struct Card *k, BOOL closing)
     ULONG t0;
     ULONG us;
 
+    WHERE(40, k->pend_seq);
     k->pending = 0;
     if (!R2Ring_FenceDone(&k->ring, k->pend_seq))
         k->ov_waits++;
@@ -616,8 +624,10 @@ static void Settle(struct Card *k, BOOL closing)
     us = HwClock(k) - t0;
     if (us > k->fence_us_max)
         k->fence_us_max = us;
+    WHERE(41, us);
     if (StopCp(k, closing) && !closing)
         k->drop_next = 1;
+    WHERE(42, 0);
 }
 
 /* Settle outside a flush, under a lock of its own (the ring's, wherever
@@ -628,6 +638,7 @@ static void SettleAlone(struct Card *k, BOOL closing)
 
     if (!k->pending)
         return;
+    WHERE(45, closing);
     locked = LockBm(k, CARD_RING, TRUE);
     k->clock_base = Ticks();
     Settle(k, closing);
@@ -703,6 +714,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     }
     k->clock_base = Ticks();
     OvLock(k, present ? CARD_OV_FRAME : CARD_OV_FLUSH);
+    WHERE(1, n);
 
     /* 1. the locks: target, ring, heap, on the board */
     if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
@@ -717,6 +729,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         return R2_OK;
     }
 
+    WHERE(2, k->pending);
     /* 1b. the frame the last flush kicked: done before anything is written
      * (the lock has waited for the 3D engine already, probe B) */
     if (k->pending)
@@ -831,6 +844,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         }
         k->reload_ucode = 0;
     }
+    WHERE(5, present);
     ring_gpu = Align4k(k->b[CARD_RING].gpu);
     ring_cpu = (ULONG *) (k->b[CARD_RING].mem + (ring_gpu - k->b[CARD_RING].gpu));
     if (R2Cp_Start(&k->hw, ring_gpu, CARD_RING_DW, 0) != R2_OK
@@ -842,6 +856,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     }
     k->ring.kick = 2048;
 
+    WHERE(6, k->core->stream_pos);
     /* 6. the stream's new part into video RAM, then the commands */
     if (k->core->stream_gen != k->gen)
     {
@@ -861,9 +876,11 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     /* the upload cache's new entries, from its mirror */
     if (k->core->ustaged && (k->core->udirty_n != 0 || k->core->udirty_all))
         CopyUCache(k);
+    WHERE(7, n);
     e = CopyCommands(k, n);
     if (e == R2_OK)
         e = R2Ring_Fence(&k->ring, &seq);
+    WHERE(8, e);
     if (k->dwords + n < k->dwords)
         k->dwords_hi++;
     k->dwords += n;
@@ -896,7 +913,12 @@ stop:
     /* 7. without the overlap: the CP off again before the unlock */
     (void) StopCp(k, FALSE);
 unlock:
+    WHERE(9, k->pending);
     UnlockAll(k);
+#if defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
+    rgl_pending = k->pending;
+#endif
+    WHERE(10, k->pending);
     if (tail != ~0UL)
         OvUnlock(k, tail);
     us = HwClock(k);
@@ -940,6 +962,7 @@ ULONG *Card_VramBegin(struct Card *k)
     if (k->in_flush)
         return (k->b[CARD_HEAP].mem != NULL) ? (ULONG *) HeapCpu(k) : NULL;
     OvLock(k, CARD_OV_VRAM);
+    WHERE(20, k->pending);
     if (!LockBm(k, CARD_HEAP, TRUE))
         return NULL;
     if (k->pending)
@@ -950,6 +973,7 @@ ULONG *Card_VramBegin(struct Card *k)
     }
     k->vram_lock = 1;
     k->vram_locks++;
+    WHERE(21, k->b[CARD_HEAP].mem);
     return (ULONG *) HeapCpu(k);
 }
 
@@ -960,6 +984,7 @@ void Card_VramEnd(struct Card *k)
         UnlockBm(k, CARD_HEAP);
         k->vram_lock = 0;
     }
+    WHERE(22, 0);
 }
 
 /* --- opening -------------------------------------------------------------------------- */

@@ -92,6 +92,10 @@ brauchen vielleicht Funktionen, die sie noch nicht hat: siehe
 
 Einem A4000D mit CyberStorm MK II 68060 bei 50 MHz, einer Mediator-
 PCI-Brücke und einer Radeon 9200, unter AmigaOS 3.2 und Picasso96.
+
+Von einem Tester gemeldet: ein A4000D mit BFG9060 (68060 bei 75 MHz) und
+einer Prometheus-Firestorm-PCI-Brücke. RadeonGL läuft mit beiden
+Brücken.
 @endnode
 
 @node Install "Installieren und zurück"
@@ -329,6 +333,12 @@ Prüfung an: RadeonGL wie installiert. Prüfung aus: RadeonGLCheck=0.
 Direkt: zusätzlich RadeonGLDirect=1. 8-Bit-LT: 8-Bit-Lichttexturen,
 GLQuake mit -lm_LUMINANCE gestartet (die Vorgabe von id; die
 Amiga-Portierung hat 16 Bit daraus gemacht).
+
+Der A4000D eines Testers (BFG9060, 68060 bei 75 MHz, Prometheus
+Firestorm, RadeonGL 0.6, Prüfung aus, 8-Bit-LT, demo1 ohne Ton): 43,0
+Bilder pro Sekunde bei 320 x 240, 41,5 bei 640 x 480; direkt 43,7 und
+42,2. Sein Speicher ist viel schneller als der des Testrechners: das macht,
+mehr als der Takt, den Unterschied.
 
 Die Fassung für 68020/68030, zum Vergleich auf demselben 68060: demo1
 17,1 (Prüfung an), 22,8 (Prüfung aus), 23,7 (direkt, 8-Bit-LT). Ein

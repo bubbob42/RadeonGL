@@ -26,6 +26,15 @@ needs.
 - **The fast path:** compiled vertex arrays (`glLockArraysEXT`) go to the
   card as indexed draws; an upload cache keeps what a program sends again
   unchanged in the card's memory.
+- **Static arrays (`GL_RGL_static_arrays`, RadeonGL's own extension):** a
+  program whose arrays never change says so with
+  `glHint(GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST)` (`0x52474C01`); the upload
+  cache then knows them by address instead of reading their bytes every
+  frame. `GL_DONT_CARE` switches it off again, `GL_FASTEST` forgets every
+  such array (before the program frees or refills one). It covers arrays
+  of positions plus two texture units without a colour array (GLQuake's
+  world). Other `minigl.library`s do not name the extension: test the
+  extension string first.
 - **Transformation and rasterising on the Radeon:** the full float matrix
   stack (`glFrustum`, `glOrtho`, `glRotatef`, `glTranslatef`, `glScalef`,
   push, pop, load, multiply), viewport, depth range.
@@ -93,6 +102,12 @@ Picasso96. Frames a second:
 The 68060 sets the pace, not the Radeon: sixteen times the pixels cost
 about one frame a second.
 
+A tester's A4000D (BFG9060, 68060 at 75 MHz, Prometheus Firestorm,
+RadeonGL 0.6, check off, 8-bit lightmaps, demo1 without sound): 43.0 fps at
+320 x 240, 41.5 at 640 x 480; direct 43.7 and 42.2. Its bridge writes to the
+card as fast as the Mediator (8.6 MB/s); its memory is 2.4 times as fast as
+the CyberStorm MK II's, its clock 1.5 times.
+
 ## Requirements
 
 - A Radeon 8500, 9000, 9100, 9200 or 9250, driven by Picasso96 3.6 or
@@ -102,6 +117,8 @@ about one frame a second.
   Installer picks the right one; a build refuses to open on a CPU it cannot
   run on.
 - AmigaOS 3.1 or newer (tested on 3.2).
+- A PCI bridge for the card: tested with the Mediator and, by a tester,
+  the Prometheus Firestorm.
 
 ## Building
 

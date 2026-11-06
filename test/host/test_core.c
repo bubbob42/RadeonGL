@@ -2527,6 +2527,38 @@ static void test_ucache_block(void)
     CHECK_INT(core.stat_uc_hits, 4);
     CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* GL_RGL_static_arrays: the world format keyed by address, its bytes
+     * not read; the colour stays in the key; GL_FASTEST forgets the keys */
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    CHECK_INT(core.static_arrays, 1);
+    UbDraw(250, idx, 96);                       /* a new kind of key: a vertex miss */
+    Core_GpuIdle(&core);
+    hits = core.stat_uc_hits;
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 2);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    uc_wv[10 * 7 + 1] += 1.0f;                  /* changed against the promise: */
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 4);     /* not seen, a hit */
+    uc_wv[10 * 7 + 1] -= 1.0f;
+    Core_Color4ub(&core, 202, 150, 100, 255);
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 5);     /* the indices only */
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_FASTEST);
+    CHECK_INT(core.static_arrays, 0);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    Core_GpuIdle(&core);
+    hits = core.stat_uc_hits;
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 1);     /* the indices only: a new generation */
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+    CHECK_INT(core.static_arrays, 0);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_LINEAR);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
     collect_from = 0;
 }
 

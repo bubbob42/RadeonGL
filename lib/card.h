@@ -163,6 +163,17 @@ struct Card
 };
 
 extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
+/* Breadcrumbs for the debug trap catcher (trapcatch.h, RGL_TRAPCATCH):
+ * where the card code is, and the bitmaps' CPU addresses at the last
+ * lock. Nothing in the release build. */
+#if defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
+extern volatile ULONG rgl_where, rgl_where2, rgl_pending;
+extern volatile ULONG rgl_bm[CARD_NBM];
+#define WHERE(n, v) (rgl_where = (n), rgl_where2 = (ULONG) (v))
+#else
+#define WHERE(n, v) ((void) 0)
+#endif
+
 extern ULONG Card_NoHeap32;     /* test switch (RadeonGLHeap32=0): skip the 32-bit heap */
 extern ULONG Card_HeapMax;      /* test switch (RadeonGLHeapMax=MB): a smaller heap; 0 = 16 MB */
 extern ULONG Card_HeapNarrow;   /* test switch (RadeonGLHeapNarrow=1): only 0.4's narrow heap, which froze */

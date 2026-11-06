@@ -1,0 +1,28 @@
+; GLQuakeNullText -- the 2D text as one array draw a line (gl_draw.c
+; Draw_StringN) on the null card: demo1 with -nostringn (a glBegin/glEnd per
+; character, as before) and without. Frame 400 shows four notify lines; it is
+; kept as DEV:Test/text-<run>-f400.r2d -- rendered with build/host/r200view,
+; the two pictures must match. host_framerate as in GLQuakeNullWva.
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 1500
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/nullx-#? DEV:Test/text-#?
+Echo "=== demo1 old ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 -nostringn +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullx-demo1-f400.r2d DEV:Test/text-old-f400.r2d
+Delete >NIL: DEV:Test/nullx-#?
+Echo "=== demo1 new ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullx-demo1-f400.r2d DEV:Test/text-new-f400.r2d
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

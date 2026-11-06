@@ -183,9 +183,11 @@ BOOL P96Board_Open(struct P96Board *b, ULONG bytes)
     /* the block: a friend of the screen's bitmap gets the screen's format
      * and lands on the board when there is room. Rows of ROW_BYTES, so the
      * size does not depend on the pixel size (a 16-bit screen gives 512
-     * pixels a row). Not BMF_DISPLAYABLE: the CRTC never shows it. */
+     * pixels a row; a 24-bit one 341 pixels, 1023 bytes: the rows follow
+     * from what a row really holds). Not BMF_DISPLAYABLE: the CRTC never
+     * shows it. */
     sbpp = p96GetBitMapAttr(b->scrbm, P96BMA_BYTESPERPIXEL);
-    if (sbpp == 0 || ROW_BYTES % sbpp != 0)
+    if (sbpp == 0 || sbpp > 4)
     {
         Log_Printf("the screen has %lu bytes a pixel: no block\n", sbpp);
         return FALSE;
@@ -193,7 +195,7 @@ BOOL P96Board_Open(struct P96Board *b, ULONG bytes)
     depth = GetBitMapAttr(b->scrbm, BMA_DEPTH);
     b->bytes = bytes;
     b->width = ROW_BYTES / sbpp;
-    b->rows = (bytes + ROW_BYTES - 1) / ROW_BYTES;
+    b->rows = (bytes + b->width * sbpp - 1) / (b->width * sbpp);
     b->bm = AllocBitMap(b->width, b->rows, depth, BMF_MINPLANES, b->scrbm);
     if (b->bm == NULL || !p96GetBitMapAttr(b->bm, P96BMA_ISP96))
     {

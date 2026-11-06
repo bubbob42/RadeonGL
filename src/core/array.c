@@ -571,6 +571,7 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
 #define UK_IDX   0x49445831UL
 #define UK_MODELRUN 0x4d4f4432UL   /* the same, hashed as one block */
 #define UK_WORLDRUN 0x574f5232UL
+#define UK_STATIC 0x53544131UL     /* the world format keyed by address (static_arrays) */
 
 /* Two hashes mixed with x (a: FNV-1a style, b: rotate and add). a rotates
  * after the multiply: without it bit 31 of x reached bit 31 of a only, and
@@ -786,6 +787,7 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
     ULONG span;
     ULONG offs;
     ULONG col;
+    ULONG k;
 
     if (c->no_fast || !c->cs->swap || c->va.type != GL_FLOAT || c->va.size != 3)
         return 0;
@@ -828,6 +830,24 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
         ptr[2] = Elem(t1, first);
         stride[2] = t1->stride ? t1->stride : t1->size * 4;
         len[2] = 8;
+        if (c->static_arrays)
+        {
+            /* the program promised these bytes do not change: their
+             * addresses, strides, count and colour are the key, nothing is
+             * read (GL_RGL_static_arrays) */
+            h[0] = 2166136261UL ^ UK_STATIC ^ c->static_gen;
+            h[1] = UK_STATIC ^ lcount;
+            UMIX(h[0], h[1], col);
+            for (k = 0; k < 3; k++)
+            {
+                /* unsigned long holds a pointer on the Amiga and the host;
+                 * the high half is 0 on the Amiga (two shifts: never 32) */
+                UMIX(h[0], h[1], (ULONG) (unsigned long) ptr[k]);
+                UMIX(h[0], h[1], (ULONG) (((unsigned long) ptr[k] >> 16) >> 16));
+            }
+            UMIX(h[0], h[1], (stride[0] << 16) ^ (stride[1] << 8) ^ stride[2]);
+            return 1;
+        }
         if (OneBlock(ptr, stride, len, &base, &span, &offs))
         {
             h[0] = 2166136261UL ^ UK_WORLDRUN ^ stride[0];

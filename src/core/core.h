@@ -316,6 +316,11 @@ struct Core
     ULONG uq_head, uq_n;
     UWORD uslot[CORE_USLOTS];       /* uq index + 1, 0 = empty */
     ULONG no_ucache;                /* tests, RadeonGLUploadCache=0 */
+    /* glHint(GL_RGL_STATIC_ARRAYS_HINT): GL_NICEST keys the world format
+     * (positions + two texture units, no colour array) by the arrays'
+     * addresses instead of their bytes -- the program promises they do not
+     * change; GL_FASTEST forgets every such key (a new generation). */
+    ULONG static_arrays, static_gen;
     ULONG stat_uc_hits, stat_uc_misses, stat_uc_saved, stat_uc_written;
     ULONG stat_stream_bytes;    /* written into the stream (vertices + indices): bus bytes */
 };

@@ -1,0 +1,48 @@
+; GLQuakeNullWva -- GLQuake's static world vertex array (gl_rsurf.c) on the
+; null card, demo1 four times: -noworldva (the copying batches), the array
+; with RadeonGL's static-arrays hint (whole chunks, keyed by address),
+; -noworldvahint (visible spans locked, hashed), -worldvacheck (every drawn
+; polygon compared with its glpoly_t: the log must say "0 different"). The library logs show what the upload cache hashed. Frame 400
+; of each run is kept as DEV:Test/wva-<run>-f400.r2d; rendered with
+; build/host/r200view, off, hint and span must match. Frame 400 counts from
+; the library's first frame, and some frames before the demo depend on real
+; time (host_framerate does not fix them): only runs of about the same speed
+; dump the same moment -- the check run (15% slower) dumps another.
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 2700
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/nullx-#? DEV:Test/wva-#?
+Echo "=== demo1 off ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 -noworldva +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullx-demo1-f400.r2d DEV:Test/wva-off-f400.r2d
+Delete >NIL: DEV:Test/nullx-#?
+Echo "=== demo1 hint ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullx-demo1-f400.r2d DEV:Test/wva-hint-f400.r2d
+Delete >NIL: DEV:Test/nullx-#?
+Echo "=== demo1 span ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 -noworldvahint +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullx-demo1-f400.r2d DEV:Test/wva-span-f400.r2d
+Delete >NIL: DEV:Test/nullx-#?
+Echo "=== demo1 check ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullX demo1 -worldvacheck +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullx-demo1.done
+Type DEV:Test/nullx-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullx-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullx-demo1-f400.r2d DEV:Test/wva-check-f400.r2d
+Delete >NIL: DEV:Test/nullx-#?
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

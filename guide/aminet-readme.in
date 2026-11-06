@@ -93,6 +93,9 @@ RadeonGLDirect=1 as well. 8-bit LM: 8-bit lightmaps, GLQuake started with
 -lm_LUMINANCE (id's own default; the Amiga port changed it to 16 bit).
 The 68060 sets the pace, not the Radeon. The 68020/68030 build on the
 same 68060: 17.1 / 22.8 / 23.7 (check on / off / direct, 8-bit LM).
+A tester's A4000D (BFG9060, 68060 at 75 MHz, Prometheus Firestorm PCI
+bridge, RadeonGL 0.6, check off, 8-bit LM, demo1 without sound): 43.0 at
+320 x 240, 41.5 at 640 x 480; direct 43.7 and 42.2. RadeonGL works with both the Mediator and the Prometheus.
 
 
 INSTALLATION

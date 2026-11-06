@@ -87,6 +87,9 @@ it does not have yet: see @{" Which programs work " link Programs}.
 
 An A4000D with a CyberStorm MK II 68060 at 50 MHz, a Mediator PCI
 bridge and a Radeon 9200, under AmigaOS 3.2 and Picasso96.
+
+Reported by a tester: an A4000D with a BFG9060 68060 at 75 MHz and a
+Prometheus Firestorm PCI bridge. RadeonGL works with both bridges.
 @endnode
 
 @node Install "Installing, and going back"
@@ -310,6 +313,12 @@ Picasso96), frames a second:
 Check on: RadeonGL as installed. Check off: RadeonGLCheck=0. Direct:
 RadeonGLDirect=1 as well. 8-bit LM: 8-bit lightmaps, GLQuake started with
 -lm_LUMINANCE (id's own default; the Amiga port changed it to 16 bit).
+
+A tester's A4000D (BFG9060, 68060 at 75 MHz, Prometheus Firestorm,
+RadeonGL 0.6, check off, 8-bit LM, demo1 without sound): 43.0 frames a
+second at 320 x 240, 41.5 at 640 x 480; direct 43.7 and 42.2. Its memory
+is much faster than the test machine's: that, more than the clock, makes
+the difference.
 
 The build for the 68020/68030, on the same 68060 for comparison: demo1
 17.1 (check on), 22.8 (check off), 23.7 (direct, 8-bit LM). A real 68030

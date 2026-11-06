@@ -56,6 +56,7 @@
 #include "r200reg.h"
 #include "nullcard.h"
 #include "card.h"
+#include "trapcatch.h"
 #include "vtxfast.h"
 #include "../src/RadeonGL_rev.h"
 
@@ -105,6 +106,7 @@ struct Rgl
     ULONG dump_frame;           /* 0: no dump */
     ULONG dump_written;         /* dwords of packets written, 0 = none */
     char dump_path[160];
+    UWORD *ptr_blank;           /* MGLSetPointer: an empty sprite (chip RAM) on the input window */
 };
 
 GLcontext Rgl_CurrentContext = 0;
@@ -500,10 +502,29 @@ static void WriteDump(struct Rgl *r)
     r->dump_written = r->card.rec_n;
 }
 
+static struct Window *InputWindow(struct Rgl *r)
+{
+    return r->real ? r->rad.win : r->win;
+}
+
+/* MiniGL's vid_DeletePointer: the window's own pointer again, the empty
+ * sprite freed (after ClearPointer: Intuition shows it until then) */
+static void PointerBack(struct Rgl *r)
+{
+    if (r->ptr_blank == NULL)
+        return;
+    if (InputWindow(r) != NULL)
+        ClearPointer(InputWindow(r));
+    FreeMem(r->ptr_blank, 8);
+    r->ptr_blank = NULL;
+}
+
 static void FreeRgl(struct Rgl *r)
 {
     ULONG i;
 
+    Trap_Remove();
+    PointerBack(r);
     if (r->card.rec != NULL)
         FreeVec(r->card.rec);
     Core_Free(&r->core);
@@ -744,6 +765,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         return NULL;
     }
     rgl = r;
+    Trap_Install();                 /* RadeonGLTrap=1, debug builds only */
     rgl_busy = 0;
     return (void *) r;
 }
@@ -915,14 +937,27 @@ void Hook_MGLEnableSync(GLcontext context, GLboolean enable)
         rgl->core.sync = enable;
 }
 
+/* MiniGL's vid_Pointer: GLQuake leaves hiding the mouse pointer to the
+ * library (mglSetPointer at its start, mglClearPointer at its end). An
+ * empty sprite, 0 x 0, as MiniGL sets it. */
 void Hook_MGLClearPointer(GLcontext context)
 {
     (void) context;
+    if (rgl != NULL)
+        PointerBack(rgl);
 }
 
 void Hook_MGLSetPointer(GLcontext context)
 {
     (void) context;
+#ifdef RGL_KEEP_POINTER
+    return;                         /* a debug build that must behave as 0.6 */
+#endif
+    if (rgl == NULL || rgl->ptr_blank != NULL || InputWindow(rgl) == NULL)
+        return;
+    rgl->ptr_blank = (UWORD *) AllocMem(8, MEMF_CHIP | MEMF_CLEAR);
+    if (rgl->ptr_blank != NULL)
+        SetPointer(InputWindow(rgl), rgl->ptr_blank, 0, 0, 0, 0);
 }
 
 void Hook_mglChooseGuardBand(GLboolean flag) { (void) flag; }
