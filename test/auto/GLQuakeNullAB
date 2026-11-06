@@ -2,26 +2,43 @@
 ; per run (edit the runs below as a comparison needs). Kept as
 ; DEV:Test/ab-<run>-f.r2d; render with build/host/r200view and compare.
 ; -anycpu: FS-UAE's machine is a 68040.
-; Now: gl_keeptjunctions 0 against the new default 1 (vertex counts).
+; Now: whole world chunks (static index lists, GPU culling) against the
+; visible surfaces only (-noworldvawhole).
 ; Needs: gmake glquake-data rgl-lib.
-; LIMIT 1800
+; LIMIT 3000
 FailAt 1000
 Wait 12
 Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Stack 1000000
 Delete >NIL: DEV:Test/nullb-#? DEV:Test/ab-#?
-Echo "=== tj0: GLQuakeA frame 400 -worldvacheck +gl_keeptjunctions 0 ===" >>DEV:Test/auto.log
-Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -worldvacheck +gl_keeptjunctions 0 +host_framerate 0.05
+Echo "=== vis400: GLQuakeA frame 400 -noworldvawhole ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -noworldvawhole +host_framerate 0.05
 Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
 Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
-Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-tj0-f.r2d
+Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-vis400-f.r2d
 Delete >NIL: DEV:Test/nullb-#?
-Echo "=== tj1: GLQuakeA frame 400 -worldvacheck ===" >>DEV:Test/auto.log
+Echo "=== whole400: GLQuakeA frame 400 -worldvacheck ===" >>DEV:Test/auto.log
 Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400 -anycpu -worldvacheck +host_framerate 0.05
 Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
 Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
-Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-tj1-f.r2d
+Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-whole400-f.r2d
+Delete >NIL: DEV:Test/nullb-#?
+Echo "=== vis550: GLQuakeA frame 550 -noworldvawhole ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 550 -anycpu -noworldvawhole +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-vis550-f.r2d
+Delete >NIL: DEV:Test/nullb-#?
+Echo "=== whole550: GLQuakeA frame 550 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 550 -anycpu +host_framerate 0.05
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/nullb-demo1-lib.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/ab-whole550-f.r2d
 Delete >NIL: DEV:Test/nullb-#?
 Echo "=== done ===" >>DEV:Test/auto.log
 Echo >DEV:Test/AutoDone done

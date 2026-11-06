@@ -326,7 +326,12 @@ struct Core
      * addresses instead of their bytes -- the program promises they do not
      * change; GL_FASTEST forgets every such key (a new generation). */
     ULONG static_arrays, static_gen;
+    /* glHint(GL_RGL_STATIC_INDICES_HINT): GL_NICEST keys 16-bit index lists
+     * by address (and count, lock), unread; GL_DONT_CARE off; GL_FASTEST off
+     * and every address key forgotten (the generation shared with arrays) */
+    ULONG static_indices;
     ULONG stat_uc_hits, stat_uc_misses, stat_uc_saved, stat_uc_written;
+    ULONG stat_uc_smiss_v, stat_uc_smiss_i;  /* misses while the static hints were on */
     ULONG stat_stream_bytes;    /* written into the stream (vertices + indices): bus bytes */
 };
 

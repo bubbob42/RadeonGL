@@ -2556,6 +2556,36 @@ static void test_ucache_block(void)
     CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
     Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
     CHECK_INT(core.static_arrays, 0);
+
+    /* GL_RGL_STATIC_INDICES_HINT: index lists keyed by address, count and
+     * lock; changed against the promise, not seen; GL_FASTEST forgets */
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_NICEST);
+    CHECK_INT(core.static_indices, 1);
+    UbDraw(250, idx, 96);                       /* new keys of both kinds */
+    Core_GpuIdle(&core);
+    hits = core.stat_uc_hits;
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 2);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    k = idx[7];
+    idx[7] = idx[8];                            /* changed against the promise: */
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 4);     /* not seen */
+    idx[7] = (UWORD) k;
+    UbDraw(250, idx, 93);                       /* another count: another key */
+    CHECK_INT(core.stat_uc_hits, hits + 5);     /* the vertices only */
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_FASTEST);
+    CHECK_INT(core.static_indices, 0);
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_NICEST);
+    Core_GpuIdle(&core);
+    hits = core.stat_uc_hits;
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits);         /* a new generation: both new */
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_DONT_CARE);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+    CHECK_INT(core.static_indices, 0);
     Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_LINEAR);
     CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);

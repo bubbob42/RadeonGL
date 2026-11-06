@@ -224,7 +224,13 @@ static void PutCache(BPTR f, const struct Core *c)
     Put(f, c->ustaged ? "(staged, copied at the flush) " : "(written in place) ");
     PutU(f, c->stat_uc_hits); Put(f, " hits, "); PutU(f, c->stat_uc_misses);
     Put(f, " misses; bytes not written again: "); PutU(f, c->stat_uc_saved);
-    Put(f, ", written into it: "); PutU(f, c->stat_uc_written); Put(f, "\n");
+    Put(f, ", written into it: "); PutU(f, c->stat_uc_written);
+    if (c->stat_uc_smiss_v || c->stat_uc_smiss_i)
+    {
+        Put(f, "; static misses: "); PutU(f, c->stat_uc_smiss_v);
+        Put(f, " vertex blocks, "); PutU(f, c->stat_uc_smiss_i); Put(f, " index lists");
+    }
+    Put(f, "\n");
 }
 
 static void PutX(BPTR f, ULONG v)

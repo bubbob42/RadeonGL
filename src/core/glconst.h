@@ -730,6 +730,9 @@
 #ifndef GL_RGL_STATIC_ARRAYS_HINT
 #define GL_RGL_STATIC_ARRAYS_HINT                0x52474c01UL
 #endif
+#ifndef GL_RGL_STATIC_INDICES_HINT
+#define GL_RGL_STATIC_INDICES_HINT               0x52474c02UL
+#endif
 #ifndef MGL_W_ONE_HINT
 #define MGL_W_ONE_HINT                           0x7016UL
 #endif

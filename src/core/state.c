@@ -363,16 +363,18 @@ void Core_Hint(struct Core *c, ULONG target, ULONG mode)
 {
     /* RadeonGL's static arrays (GL_RGL_static_arrays): GL_NICEST on,
      * GL_DONT_CARE off, GL_FASTEST off and every address key forgotten */
-    if (target == GL_RGL_STATIC_ARRAYS_HINT)
+    if (target == GL_RGL_STATIC_ARRAYS_HINT || target == GL_RGL_STATIC_INDICES_HINT)
     {
+        ULONG *flag = (target == GL_RGL_STATIC_ARRAYS_HINT) ? &c->static_arrays : &c->static_indices;
+
         if (mode == GL_NICEST)
-            c->static_arrays = 1;
+            *flag = 1;
         else if (mode == GL_DONT_CARE)
-            c->static_arrays = 0;
+            *flag = 0;
         else if (mode == GL_FASTEST)
         {
-            c->static_arrays = 0;
-            c->static_gen++;
+            *flag = 0;
+            c->static_gen++;        /* every address key, arrays and indices */
         }
         else
             Core_Error(c, GL_INVALID_ENUM);

@@ -572,6 +572,7 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
 #define UK_MODELRUN 0x4d4f4432UL   /* the same, hashed as one block */
 #define UK_WORLDRUN 0x574f5232UL
 #define UK_STATIC 0x53544131UL     /* the world format keyed by address (static_arrays) */
+#define UK_STATIC_IDX 0x53544932UL /* index lists keyed by address (static_indices) */
 
 /* Two hashes mixed with x (a: FNV-1a style, b: rotate and add). a rotates
  * after the multiply: without it bit 31 of x reached bit 31 of a only, and
@@ -1115,13 +1116,29 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
             vgpu = c->heap.gpu + voff;
             if (vkey)
                 c->stat_uc_misses++;
+            if (vkey && c->static_arrays)
+                c->stat_uc_smiss_v++;
         }
     }
 
     /* the indices: a hit was checked against this same lock already */
-    ih[0] = 2166136261UL ^ UK_IDX ^ first;
-    ih[1] = UK_IDX ^ lcount;
-    HashIdx16(ix16, n, ih);
+    if (c->static_indices)
+    {
+        /* GL_RGL_STATIC_INDICES_HINT: the program promised this list does
+         * not change: its address, count and lock are the key, nothing is
+         * read (a miss still packs and checks it) */
+        ih[0] = 2166136261UL ^ UK_STATIC_IDX ^ c->static_gen ^ first;
+        ih[1] = UK_STATIC_IDX ^ lcount;
+        UMIX(ih[0], ih[1], n);
+        UMIX(ih[0], ih[1], (ULONG) (unsigned long) ix16);
+        UMIX(ih[0], ih[1], (ULONG) (((unsigned long) ix16 >> 16) >> 16));
+    }
+    else
+    {
+        ih[0] = 2166136261UL ^ UK_IDX ^ first;
+        ih[1] = UK_IDX ^ lcount;
+        HashIdx16(ix16, n, ih);
+    }
     ipos = 0xffffffffUL;
     ioff = 0xffffffffUL;
     e = ULook(c, ih[0], ih[1], idw);
@@ -1138,6 +1155,8 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
         ioff = (ipos != 0xffffffffUL) ? c->ucache_off + ipos : StreamAlloc(c, ibytes);
         igpu = c->heap.gpu + ioff;
         c->stat_uc_misses++;
+        if (c->static_indices)
+            c->stat_uc_smiss_i++;
     }
 
     /* what the cache does not hold: into video RAM (one lock), or when

@@ -33,8 +33,12 @@ needs.
   frame. `GL_DONT_CARE` switches it off again, `GL_FASTEST` forgets every
   such array (before the program frees or refills one). It covers arrays
   of positions plus two texture units without a colour array (GLQuake's
-  world). Other `minigl.library`s do not name the extension: test the
-  extension string first.
+  world). `glHint(GL_RGL_STATIC_INDICES_HINT, GL_NICEST)` (`0x52474C02`)
+  does the same for 16-bit index lists: keyed by address, count and lock,
+  never read again -- for lists built once (GLQuake draws whole chunks of
+  its world from them, and lets the card cull what is hidden). Both share
+  `GL_FASTEST`'s forgetting. Other `minigl.library`s do not name the
+  extension: test the extension string first.
 - **Transformation and rasterising on the Radeon:** the full float matrix
   stack (`glFrustum`, `glOrtho`, `glRotatef`, `glTranslatef`, `glScalef`,
   push, pop, load, multiply), viewport, depth range.
