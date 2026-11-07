@@ -1124,16 +1124,275 @@ static const char *ChipCheck(struct Card *k)
     return NULL;
 }
 
-ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char *why,
-                ULONG whylen)
+/* --- the GL screen ------------------------------------------------------------------ */
+
+/* The input window: backdrop and borderless over the whole GL screen. */
+static BOOL OpenInputWindow(struct Card *k)
+{
+    struct TagItem t[12];
+
+    t[0].ti_Tag = WA_CustomScreen;  t[0].ti_Data = (ULONG) k->scr;
+    t[1].ti_Tag = WA_Left;          t[1].ti_Data = 0;
+    t[2].ti_Tag = WA_Top;           t[2].ti_Data = 0;
+    t[3].ti_Tag = WA_Width;         t[3].ti_Data = k->width;
+    t[4].ti_Tag = WA_Height;        t[4].ti_Data = k->height;
+    t[5].ti_Tag = WA_Backdrop;      t[5].ti_Data = TRUE;
+    t[6].ti_Tag = WA_Borderless;    t[6].ti_Data = TRUE;
+    t[7].ti_Tag = WA_Activate;      t[7].ti_Data = TRUE;
+    t[8].ti_Tag = WA_RMBTrap;       t[8].ti_Data = TRUE;
+    t[9].ti_Tag = WA_SimpleRefresh; t[9].ti_Data = TRUE;
+    t[10].ti_Tag = WA_NoCareRefresh; t[10].ti_Data = TRUE;
+    t[11].ti_Tag = TAG_DONE;        t[11].ti_Data = 0;
+    k->win = OpenWindowTagList(NULL, t);
+    return (BOOL) (k->win != NULL);
+}
+
+/* The GL screen in mode id, w x h, and its input window. bpp: the bytes a
+ * pixel the screen must have (a resize keeps the format), 0 for either of
+ * R5G6B5PC and B8G8R8A8. FALSE with why[]; what opened stays for the
+ * caller to close. */
+static BOOL OpenGLScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG bpp, char *why,
+                       ULONG whylen)
+{
+    struct TagItem t[10];
+    struct BitMap *sbm;
+    ULONG fmt;
+
+    fmt = p96GetModeIDAttr(id, P96IDA_RGBFORMAT);
+    k->compat = p96GetModeIDAttr(id, P96IDA_COMPATIBLEFORMATS);
+    k->board = p96GetModeIDAttr(id, P96IDA_BOARDNUMBER);
+    t[0].ti_Tag = P96SA_DisplayID;  t[0].ti_Data = id;
+    t[1].ti_Tag = P96SA_Width;      t[1].ti_Data = w;
+    t[2].ti_Tag = P96SA_Height;     t[2].ti_Data = h;
+    t[3].ti_Tag = P96SA_RGBFormat;  t[3].ti_Data = fmt;
+    t[4].ti_Tag = P96SA_Depth;      t[4].ti_Data = 8;
+    t[5].ti_Tag = P96SA_Title;      t[5].ti_Data = (ULONG) "RadeonGL";
+    t[6].ti_Tag = P96SA_ShowTitle;  t[6].ti_Data = FALSE;
+    t[7].ti_Tag = P96SA_Quiet;      t[7].ti_Data = TRUE;
+    t[8].ti_Tag = P96SA_AutoScroll; t[8].ti_Data = FALSE;
+    t[9].ti_Tag = TAG_DONE;         t[9].ti_Data = 0;
+    k->scr = p96OpenScreenTagList(t);
+    if (k->scr == NULL)
+    {
+        Why(why, whylen, "the GL screen did not open");
+        return FALSE;
+    }
+    sbm = k->scr->RastPort.BitMap;
+    k->b[CARD_SCREEN].bm = sbm;
+    fmt = p96GetBitMapAttr(sbm, P96BMA_RGBFORMAT);
+    if (bpp == 0)
+        bpp = p96GetBitMapAttr(sbm, P96BMA_BYTESPERPIXEL);
+    if (p96GetBitMapAttr(sbm, P96BMA_BYTESPERPIXEL) != bpp
+        || !((bpp == 2 && fmt == RGBFB_R5G6B5PC) || (bpp == 4 && fmt == RGBFB_B8G8R8A8)))
+    {
+        Why(why, whylen, "the GL screen is neither R5G6B5PC nor B8G8R8A8 (or not the format before)");
+        return FALSE;
+    }
+    k->bpp = bpp;
+    k->color_format = (k->bpp == 2) ? R_COLOR_FORMAT_RGB565 : R_COLOR_FORMAT_ARGB8888;
+    k->width = w;
+    k->height = h;
+    if (!OpenInputWindow(k))
+    {
+        Why(why, whylen, "the input window did not open");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* The back buffer for k->width x k->height: colour, then Z16, on the board. */
+static BOOL AllocTarget(struct Card *k, char *why, ULONG whylen)
+{
+    k->pitch = (k->width + 15) & ~15UL;     /* rows a multiple of 32 bytes (the present) */
+    k->color_bytes = k->pitch * k->height * k->bpp;
+    k->depth_bytes = k->pitch * k->height * 2;
+    if (!AllocData(k, CARD_TARGET, Align4k(k->color_bytes) + k->depth_bytes + 8192))
+    {
+        Why(why, whylen, "no memory for the back buffer bitmap");
+        return FALSE;
+    }
+    if (!OnBoard(k, CARD_TARGET))
+    {
+        Why(why, whylen, "P96 did not put the back buffer bitmap on the board");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* The input window and the GL screen closed (and the back buffer freed);
+ * FALSE, with nothing closed, while a visitor window holds the screen. */
+static BOOL CloseGLScreen(struct Card *k)
+{
+    if (k->win != NULL)
+    {
+        ModifyIDCMP(k->win, 0);
+        CloseWindow(k->win);
+        k->win = NULL;
+    }
+    if (k->scr != NULL && !p96CloseScreen(k->scr))
+    {
+        (void) OpenInputWindow(k);
+        return FALSE;
+    }
+    k->scr = NULL;
+    k->b[CARD_SCREEN].bm = NULL;
+    FreeBm(k, CARD_TARGET);
+    return TRUE;
+}
+
+ULONG Card_Resize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen)
+{
+    ULONG id, oldid, oldw, oldh, bpp;
+    BOOL ok;
+
+    Why(why, whylen, "");
+    if (k->lost != 0 || k->scr == NULL || P96Base == NULL)
+    {
+        Why(why, whylen, "the context is lost");
+        return CARD_FAILED;
+    }
+    if (w == k->width && h == k->height)
+        return CARD_OK;
+    bpp = k->bpp;
+    id = BestMode(w, h, (bpp == 4) ? 32UL : 16UL);
+    if (id == (ULONG) INVALID_ID || !BoardIsRadeon(id)
+        || p96GetModeIDAttr(id, P96IDA_BOARDNUMBER) != k->board)
+    {
+        Why(why, whylen, "no mode of that size on the Radeon of this context");
+        return CARD_FAILED;
+    }
+    oldid = GetVPModeID(&k->scr->ViewPort);
+    oldw = k->width;
+    oldh = k->height;
+
+    /* 1. the last frame drawn, nothing locked */
+    UnlockAll(k);
+    SettleAlone(k, FALSE);
+    WaitBlit();
+
+    /* 2. the old screen, window and back buffer away */
+    if (!CloseGLScreen(k))
+    {
+        Why(why, whylen, "a window on the GL screen keeps it open");
+        return CARD_FAILED;
+    }
+
+    /* 3. the new ones -- or the old size again */
+    ok = OpenGLScreen(k, id, w, h, bpp, why, whylen) && AllocTarget(k, why, whylen);
+    if (!ok)
+    {
+        (void) CloseGLScreen(k);
+        if (!OpenGLScreen(k, oldid, oldw, oldh, bpp, why, whylen) || !AllocTarget(k, why, whylen))
+        {
+            k->lost = CARD_LOST_SCREEN;
+            return CARD_FAILED;
+        }
+    }
+
+    /* 4. the back buffer's address, from a lock */
+    if (!LockBm(k, CARD_TARGET, FALSE))
+    {
+        Why(why, whylen, "the back buffer is not on the board");
+        k->lost = CARD_LOST_SCREEN;
+        return CARD_FAILED;
+    }
+    TargetAt(k, &k->color_gpu, &k->depth_gpu);
+    UnlockBm(k, CARD_TARGET);
+    return ok ? CARD_OK : CARD_FAILED;
+}
+
+/* Picasso96API for a call without a context: the context's if one is open,
+ * else opened here (P96Close undoes only that). */
+static struct Library *P96Own(void)
+{
+    struct Library *own;
+
+    if (P96Base != NULL)
+        return NULL;
+    own = OpenLibrary("Picasso96API.library", 2);
+    P96Base = own;
+    return own;
+}
+
+static void P96Close(struct Library *own)
+{
+    if (own != NULL)
+    {
+        CloseLibrary(own);
+        P96Base = NULL;
+    }
+}
+
+ULONG Card_EachMode(ULONG depth, BOOL (*fn)(const struct CardMode *m, void *ud), void *ud)
+{
+    struct Library *own;
+    struct List *l;
+    struct P96Mode *pm;
+    struct TagItem t[2];
+    struct CardMode m;
+    ULONG found;
+    ULONG i;
+
+    found = CARD_BESTMODE;
+    own = P96Own();
+    if (P96Base == NULL)
+        return found;
+    t[0].ti_Tag = P96MA_FormatsAllowed;
+    t[0].ti_Data = (depth == 32) ? RGBFF_B8G8R8A8 : RGBFF_R5G6B5PC;
+    t[1].ti_Tag = TAG_DONE;
+    t[1].ti_Data = 0;
+    l = p96AllocModeListTagList(t);
+    if (l != NULL)
+    {
+        for (pm = (struct P96Mode *) l->lh_Head; pm->Node.ln_Succ != NULL;
+             pm = (struct P96Mode *) pm->Node.ln_Succ)
+        {
+            if (!BoardIsRadeon(pm->DisplayID))
+                continue;
+            m.id = pm->DisplayID;
+            m.width = pm->Width;
+            m.height = pm->Height;
+            m.depth = pm->Depth;
+            for (i = 0; i < sizeof(m.name) - 1 && pm->Description[i] != 0; i++)
+                m.name[i] = pm->Description[i];
+            m.name[i] = 0;
+            if (fn(&m, ud))
+            {
+                found = m.id;
+                break;
+            }
+        }
+        p96FreeModeList(l);
+    }
+    P96Close(own);
+    return found;
+}
+
+BOOL Card_ModeSize(ULONG id, ULONG *w, ULONG *h)
+{
+    struct Library *own;
+    BOOL ok;
+
+    ok = FALSE;
+    own = P96Own();
+    if (P96Base != NULL && id != 0 && id != CARD_BESTMODE
+        && p96GetModeIDAttr(id, P96IDA_ISP96) && BoardIsRadeon(id))
+    {
+        *w = p96GetModeIDAttr(id, P96IDA_WIDTH);
+        *h = p96GetModeIDAttr(id, P96IDA_HEIGHT);
+        ok = (BOOL) (*w != 0 && *h != 0);
+    }
+    P96Close(own);
+    return ok;
+}
+
+ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULONG check,
+                char *why, ULONG whylen)
 {
     static struct Card zero;
-    struct TagItem t[12];
     struct EClockVal ev;
-    struct BitMap *sbm;
     const char *bad;
     ULONG id;
-    ULONG fmt;
     ULONG size;
     ULONG top;
     ULONG want;
@@ -1145,7 +1404,14 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
     if (P96Base == NULL)
         return CARD_NOT_RADEON;
     want = (depth == 32) ? 32UL : 16UL;
-    id = BestMode(w, h, want);
+    /* the mode asked for (MGLCreateContextFromID), if it is a Radeon's;
+     * else the best one for the size */
+    id = (ULONG) INVALID_ID;
+    if (modeid != 0 && modeid != CARD_BESTMODE && p96GetModeIDAttr(modeid, P96IDA_ISP96)
+        && BoardIsRadeon(modeid))
+        id = modeid;
+    if (id == (ULONG) INVALID_ID)
+        id = BestMode(w, h, want);
     if (id == (ULONG) INVALID_ID)
         id = BestMode(w, h, (want == 16) ? 32UL : 16UL);
     if (id == (ULONG) INVALID_ID || !BoardIsRadeon(id))
@@ -1173,74 +1439,15 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char
         clk_Freq = 709379;
     k->clock_base = Ticks();
 
-    /* the GL screen and its input window */
-    fmt = p96GetModeIDAttr(id, P96IDA_RGBFORMAT);
-    k->compat = p96GetModeIDAttr(id, P96IDA_COMPATIBLEFORMATS);
-    k->board = p96GetModeIDAttr(id, P96IDA_BOARDNUMBER);
-    t[0].ti_Tag = P96SA_DisplayID;  t[0].ti_Data = id;
-    t[1].ti_Tag = P96SA_Width;      t[1].ti_Data = w;
-    t[2].ti_Tag = P96SA_Height;     t[2].ti_Data = h;
-    t[3].ti_Tag = P96SA_RGBFormat;  t[3].ti_Data = fmt;
-    t[4].ti_Tag = P96SA_Depth;      t[4].ti_Data = 8;
-    t[5].ti_Tag = P96SA_Title;      t[5].ti_Data = (ULONG) "RadeonGL";
-    t[6].ti_Tag = P96SA_ShowTitle;  t[6].ti_Data = FALSE;
-    t[7].ti_Tag = P96SA_Quiet;      t[7].ti_Data = TRUE;
-    t[8].ti_Tag = P96SA_AutoScroll; t[8].ti_Data = FALSE;
-    t[9].ti_Tag = TAG_DONE;         t[9].ti_Data = 0;
-    k->scr = p96OpenScreenTagList(t);
-    if (k->scr == NULL)
+    /* the GL screen and its input window, the back buffer and the ring */
+    if (!OpenGLScreen(k, id, w, h, 0, why, whylen) || !AllocTarget(k, why, whylen))
     {
-        Why(why, whylen, "the GL screen did not open");
         Card_Close(k);
         return CARD_FAILED;
     }
-    sbm = k->scr->RastPort.BitMap;
-    k->b[CARD_SCREEN].bm = sbm;
-    k->bpp = p96GetBitMapAttr(sbm, P96BMA_BYTESPERPIXEL);
-    fmt = p96GetBitMapAttr(sbm, P96BMA_RGBFORMAT);
-    if (!((k->bpp == 2 && fmt == RGBFB_R5G6B5PC) || (k->bpp == 4 && fmt == RGBFB_B8G8R8A8)))
+    if (!AllocData(k, CARD_RING, CARD_RING_DW * 4 + 4096))
     {
-        Why(why, whylen, "the GL screen is neither R5G6B5PC nor B8G8R8A8");
-        Card_Close(k);
-        return CARD_FAILED;
-    }
-    k->color_format = (k->bpp == 2) ? R_COLOR_FORMAT_RGB565 : R_COLOR_FORMAT_ARGB8888;
-    k->width = w;
-    k->height = h;
-    t[0].ti_Tag = WA_CustomScreen;  t[0].ti_Data = (ULONG) k->scr;
-    t[1].ti_Tag = WA_Left;          t[1].ti_Data = 0;
-    t[2].ti_Tag = WA_Top;           t[2].ti_Data = 0;
-    t[3].ti_Tag = WA_Width;         t[3].ti_Data = w;
-    t[4].ti_Tag = WA_Height;        t[4].ti_Data = h;
-    t[5].ti_Tag = WA_Backdrop;      t[5].ti_Data = TRUE;
-    t[6].ti_Tag = WA_Borderless;    t[6].ti_Data = TRUE;
-    t[7].ti_Tag = WA_Activate;      t[7].ti_Data = TRUE;
-    t[8].ti_Tag = WA_RMBTrap;       t[8].ti_Data = TRUE;
-    t[9].ti_Tag = WA_SimpleRefresh; t[9].ti_Data = TRUE;
-    t[10].ti_Tag = WA_NoCareRefresh; t[10].ti_Data = TRUE;
-    t[11].ti_Tag = TAG_DONE;        t[11].ti_Data = 0;
-    k->win = OpenWindowTagList(NULL, t);
-    if (k->win == NULL)
-    {
-        Why(why, whylen, "the input window did not open");
-        Card_Close(k);
-        return CARD_FAILED;
-    }
-
-    /* video RAM: the target (colour, then Z16), the ring, the heap */
-    k->pitch = (w + 15) & ~15UL;            /* rows a multiple of 32 bytes (the present) */
-    k->color_bytes = k->pitch * h * k->bpp;
-    k->depth_bytes = k->pitch * h * 2;
-    if (!AllocData(k, CARD_TARGET, Align4k(k->color_bytes) + k->depth_bytes + 8192)
-        || !AllocData(k, CARD_RING, CARD_RING_DW * 4 + 4096))
-    {
-        Why(why, whylen, "no memory for the back buffer and the ring bitmaps");
-        Card_Close(k);
-        return CARD_FAILED;
-    }
-    if (!OnBoard(k, CARD_TARGET))
-    {
-        Why(why, whylen, "P96 did not put the back buffer bitmap on the board");
+        Why(why, whylen, "no memory for the ring bitmap");
         Card_Close(k);
         return CARD_FAILED;
     }

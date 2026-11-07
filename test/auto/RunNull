@@ -8,13 +8,15 @@
 ; DEV:Test/null-{demo}.log, a done marker when it is over. Frame 400 is
 ; dumped to DEV:Test/null-{demo}-f400.r2d (on the Mac:
 ; build/host/r200view dist/Test/null-{demo}-f400.r2d out.ppm).
+; -anycpu: FS-UAE's machine is a 68040 and GLQuake the 68060 build, which
+; refuses another CPU since 2026-11-06 (it ran there emulating FINTRZ before).
 FailAt 1000
 CD DEV:Quake
 SetEnv RadeonGLLog DEV:Test/null-{demo}-lib.log
 SetEnv RadeonGLDump 400
 SetEnv RadeonGLDumpFile DEV:Test/null-{demo}-f400.r2d
 Assign LIBS: DEV:Libs/RadeonGL ADD
-GLQuake -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/null-{demo}.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/null-{demo}.log
 Echo "null {demo} rc=$RC" >>DEV:Test/null-{demo}.log
 Assign LIBS: DEV:Libs/RadeonGL REMOVE
 UnSetEnv RadeonGLLog

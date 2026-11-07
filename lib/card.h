@@ -183,12 +183,41 @@ extern ULONG Card_HeapNarrow;   /* test switch (RadeonGLHeapNarrow=1): only 0.4'
 #define CARD_LOST_CP       3    /* the CP would not start or stop */
 #define CARD_LOST_EMIT     4    /* a command did not fit or was malformed (R2_E*) */
 #define CARD_LOST_HEAP     5    /* P96 moved the heap off a 32-byte boundary */
+#define CARD_LOST_SCREEN   6    /* a resize could open neither the new screen nor the old one again */
 
 /* Open the GL screen (w x h, depth 16 or 32 asked) on a Radeon and set
  * everything up. CARD_OK, CARD_NOT_RADEON (nothing kept), or CARD_FAILED
- * with why[] (nothing kept). check: run the packet checker. */
-ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG check, char *why,
-                ULONG whylen);
+ * with why[] (nothing kept). check: run the packet checker. modeid: a
+ * Picasso96 mode of a Radeon board, w x h its size (MGLCreateContextFromID),
+ * or 0 / CARD_BESTMODE for the best mode for w x h. */
+#define CARD_BESTMODE 0xFFFFFFFFUL
+ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULONG check,
+                char *why, ULONG whylen);
+
+/* A Radeon board's screen mode (mglGetSupportedScreenModes). */
+struct CardMode
+{
+    ULONG id;
+    ULONG width, height, depth;
+    char name[48];
+};
+
+/* Each mode of the Radeon boards in the GL screen's format for depth (16:
+ * R5G6B5PC, 32: B8G8R8A8), fn called for each until it returns TRUE: that
+ * mode's id, else CARD_BESTMODE. Opens Picasso96API.library itself when no
+ * context has it open. */
+ULONG Card_EachMode(ULONG depth, BOOL (*fn)(const struct CardMode *m, void *ud), void *ud);
+
+/* A mode's size; FALSE when it is not a Picasso96 mode of a Radeon board. */
+BOOL Card_ModeSize(ULONG id, ULONG *w, ULONG *h);
+
+/* 2026-11-06 (mglResizeContext): the GL screen, its input window and the
+ * back buffer anew at w x h, the best mode for it on the same board and in
+ * the same format; the ring and the texture heap stay, so textures and
+ * static arrays survive. CARD_OK; CARD_FAILED with why[] and the old size
+ * kept (k->lost = CARD_LOST_SCREEN if not even that could be reopened). The
+ * caller updates the core (Card_Target, Core_Retarget). */
+ULONG Card_Resize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen);
 
 /* For Core_Init: the target and the heap (heap_cpu is NULL: the core
  * reaches the heap only through Card_VramBegin). */

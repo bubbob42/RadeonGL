@@ -53,12 +53,14 @@
  * stream every frame (MEASURED A4000D: +10 KB a frame, -6% at 320 x 240). */
 #define CORE_UQ           1024            /* cache entries, oldest first */
 #define CORE_UDIRTY       32              /* staged: ranges for the back end to copy */
-#define CORE_USLOTS       16384           /* their lookup table (a power of two): an insert
-                                           * takes its slot from whatever held it, so a
-                                           * small table loses live entries (MEASURED
-                                           * 2026-11-03: 256 slots cost misses; at 4096 a
-                                           * new hash function cost 22% more misses by
-                                           * which entries happened to collide) */
+#define CORE_USLOTS       16384           /* their lookup table (a power of two): a key
+                                           * looks in 4 slots from its own (array.c
+                                           * UPROBE); with all 4 taken an insert takes
+                                           * the stalest, so a small table loses live
+                                           * entries (MEASURED 2026-11-03, one slot a
+                                           * key: 256 slots cost misses; at 4096 a new
+                                           * hash function cost 22% more misses by which
+                                           * entries happened to collide) */
 
 /* One upload the cache holds: its key (two hashes of the packed dwords and
  * their count, a kind folded into the second) and where it is. */
@@ -69,6 +71,7 @@ struct CoreUEntry
     ULONG bytes;
     ULONG epoch;            /* last drawn in: never evicted within it */
     ULONG slot;
+    ULONG ref;              /* hit since the ring last passed it (second chance) */
 };
 
 /* What the core needs from its host (the library or a test). */
@@ -319,6 +322,7 @@ struct Core
     ULONG udirty_n, udirty_all;
     struct CoreUEntry uq[CORE_UQ];
     ULONG uq_head, uq_n;
+    ULONG ufull_epoch;              /* the epoch in which UAlloc found no room */
     UWORD uslot[CORE_USLOTS];       /* uq index + 1, 0 = empty */
     ULONG no_ucache;                /* tests, RadeonGLUploadCache=0 */
     /* glHint(GL_RGL_STATIC_ARRAYS_HINT): GL_NICEST keys the world format
@@ -330,6 +334,15 @@ struct Core
      * by address (and count, lock), unread; GL_DONT_CARE off; GL_FASTEST off
      * and every address key forgotten (the generation shared with arrays) */
     ULONG static_indices;
+    ULONG static_tag;               /* glHint(GL_RGL_ARRAYS_TAG_HINT, tag): in the model
+                                     * format's static key (a program that writes new
+                                     * bytes at an address changes it) */
+    /* 2026-11-06, glHint(GL_RGL_DYNAMIC_ARRAYS_HINT): GL_NICEST -- the
+     * program says the next draws' vertices are new each time (an animated
+     * model's interpolated frame): no key, no hashing, no place in the
+     * upload cache, straight into the stream; GL_DONT_CARE or GL_FASTEST off */
+    ULONG dynamic_arrays;
+    ULONG stat_dyn_v;               /* vertex blocks streamed under that hint */
     ULONG stat_uc_hits, stat_uc_misses, stat_uc_saved, stat_uc_written;
     ULONG stat_uc_smiss_v, stat_uc_smiss_i;  /* misses while the static hints were on */
     ULONG stat_stream_bytes;    /* written into the stream (vertices + indices): bus bytes */
@@ -390,6 +403,10 @@ void  Core_UCacheCopied(struct Core *c);
  * addresses, and the whole state is emitted again. What was emitted before
  * holds the old addresses: the back end drops it. */
 void  Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gpu);
+/* 2026-11-06: a new render target for a resized context (mglResizeContext):
+ * size, pitches, format and addresses; the state is emitted again. The heap
+ * and what it holds stay. */
+void  Core_Retarget(struct Core *c, const struct CoreTarget *t);
 
 /* The GPU's state is gone (a reset of its 3D blocks), or what was emitted
  * never reached it (a dropped frame: Core_Rebase calls it): the whole state

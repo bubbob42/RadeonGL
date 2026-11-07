@@ -199,6 +199,12 @@ void Core_Rebase(struct Core *c, ULONG heap_gpu, ULONG color_gpu, ULONG depth_gp
     Core_GpuIdle(c);
 }
 
+void Core_Retarget(struct Core *c, const struct CoreTarget *t)
+{
+    c->target = *t;
+    Core_Forget(c);
+}
+
 void Core_MarkTextures(struct Core *c, ULONG units)
 {
     ULONG u;

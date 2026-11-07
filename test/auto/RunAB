@@ -5,12 +5,14 @@
 ; no frame dump, locked arrays on ({locked} = 1) or the immediate way
 ; ({locked} = 0, RadeonGLLocked). Output: DEV:Test/ab-{tag}.log (GLQuake's
 ; text) + ab-{tag}-lib.log (the library's summary), a done marker.
+; -anycpu: FS-UAE's machine is a 68040 and GLQuake the 68060 build, which
+; refuses another CPU since 2026-11-06 (it ran there emulating FINTRZ before).
 FailAt 1000
 CD DEV:Quake
 SetEnv RadeonGLLog DEV:Test/ab-{tag}-lib.log
 SetEnv RadeonGLLocked {locked}
 Assign LIBS: DEV:Libs/RadeonGL ADD
-GLQuake -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/ab-{tag}.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/ab-{tag}.log
 Echo "ab {tag} rc=$RC" >>DEV:Test/ab-{tag}.log
 Assign LIBS: DEV:Libs/RadeonGL REMOVE
 UnSetEnv RadeonGLLog

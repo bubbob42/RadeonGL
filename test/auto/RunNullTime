@@ -5,12 +5,14 @@
 ; without a frame dump: the timedemo's fps then times GLQuake plus the
 ; library's emitter alone (emulated: compare builds, never hardware).
 ; Output: DEV:Test/time-{demo}.log + time-{demo}-lib.log, a done marker.
+; -anycpu: FS-UAE's machine is a 68040 and GLQuake the 68060 build, which
+; refuses another CPU since 2026-11-06 (it ran there emulating FINTRZ before).
 FailAt 1000
 CD DEV:Quake
 SetEnv RadeonGLLog DEV:Test/time-{demo}-lib.log
 SetEnv RadeonGLCheck 0
 Assign LIBS: DEV:Libs/RadeonGL ADD
-GLQuake -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/time-{demo}.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo {demo} >DEV:Test/time-{demo}.log
 Echo "time {demo} rc=$RC" >>DEV:Test/time-{demo}.log
 Assign LIBS: DEV:Libs/RadeonGL REMOVE
 UnSetEnv RadeonGLLog

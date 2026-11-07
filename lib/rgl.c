@@ -107,6 +107,9 @@ struct Rgl
     ULONG dump_written;         /* dwords of packets written, 0 = none */
     char dump_path[160];
     UWORD *ptr_blank;           /* MGLSetPointer: an empty sprite (chip RAM) on the input window */
+    ULONG resizes;              /* mglResizeContext calls that changed the size (2026-11-06) */
+    ULONG resize_failed;        /* ... that kept the old one */
+    char resize_why[96];        /* the last one's reason */
 };
 
 GLcontext Rgl_CurrentContext = 0;
@@ -230,6 +233,10 @@ static void PutCache(BPTR f, const struct Core *c)
         Put(f, "; static misses: "); PutU(f, c->stat_uc_smiss_v);
         Put(f, " vertex blocks, "); PutU(f, c->stat_uc_smiss_i); Put(f, " index lists");
     }
+    if (c->stat_dyn_v != 0)
+    {
+        Put(f, "; streamed as dynamic (no key): "); PutU(f, c->stat_dyn_v); Put(f, " vertex blocks");
+    }
     Put(f, "\n");
 }
 
@@ -270,6 +277,15 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, "RadeonGL on the Radeon (PCI "); PutX(f, k->pci_id); Put(f, ")\n");
     Put(f, "screen: "); PutU(f, k->width); Put(f, " x "); PutU(f, k->height);
     Put(f, k->bpp == 2 ? ", 16 bit (R5G6B5PC)\n" : ", 32 bit (B8G8R8A8)\n");
+    if (r->resizes != 0 || r->resize_failed != 0)
+    {
+        Put(f, "resized: "); PutU(f, r->resizes); Put(f, " times, refused "); PutU(f, r->resize_failed);
+        if (r->resize_failed != 0)
+        {
+            Put(f, " (last: "); Put(f, r->resize_why); Put(f, ")");
+        }
+        Put(f, "\n");
+    }
     Put(f, "frames: "); PutU(f, r->frame); Put(f, "\n");
     Put(f, "flushes: "); PutU(f, k->flushes); Put(f, ", presents: "); PutU(f, k->presents);
     Put(f, ", without the screen on the board: "); PutU(f, k->noscreen); Put(f, "\n");
@@ -353,6 +369,7 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
              : k->lost == CARD_LOST_FENCE ? "a fence timed out"
              : k->lost == CARD_LOST_EMIT ? "a command did not fit or was malformed (R2_E "
              : k->lost == CARD_LOST_HEAP ? "Picasso96 moved the texture heap off a 32-byte boundary"
+             : k->lost == CARD_LOST_SCREEN ? "a resize could open neither the new GL screen nor the old one"
              : "the CP would not start or stop");
         if (k->lost == CARD_LOST_EMIT)
         {
@@ -633,7 +650,69 @@ static BOOL NullCardWindow(struct Rgl *r)
     return (BOOL) (r->win != NULL);
 }
 
+static void *CreateContext(int w, int h, ULONG modeid);
+
 void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
+{
+    (void) offx;
+    (void) offy;
+    return CreateContext(w, h, 0);
+}
+
+/* 2026-11-06: a context in exactly that Picasso96 mode (*w, *h get its
+ * size); MGL_SM_BESTMODE: the best mode for *w x *h, as MGLCreateContext;
+ * MGL_SM_WINDOWMODE (a window on the Workbench): not offered, NULL. */
+void *Hook_MGLCreateContextFromID(GLint ID, GLint *w, GLint *h)
+{
+    ULONG mw, mh;
+
+    if (w == NULL || h == NULL || (ULONG) ID == MGL_SM_WINDOWMODE)
+        return NULL;
+    if ((ULONG) ID == MGL_SM_BESTMODE)
+        return CreateContext(*w, *h, 0);
+    if (!Card_ModeSize((ULONG) ID, &mw, &mh))
+        return NULL;
+    *w = (GLint) mw;
+    *h = (GLint) mh;
+    return CreateContext((int) mw, (int) mh, (ULONG) ID);
+}
+
+/* 2026-11-06: the Radeon boards' modes in the depth mglChoosePixelDepth
+ * asked for, each to CallbackFn until it returns GL_TRUE: that mode's id,
+ * else MGL_SM_BESTMODE. */
+struct ModeWalk
+{
+    MGLScreenModeCallback fn;
+};
+
+static BOOL ModeToClient(const struct CardMode *m, void *ud)
+{
+    struct ModeWalk *mw;
+    MGLScreenMode s;
+    ULONG i;
+
+    mw = (struct ModeWalk *) ud;
+    s.id = (GLint) m->id;
+    s.width = (GLint) m->width;
+    s.height = (GLint) m->height;
+    s.bit_depth = (GLint) m->depth;
+    for (i = 0; i < MGL_MAX_MODE - 1 && m->name[i] != 0; i++)
+        s.mode_name[i] = m->name[i];
+    s.mode_name[i] = 0;
+    return (BOOL) (mw->fn(&s) == GL_TRUE);
+}
+
+GLint Hook_mglGetSupportedScreenModes(MGLScreenModeCallback CallbackFn)
+{
+    struct ModeWalk mw;
+
+    if (CallbackFn == NULL)
+        return (GLint) MGL_SM_BESTMODE;
+    mw.fn = CallbackFn;
+    return (GLint) Card_EachMode(choose_depth, ModeToClient, &mw);
+}
+
+static void *CreateContext(int w, int h, ULONG modeid)
 {
     struct Rgl *r;
     struct CoreTarget t;
@@ -648,8 +727,6 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     ULONG staged;
     char flag[8];
 
-    (void) offx;
-    (void) offy;
     if (w <= 0 || h <= 0 || w > 2048 || h > 2048)
         return NULL;
     Forbid();
@@ -694,7 +771,7 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
         /* RadeonGLHeapNarrow=1: straight to the last rung, 0.4's narrow heap */
         Card_HeapNarrow = (GetVar((STRPTR) "RadeonGLHeapNarrow", (STRPTR) flag, sizeof(flag), 0) > 0
                            && flag[0] == '1') ? 1UL : 0UL;
-        res = Card_Open(&r->rad, (ULONG) w, (ULONG) h, choose_depth, check, why, sizeof(why));
+        res = Card_Open(&r->rad, (ULONG) w, (ULONG) h, choose_depth, modeid, check, why, sizeof(why));
         if (res == CARD_FAILED
             || (res == CARD_NOT_RADEON && (which[0] == 'r' || which[0] == 'R')))
         {
@@ -895,12 +972,66 @@ void *Hook_MGLGetInputWindowHandle(GLcontext context)
     return Hook_MGLGetWindowHandle(context);
 }
 
+/* 2026-11-06: the context at a new size, as MiniGL's mglResizeContext: a
+ * new GL screen (the best mode for the size on the same Radeon, the same
+ * format), input window and back buffer; the texture heap and the ring
+ * stay, so textures and static arrays survive. The client asks for the
+ * window again (mglGetWindowHandle). GL_FALSE: the size stayed (the log
+ * says why). The null card: only its target changes. */
 GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height)
 {
+    struct CoreTarget t;
+    ULONG res;
+    ULONG pitch;
+    ULONG i;
+    BOOL hidden;
+
     (void) context;
-    (void) width;
-    (void) height;
-    return GL_FALSE;            /* not yet */
+    if (rgl == NULL || width <= 0 || height <= 0 || width > 2048 || height > 2048
+        || IN_BEGIN(&rgl->core))
+        return GL_FALSE;
+    if (rgl->real && (ULONG) width == rgl->rad.width && (ULONG) height == rgl->rad.height)
+        return GL_TRUE;
+    hidden = (BOOL) (rgl->ptr_blank != NULL);
+    PointerBack(rgl);                   /* its window goes */
+    res = CARD_OK;
+    if (rgl->real)
+    {
+        /* what was built for the old back buffer is drawn first */
+        (void) Card_Flush(&rgl->rad, FALSE);
+        res = Card_Resize(&rgl->rad, (ULONG) width, (ULONG) height, rgl->resize_why,
+                          sizeof(rgl->resize_why));
+        /* the back buffer is new either way (the old size reopened) */
+        if (rgl->rad.lost == 0)
+        {
+            Card_Target(&rgl->rad, &t);
+            Core_Retarget(&rgl->core, &t);
+        }
+    }
+    else
+    {
+        R2Ring_Commit(&rgl->ring);
+        pitch = ((ULONG) width + 15) & ~15UL;
+        rgl->card.cfg.range[0].size = pitch * (ULONG) height * 2;
+        rgl->card.cfg.range[1].size = pitch * (ULONG) height * 2;
+        t.width = (ULONG) width;
+        t.height = (ULONG) height;
+        t.color_gpu = COLOR_GPU;
+        t.color_pitch = pitch;
+        t.color_format = R_COLOR_FORMAT_RGB565;
+        t.depth_gpu = DEPTH_GPU;
+        t.depth_pitch = pitch;
+        Core_Retarget(&rgl->core, &t);
+    }
+    if (res == CARD_OK)
+        rgl->resizes++;
+    else
+        rgl->resize_failed++;
+    for (i = 0; i < sizeof(rgl->resize_why) && res == CARD_OK; i++)
+        rgl->resize_why[i] = 0;
+    if (hidden)
+        Hook_MGLSetPointer(context);
+    return (res == CARD_OK) ? GL_TRUE : GL_FALSE;
 }
 
 /* MiniGL's extras: stored or harmless */

@@ -1139,8 +1139,18 @@ $(GLBENCH): glsmoke/glbench.c glsmoke/pcprof.c glsmoke/pcprof.h
 	    -I$(MGL_SDK_INC) -o $@ glsmoke/glbench.c glsmoke/pcprof.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
+# GLModes: the library's screen modes, a context from a mode, live resizes
+# (glsmoke/glmodes.c, 2026-11-06)
+GLMODES := dist/GLSmoke/GLModes
+
+$(GLMODES): glsmoke/glmodes.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLBENCH) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLBENCH) $(GLMODES) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke

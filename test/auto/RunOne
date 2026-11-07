@@ -6,12 +6,14 @@
 ; added to LIBS: for this run only (removed again afterwards; nothing is
 ; installed). GLQuake's own output goes to its own log: two processes
 ; appending to one file would collide ("object in use").
+; -anycpu: FS-UAE's machine is a 68040 and GLQuake the 68060 build, which
+; refuses another CPU since 2026-11-06 (it ran there emulating FINTRZ before).
 FailAt 1000
 CD DEV:Quake
 If "{which}" EQ "B"
   Assign LIBS: DEV:Quake/LibsPiStorm3D ADD
 EndIf
-GLQuake -stdout -nosound -nocdaudio -noudp -nolan >DEV:Test/run{which}.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan >DEV:Test/run{which}.log
 Echo "run {which} rc=$RC" >>DEV:Test/run{which}.log
 If "{which}" EQ "B"
   Assign LIBS: DEV:Quake/LibsPiStorm3D REMOVE

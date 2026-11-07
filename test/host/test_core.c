@@ -111,6 +111,15 @@ static void Cfg(struct R2ChkCfg *cfg)
     cfg->peek_ctx = NULL;
 }
 
+/* Where Collect starts: a frame's draws only, checked before the next
+ * frame may reuse what they read (test_ucache). */
+static ULONG collect_from;
+/* Where Checked starts reading indices (0: everywhere). The draws before
+ * it are run for their state only: video RAM has moved on since -- an
+ * upload cache entry no longer drawn may be written over -- and they were
+ * checked in their own frame (test_ucache_live, test_ucache_clock). */
+static ULONG check_from;
+
 static LONG Checked(struct R2ChkState *st)
 {
     struct R2ChkCfg cfg;
@@ -119,7 +128,19 @@ static LONG Checked(struct R2ChkState *st)
 
     Cfg(&cfg);
     R2Chk_Reset(st);
-    e = R2Chk_Run(&cfg, st, stream, (ULONG) (cs.ptr - stream), cs.swap, 0, &err);
+    e = R2CE_OK;
+    if (check_from != 0 && check_from <= (ULONG) (cs.ptr - stream))
+    {
+        cfg.peek = NULL;
+        e = R2Chk_Run(&cfg, st, stream, check_from, cs.swap, 0, &err);
+        st->index_unchecked = 0;        /* checked in their own frames */
+        Cfg(&cfg);
+        if (e == R2CE_OK)
+            e = R2Chk_Run(&cfg, st, stream + check_from, (ULONG) (cs.ptr - stream) - check_from,
+                          cs.swap, check_from, &err);
+    }
+    else
+        e = R2Chk_Run(&cfg, st, stream, (ULONG) (cs.ptr - stream), cs.swap, 0, &err);
     if (e != R2CE_OK)
         printf("  checker: %s at %lu what 0x%lx value 0x%lx\n", R2Chk_ErrorName(e),
                (unsigned long) err.at, (unsigned long) err.what, (unsigned long) err.value);
@@ -227,10 +248,6 @@ static ULONG HeapV(ULONG gpu)
     v = vram[(gpu - TEX_GPU) / 4];
     return cs.swap ? R2Cs_Swap32(v) : v;
 }
-
-/* Where Collect starts: a frame's draws only, checked before the next
- * frame may reuse what they read (test_ucache). */
-static ULONG collect_from;
 
 /* Every draw in the stream (immediate packets, and indexed draws from the
  * arrays in the heap), its vertices' x as ids. */
@@ -2452,6 +2469,36 @@ static void test_ucache_block(void)
     CHECK_INT(core.stat_uc_hits, hits + 2);
     CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
     uc_mv[250].x = 250.0f;
+
+    /* 2026-11-07: GL_RGL_static_arrays with GL_RGL_arrays_tag: the model
+     * format keyed by address and tag, its bytes not read; a new tag, or
+     * GL_FASTEST, is a new key */
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    Core_Hint(&core, GL_RGL_ARRAYS_TAG_HINT, 1);
+    UbDraw(250, idx, 96);                       /* a new kind of key: a vertex miss */
+    Core_GpuIdle(&core);
+    hits = core.stat_uc_hits;
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 2);
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    uc_mv[10].y += 1.0f;                        /* changed against the promise: */
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 4);     /* not seen, a hit */
+    Core_Hint(&core, GL_RGL_ARRAYS_TAG_HINT, 2);    /* the program's word: new bytes */
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 5);     /* the indices only */
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));     /* and the new bytes drawn */
+    uc_mv[10].y -= 1.0f;
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_FASTEST);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    hits = core.stat_uc_hits;
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_uc_hits, hits + 1);     /* a new generation: the indices only */
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+    Core_Hint(&core, GL_RGL_ARRAYS_TAG_HINT, 0);
+    CHECK_INT(core.static_tag, 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
     /* the same bytes, another layout: the coordinates from y z */
     hits = core.stat_uc_hits;
     Core_TexCoordPointer(&core, 2, GL_FLOAT, (LONG) sizeof(struct UcModelVtx), &uc_mv[0].y);
@@ -2586,6 +2633,30 @@ static void test_ucache_block(void)
     Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_DONT_CARE);
     Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
     CHECK_INT(core.static_indices, 0);
+
+    /* GL_RGL_DYNAMIC_ARRAYS_HINT (2026-11-06): no vertex key -- every draw
+     * streams its vertices (neither a hit nor a miss for them), the index
+     * list still from the cache; the same picture; off again */
+    UbDraw(250, idx, 96);                       /* the content-keyed list in the cache */
+    Core_GpuIdle(&core);
+    Core_Hint(&core, GL_RGL_DYNAMIC_ARRAYS_HINT, GL_NICEST);
+    CHECK_INT(core.dynamic_arrays, 1);
+    hits = core.stat_uc_hits;
+    misses = core.stat_uc_misses;
+    draws = core.stat_dyn_v;
+    UbDraw(250, idx, 96);
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_dyn_v, draws + 2);
+    CHECK_INT(core.stat_uc_misses, misses);     /* no vertex miss */
+    CHECK_INT(core.stat_uc_hits, hits + 2);     /* the index list, twice */
+    CHECK(SameAsGl(GL_TRIANGLES, idx, 96));
+    Core_Hint(&core, GL_RGL_DYNAMIC_ARRAYS_HINT, GL_DONT_CARE);
+    CHECK_INT(core.dynamic_arrays, 0);
+    UbDraw(250, idx, 96);
+    CHECK_INT(core.stat_dyn_v, draws + 2);
+    Core_Hint(&core, GL_RGL_DYNAMIC_ARRAYS_HINT, GL_NICEST);
+    Core_Hint(&core, GL_RGL_DYNAMIC_ARRAYS_HINT, GL_FASTEST);
+    CHECK_INT(core.dynamic_arrays, 0);
     Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_LINEAR);
     CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
@@ -2648,11 +2719,13 @@ static void test_ucache(void)
     CHECK_INT(core.stat_uc_hits, 11);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 
-    /* more than the cache holds in one frame: 30 locks of 1500 vertices,
-     * 36 KB each (1080 KB of 1024; the rest goes to the stream, which does
+    /* more than the cache holds in one frame: 30 locks of 3000 vertices,
+     * 72 KB each (2160 KB of 2048; the rest goes to the stream, which does
      * not wrap: a wrap is a flush, after which the host cannot check the
      * earlier draws), three frames; every draw of a frame still draws its
-     * own, checked before the next frame may reuse the space */
+     * own, checked before the next frame may reuse the space (2026-11-07:
+     * was 1500 vertices, filling the 1 MB region of the time; the region
+     * is 2 MB now) */
     UcSetup();
     for (frame = 0; frame < 3; frame++)
     {
@@ -2660,7 +2733,7 @@ static void test_ucache(void)
         n = 0;
         for (d = 0; d < 30; d++)
         {
-            UcDraw(d, d * 250, 1500);
+            UcDraw(d, d * 250, 3000);
             for (i = 0; i < 96; i++)
                 uc_all[n++] = uc_idx[d][i];
         }
@@ -2668,6 +2741,7 @@ static void test_ucache(void)
         Core_GpuIdle(&core);
     }
     collect_from = 0;
+    CHECK(core.ufull_epoch != 0);               /* the region did run full */
     CHECK_INT(core.stat_lock_draws, 90);
     CHECK_INT(core.stat_stream_wraps, 0);
     CHECK(core.stat_uc_misses > 0 && core.stat_uc_hits > 0);
@@ -2687,6 +2761,156 @@ static void test_ucache(void)
     UcDraw(0, 0, 250);
     Core_Rebase(&core, TEX_GPU, COLOR_GPU, DEPTH_GPU);
     CHECK_INT(core.uq_n, 0);
+}
+
+/* 2026-11-07: blocks drawn in every frame (the world's) stand at the
+ * ring's head once it has wrapped; a new block drawn after them must still
+ * enter the cache. The ring gave up at the first entry of the current
+ * epoch, and GLQuake's models and weapon went to the stream uncached in
+ * every frame. Each frame: three blocks as in the last one, then a new
+ * block drawn twice -- the second draw hits -- and the picture is right,
+ * and the queue stays in the ring's order, over 90 frames (the ring wraps
+ * after 58). */
+/* The upload cache's queue runs in the ring's order from ucache_pos (the
+ * oldest entry next after it, the newest just before it), and no two
+ * entries share a byte: eviction looks at the oldest entry only and
+ * relies on both. */
+static int UcRingOrdered(void)
+{
+    ULONG i;
+    ULONG j;
+    ULONG q;
+    ULONG r;
+    ULONG rel;
+    ULONG prev;
+
+    prev = 0;
+    for (i = 0; i < core.uq_n; i++)
+    {
+        q = (core.uq_head + i) % CORE_UQ;
+        rel = (core.uq[q].pos + core.ucache_size - core.ucache_pos) % core.ucache_size;
+        if (rel < prev)
+            return 0;
+        prev = rel;
+        for (j = i + 1; j < core.uq_n; j++)
+        {
+            r = (core.uq_head + j) % CORE_UQ;
+            if (core.uq[q].pos < core.uq[r].pos + core.uq[r].bytes
+                && core.uq[r].pos < core.uq[q].pos + core.uq[q].bytes)
+                return 0;
+        }
+    }
+    return 1;
+}
+
+static void test_ucache_live(void)
+{
+    ULONG d;
+    ULONG i;
+    ULONG k;
+    ULONG n;
+    ULONG frame;
+    ULONG hits;
+    ULONG disorder;
+    ULONG missed;
+
+    for (d = 0; d < 40; d++)
+        for (i = 0; i < 96; i++)
+            uc_idx[d][i] = (UWORD) (d * 250 + (i * 7 + d) % 250);
+    UcSetup();
+    disorder = 0;
+    missed = 0;
+    for (frame = 0; frame < 90; frame++)
+    {
+        collect_from = (ULONG) (cs.ptr - stream);
+        check_from = collect_from;
+        n = 0;
+        for (d = 0; d < 3; d++)
+        {
+            hits = core.stat_uc_hits;
+            UcDraw(d, d * 250, 250);
+            if (frame > 0)
+                CHECK_INT(core.stat_uc_hits, hits + 2);     /* the "world" stays */
+            for (i = 0; i < 96; i++)
+                uc_all[n++] = uc_idx[d][i];
+        }
+        for (k = 2500; k < 4000; k++)
+            lk_pos[k * 3 + 1] = (float) (frame * 7 + k);   /* a new block */
+        UcDraw(10, 2500, 1500);
+        for (i = 0; i < 96; i++)
+            uc_all[n++] = uc_idx[10][i];
+        hits = core.stat_uc_hits;
+        UcDraw(10, 2500, 1500);
+        for (i = 0; i < 96; i++)
+            uc_all[n++] = uc_idx[10][i];
+        if (core.stat_uc_hits != hits + 2)
+            missed++;
+        CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+        if (!UcRingOrdered())
+            disorder++;
+        Core_GpuIdle(&core);
+    }
+    collect_from = 0;
+    check_from = 0;
+    CHECK_INT(missed, 0);
+    CHECK(core.stat_uc_misses >= 90);           /* 90 new blocks, each written once */
+    CHECK_INT(disorder, 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
+/* 2026-11-07: the second chance. Three blocks drawn only every fifth
+ * frame (the world's, in and out of view) beside a new block in every
+ * frame (a model's, never hit), over 200 frames (the ring wraps three
+ * times, at frames 57, 114 and 171: none draws the three): they always
+ * hit. A ring that evicts in plain order dropped them whenever it passed
+ * them in a frame that did not draw them. */
+static void test_ucache_clock(void)
+{
+    ULONG d;
+    ULONG i;
+    ULONG k;
+    ULONG n;
+    ULONG frame;
+    ULONG hits;
+    ULONG disorder;
+    ULONG wmiss;
+
+    for (d = 0; d < 40; d++)
+        for (i = 0; i < 96; i++)
+            uc_idx[d][i] = (UWORD) (d * 250 + (i * 7 + d) % 250);
+    UcSetup();
+    disorder = 0;
+    wmiss = 0;
+    for (frame = 0; frame < 200; frame++)
+    {
+        collect_from = (ULONG) (cs.ptr - stream);
+        check_from = collect_from;
+        n = 0;
+        if (frame % 5 == 0)
+            for (d = 0; d < 3; d++)
+            {
+                hits = core.stat_uc_hits;
+                UcDraw(d, d * 250, 250);
+                if (frame > 0 && core.stat_uc_hits != hits + 2)
+                    wmiss++;
+                for (i = 0; i < 96; i++)
+                    uc_all[n++] = uc_idx[d][i];
+            }
+        for (k = 2500; k < 4000; k++)
+            lk_pos[k * 3 + 1] = (float) (frame * 7 + k);
+        UcDraw(10, 2500, 1500);
+        for (i = 0; i < 96; i++)
+            uc_all[n++] = uc_idx[10][i];
+        CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+        if (!UcRingOrdered())
+            disorder++;
+        Core_GpuIdle(&core);
+    }
+    collect_from = 0;
+    check_from = 0;
+    CHECK_INT(wmiss, 0);
+    CHECK_INT(disorder, 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 }
 
 /* A back end whose video RAM moves (P96 bitmaps): texels only between the
@@ -3274,6 +3498,8 @@ int main(void)
     test_tex_rows8();
     test_stream_direct();
     test_ucache();
+    test_ucache_live();
+    test_ucache_clock();
     test_ucache_block();
     test_ucache_signs();
     test_drop_mid_draw();

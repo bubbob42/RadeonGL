@@ -1,0 +1,38 @@
+; LowLevelPort0 -- what GLQuake leaves on the mouse port (lowlevel.library):
+; after 1.1 (GLQuakeA) port 0 stays in autosense; after the new build it is
+; locked to mouse mode. JoyPeek 0 reads it five times and prints the type
+; lowlevel reports. 1.1 first: the new build's exit overrides its state.
+; VBList shows the VBlank servers (any SetJoyPortAttrs/ReadJoyPort(0) swaps
+; gameport.device's for lowlevel's, until the next boot).
+; Needs: gmake glquake QCPU=040 glquake-data rgl-lib, DEV:Quake/GLQuakeA,
+; DEV:Test/VBList, DEV:Test/JoyPeek.
+; LIMIT 1500
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Version lowlevel.library FULL >>DEV:Test/auto.log
+Echo "=== VBlank servers at boot ===" >>DEV:Test/auto.log
+DEV:Test/VBList >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/nullb-#?
+Echo "=== GLQuakeA (1.1) demo1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuakeA demo1 400
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Search DEV:Test/nullb-demo1.log "Port 0" NONUM >>DEV:Test/auto.log
+Search DEV:Test/nullb-demo1.log "fps" NONUM >>DEV:Test/auto.log
+Echo "=== port 0 after 1.1 ===" >>DEV:Test/auto.log
+DEV:Test/JoyPeek 0 >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/nullb-#?
+Echo "=== GLQuake040 (new) demo1 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuake040 demo1 400
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Search DEV:Test/nullb-demo1.log "Port 0" NONUM >>DEV:Test/auto.log
+Search DEV:Test/nullb-demo1.log "fps" NONUM >>DEV:Test/auto.log
+Search DEV:Test/nullb-demo1.log "Port 1:" NONUM >>DEV:Test/auto.log
+Echo "=== port 0 after the new build ===" >>DEV:Test/auto.log
+DEV:Test/JoyPeek 0 >>DEV:Test/auto.log
+Echo "=== VBlank servers at the end ===" >>DEV:Test/auto.log
+DEV:Test/VBList >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

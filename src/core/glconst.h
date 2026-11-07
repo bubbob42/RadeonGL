@@ -733,6 +733,15 @@
 #ifndef GL_RGL_STATIC_INDICES_HINT
 #define GL_RGL_STATIC_INDICES_HINT               0x52474c02UL
 #endif
+/* 2026-11-06, extension GL_RGL_dynamic_arrays (array.c DrawCached) */
+#ifndef GL_RGL_DYNAMIC_ARRAYS_HINT
+#define GL_RGL_DYNAMIC_ARRAYS_HINT               0x52474c03UL
+#endif
+/* 2026-11-07, extension GL_RGL_arrays_tag (array.c VertexKey): the mode is
+ * a 32-bit tag, part of a model-format static key */
+#ifndef GL_RGL_ARRAYS_TAG_HINT
+#define GL_RGL_ARRAYS_TAG_HINT                   0x52474c04UL
+#endif
 #ifndef MGL_W_ONE_HINT
 #define MGL_W_ONE_HINT                           0x7016UL
 #endif

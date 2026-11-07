@@ -380,6 +380,23 @@ void Core_Hint(struct Core *c, ULONG target, ULONG mode)
             Core_Error(c, GL_INVALID_ENUM);
         return;
     }
+    /* GL_RGL_arrays_tag: any value, kept as it is */
+    if (target == GL_RGL_ARRAYS_TAG_HINT)
+    {
+        c->static_tag = mode;
+        return;
+    }
+    /* GL_RGL_dynamic_arrays: GL_NICEST on, GL_DONT_CARE and GL_FASTEST off */
+    if (target == GL_RGL_DYNAMIC_ARRAYS_HINT)
+    {
+        if (mode == GL_NICEST)
+            c->dynamic_arrays = 1;
+        else if (mode == GL_DONT_CARE || mode == GL_FASTEST)
+            c->dynamic_arrays = 0;
+        else
+            Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
     /* GL's five targets and MiniGL's two (glHint(MGL_W_ONE_HINT): GLQuake);
      * every other hint is accepted and changes nothing */
     if ((target < GL_PERSPECTIVE_CORRECTION_HINT || target > GL_FOG_HINT)

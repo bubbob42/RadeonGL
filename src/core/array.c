@@ -573,6 +573,7 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
 #define UK_WORLDRUN 0x574f5232UL
 #define UK_STATIC 0x53544131UL     /* the world format keyed by address (static_arrays) */
 #define UK_STATIC_IDX 0x53544932UL /* index lists keyed by address (static_indices) */
+#define UK_STATIC_MODEL 0x53544d33UL /* the model format keyed by address and tag */
 
 /* Two hashes mixed with x (a: FNV-1a style, b: rotate and add). a rotates
  * after the multiply: without it bit 31 of x reached bit 31 of a only, and
@@ -806,6 +807,23 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
         ptr[2] = Elem(t0, first);
         stride[2] = t0->stride ? t0->stride : t0->size * 4;
         len[2] = 8;
+        if (c->static_arrays)
+        {
+            /* 2026-11-07: the program promised these bytes do not change
+             * while their addresses, strides, count and its tag stay
+             * (GL_RGL_arrays_tag: GLQuake's model fills, kept and drawn
+             * again) -- nothing is read */
+            h[0] = 2166136261UL ^ UK_STATIC_MODEL ^ c->static_gen;
+            h[1] = UK_STATIC_MODEL ^ lcount;
+            UMIX(h[0], h[1], c->static_tag);
+            for (k = 0; k < 3; k++)
+            {
+                UMIX(h[0], h[1], (ULONG) (unsigned long) ptr[k]);
+                UMIX(h[0], h[1], (ULONG) (((unsigned long) ptr[k] >> 16) >> 16));
+            }
+            UMIX(h[0], h[1], (stride[0] << 16) ^ (stride[1] << 8) ^ stride[2]);
+            return 1;
+        }
         if (OneBlock(ptr, stride, len, &base, &span, &offs))
         {
             h[0] = 2166136261UL ^ UK_MODELRUN ^ stride[0];
@@ -871,16 +889,33 @@ static ULONG USlot(ULONG h1, ULONG h2)
     return (h1 ^ (h1 >> 11) ^ (h2 >> 17)) & (CORE_USLOTS - 1);
 }
 
+/* 2026-11-07: a key's entry is in one of UPROBE slots from USlot on. With
+ * one slot, two entries drawn in every frame whose keys shared it pushed
+ * each other out in turn: both missed in every frame, as long as both
+ * were in view (MEASURED, A4000D, GLQuake demo1: whether such a pair
+ * exists depends on where malloc put the world's arrays -- 117 static
+ * misses in one run, 1099 in the next, same program, same library). */
+#define UPROBE 4
+
 static struct CoreUEntry *ULook(struct Core *c, ULONG h1, ULONG h2, ULONG ndw)
 {
     struct CoreUEntry *e;
+    ULONG s;
+    ULONG i;
     ULONG q;
 
-    q = c->uslot[USlot(h1, h2)];
-    if (q == 0)
-        return NULL;
-    e = &c->uq[q - 1];
-    return (e->h1 == h1 && e->h2 == h2 && e->ndw == ndw) ? e : NULL;
+    s = USlot(h1, h2);
+    for (i = 0; i < UPROBE; i++)
+    {
+        q = c->uslot[(s + i) & (CORE_USLOTS - 1)];
+        if (q != 0)
+        {
+            e = &c->uq[q - 1];
+            if (e->h1 == h1 && e->h2 == h2 && e->ndw == ndw)
+                return e;
+        }
+    }
+    return NULL;
 }
 
 /* Drop the oldest entry; FALSE if the current epoch drew it. */
@@ -898,9 +933,35 @@ static ULONG UPop(struct Core *c)
     return 1;
 }
 
-/* Evict the oldest entries while they overlap [lo, hi) of the region (the
- * ring allocates in order, so they are the ones in the way). */
-static ULONG UEvict(struct Core *c, ULONG lo, ULONG hi)
+/* The oldest entry, drawn in the current epoch, becomes the newest: its
+ * bytes stay where they are and the allocation goes on past them, so the
+ * queue still runs in the ring's order from ucache_pos. */
+static void URotate(struct Core *c)
+{
+    struct CoreUEntry *e;
+    ULONG q;
+
+    e = &c->uq[c->uq_head];
+    q = (c->uq_head + c->uq_n) % CORE_UQ;
+    if (q != c->uq_head)
+    {
+        c->uq[q] = *e;
+        if (c->uslot[e->slot] == c->uq_head + 1)
+            c->uslot[e->slot] = (UWORD) (q + 1);
+    }
+    c->uq_head = (c->uq_head + 1) % CORE_UQ;
+}
+
+/* [lo, hi) cleared of entries from the oldest on: 0 when it is free, 1
+ * when an entry was kept in the way (rotated, *next: the end of its
+ * bytes), -1 when every entry has been passed over twice. Kept: one drawn
+ * in this epoch, and one hit since the ring last passed it -- once: its
+ * mark is cleared (a second chance, CLOCK). The world's blocks are hit
+ * whenever they are in view and stay; a model's, new in each frame and
+ * never hit, go first. (MEASURED, A4000D: without the second chance the
+ * moving ring evicted world blocks just out of view, 1168 static misses
+ * a demo1 run against 280.) */
+static LONG UClear(struct Core *c, ULONG lo, ULONG hi, ULONG *turns, ULONG *next)
 {
     struct CoreUEntry *e;
 
@@ -908,31 +969,71 @@ static ULONG UEvict(struct Core *c, ULONG lo, ULONG hi)
     {
         e = &c->uq[c->uq_head];
         if (!(e->pos < hi && e->pos + e->bytes > lo))
-            return 1;
-        if (!UPop(c))
             return 0;
+        if (!e->ref && UPop(c))
+            continue;
+        if (*turns == 0)
+            return -1;
+        (*turns)--;
+        e->ref = 0;
+        *next = e->pos + e->bytes;
+        URotate(c);
+        return 1;
     }
-    return 1;
+    return 0;
 }
 
-/* Room for bytes in the region: its offset there, or ~0 (the stream then). */
+/* Room for bytes in the region: its offset there, or ~0 (the stream then).
+ * 2026-11-07: entries drawn in this epoch are passed over, no longer the
+ * end of the search. The ring is filled in the order of insertion, and
+ * the world's blocks, inserted first, are drawn in every frame: once the
+ * ring had wrapped they stood at its head, and every new block after the
+ * world in a frame -- the models, the weapon -- went to the stream
+ * uncached, to miss again in the next frame (MEASURED on the A4000D,
+ * GLQuake demo1: 1425 blocks, 7 MB of 14.7 streamed). */
 static ULONG UAlloc(struct Core *c, ULONG bytes)
 {
     ULONG start;
+    ULONG turns;
+    ULONG next;
+    LONG r;
 
     if (bytes > c->ucache_size / 4)
+        return 0xffffffffUL;
+    /* no room found once in this epoch: none until it ends (a frame with
+     * more new data than the region holds would pass over every entry
+     * twice for each draw after that) */
+    if (c->ufull_epoch == c->epoch)
         return 0xffffffffUL;
     if (c->uq_n == CORE_UQ && !UPop(c))
         return 0xffffffffUL;
     start = c->ucache_pos;
-    if (start + bytes > c->ucache_size)
+    turns = 2 * c->uq_n;        /* a pass to clear the marks, one to evict */
+    next = 0;
+    for (;;)
     {
-        if (!UEvict(c, start, c->ucache_size))
+        if (start + bytes > c->ucache_size)
+        {
+            /* the end of the region: whatever is there goes or stays */
+            while ((r = UClear(c, start, c->ucache_size, &turns, &next)) == 1)
+                ;
+            if (r < 0)
+            {
+                c->ufull_epoch = c->epoch;
+                return 0xffffffffUL;
+            }
+            start = 0;
+        }
+        r = UClear(c, start, start + bytes, &turns, &next);
+        if (r == 0)
+            break;
+        if (r < 0)
+        {
+            c->ufull_epoch = c->epoch;
             return 0xffffffffUL;
-        start = 0;
+        }
+        start = next;
     }
-    if (!UEvict(c, start, start + bytes))
-        return 0xffffffffUL;
     c->ucache_pos = start + bytes;
     return start;
 }
@@ -941,6 +1042,11 @@ static void UInsert(struct Core *c, const ULONG *h, ULONG ndw, ULONG pos, ULONG 
 {
     struct CoreUEntry *e;
     ULONG q;
+    ULONG s;
+    ULONG t;
+    ULONG i;
+    ULONG slot;
+    ULONG best;
 
     if (c->uq_n == CORE_UQ && !UPop(c))
         return;
@@ -952,8 +1058,35 @@ static void UInsert(struct Core *c, const ULONG *h, ULONG ndw, ULONG pos, ULONG 
     e->pos = pos;
     e->bytes = bytes;
     e->epoch = c->epoch;
-    e->slot = USlot(h[0], h[1]);
-    c->uslot[e->slot] = (UWORD) (q + 1);
+    e->ref = 0;
+    /* a free slot of the key's UPROBE, else the one whose entry was drawn
+     * longest ago (it stays in the ring, out of reach, until evicted) */
+    s = USlot(h[0], h[1]);
+    slot = s;
+    for (i = 0; i < UPROBE; i++)
+    {
+        t = (s + i) & (CORE_USLOTS - 1);
+        if (c->uslot[t] == 0)
+        {
+            slot = t;
+            break;
+        }
+    }
+    if (i == UPROBE)
+    {
+        best = 0;
+        for (i = 0; i < UPROBE; i++)
+        {
+            t = (s + i) & (CORE_USLOTS - 1);
+            if (c->epoch - c->uq[c->uslot[t] - 1].epoch >= best)
+            {
+                best = c->epoch - c->uq[c->uslot[t] - 1].epoch;
+                slot = t;
+            }
+        }
+    }
+    e->slot = slot;
+    c->uslot[slot] = (UWORD) (q + 1);
     c->uq_n++;
 }
 
@@ -963,6 +1096,7 @@ void UCache_Clear(struct Core *c)
 
     c->uq_head = 0;
     c->uq_n = 0;
+    c->ufull_epoch = 0;
     c->ucache_pos = 0;
     c->udirty_n = 0;
     c->udirty_all = 0;
@@ -985,7 +1119,14 @@ static void UDirty(struct Core *c, ULONG pos, ULONG bytes)
     }
     if (n == CORE_UDIRTY)
     {
-        c->udirty_all = 1;
+        /* 2026-11-07: the last range stretched over the gap (the mirror and
+         * video RAM hold the same bytes there: copied again, unchanged)
+         * rather than the whole region over the bus. UAlloc passes over
+         * live entries, so a frame's ranges are no longer one run. */
+        if (pos >= c->udirty_off[n - 1])
+            c->udirty_len[n - 1] = pos + bytes - c->udirty_off[n - 1];
+        else
+            c->udirty_all = 1;
         return;
     }
     c->udirty_off[n] = pos;
@@ -1078,6 +1219,7 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
     ULONG voff, ioff;           /* heap offsets to write, ~0: nothing */
     ULONG vgpu, igpu;
     ULONG upload;
+    ULONG vmiss, imiss, want;
     ULONG k;
     float pos[4];
 
@@ -1094,26 +1236,32 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
         upload = 1;
     }
 
-    /* where the vertices are, or go */
+    /* where the vertices are, or go: looked up here, room made below */
     vpos = 0xffffffffUL;
     voff = 0xffffffffUL;
     vgpu = c->lk_gpu;
+    vkey = 0;
+    vmiss = 0;
+    vh[0] = 0;
+    vh[1] = 0;
     if (upload)
     {
-        vkey = VertexKey(c, first, lcount, units, vh);
+        /* GL_RGL_DYNAMIC_ARRAYS_HINT: new bytes each draw -- no key */
+        vkey = c->dynamic_arrays ? 0 : VertexKey(c, first, lcount, units, vh);
+        if (c->dynamic_arrays)
+            c->stat_dyn_v++;
         e = vkey ? ULook(c, vh[0], vh[1], vdw) : NULL;
         if (e != NULL)
         {
             e->epoch = c->epoch;
+            e->ref = 1;
             vgpu = c->heap.gpu + c->ucache_off + e->pos;
             c->stat_uc_hits++;
             c->stat_uc_saved += vdw * 4;
         }
         else
         {
-            vpos = vkey ? UAlloc(c, vbytes) : 0xffffffffUL;
-            voff = (vpos != 0xffffffffUL) ? c->ucache_off + vpos : StreamAlloc(c, vbytes);
-            vgpu = c->heap.gpu + voff;
+            vmiss = 1;
             if (vkey)
                 c->stat_uc_misses++;
             if (vkey && c->static_arrays)
@@ -1141,22 +1289,54 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
     }
     ipos = 0xffffffffUL;
     ioff = 0xffffffffUL;
+    igpu = 0;
     e = ULook(c, ih[0], ih[1], idw);
+    imiss = (e == NULL);
     if (e != NULL)
     {
         e->epoch = c->epoch;
+        e->ref = 1;
         igpu = c->heap.gpu + c->ucache_off + e->pos;
         c->stat_uc_hits++;
         c->stat_uc_saved += idw * 4;
     }
     else
     {
-        ipos = UAlloc(c, ibytes);
-        ioff = (ipos != 0xffffffffUL) ? c->ucache_off + ipos : StreamAlloc(c, ibytes);
-        igpu = c->heap.gpu + ioff;
         c->stat_uc_misses++;
         if (c->static_indices)
             c->stat_uc_smiss_i++;
+    }
+
+    /* 2026-11-07: the room for what missed in one piece, after both
+     * lookups. UAlloc passes over kept entries and moves them to the newest
+     * end of its queue; with two allocations, one for the vertices and one
+     * for the indices, the second could move entries ahead of the first
+     * before it was inserted -- in the queue behind them, in the ring
+     * before them -- and a later allocation would write over it unseen
+     * (found in review; test_ucache_live checks the order after every
+     * frame). The lookups first also keep a list that hits from being
+     * evicted by its own draw's vertices. */
+    want = ((vmiss && vkey) ? vbytes : 0) + (imiss ? ibytes : 0);
+    k = (want != 0) ? UAlloc(c, want) : 0xffffffffUL;
+    if (k != 0xffffffffUL)
+    {
+        if (vmiss && vkey)
+        {
+            vpos = k;
+            k += vbytes;
+        }
+        if (imiss)
+            ipos = k;
+    }
+    if (vmiss)
+    {
+        voff = (vpos != 0xffffffffUL) ? c->ucache_off + vpos : StreamAlloc(c, vbytes);
+        vgpu = c->heap.gpu + voff;
+    }
+    if (imiss)
+    {
+        ioff = (ipos != 0xffffffffUL) ? c->ucache_off + ipos : StreamAlloc(c, ibytes);
+        igpu = c->heap.gpu + ioff;
     }
 
     /* what the cache does not hold: into video RAM (one lock), or when
