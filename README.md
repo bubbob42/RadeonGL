@@ -42,7 +42,8 @@ needs.
 - **Transformation and rasterising on the Radeon:** the full float matrix
   stack (`glFrustum`, `glOrtho`, `glRotatef`, `glTranslatef`, `glScalef`,
   push, pop, load, multiply), viewport, depth range.
-- **Textures:** two units (multitexture), RGB565, ARGB4444, I8 and AI88 in
+- **Textures:** two units (multitexture), RGB565, ARGB4444, ARGB8888 (for
+  `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
   the card's memory (up to 16 MB), nearest, linear and mipmap filters,
   repeat and clamp, the environments MODULATE, REPLACE, DECAL (RGB) and
   ADD, `glTexSubImage2D` updates.
@@ -54,6 +55,12 @@ needs.
 - **Texture coordinates from the TCL:** `glTexGen` with `GL_OBJECT_LINEAR`,
   `GL_EYE_LINEAR` and `GL_SPHERE_MAP` (S and T, per unit), and texture
   matrices (`glMatrixMode(GL_TEXTURE)`).
+- **Fog and lines:** `glFog` (linear, exp, exp2; computed by the TCL from
+  the eye depth), `glLineWidth` up to 64 pixels.
+- **Reading back:** `glReadPixels` (RGBA, RGB, alpha, luminance; unsigned
+  bytes; `glPixelStorei(GL_PACK_ALIGNMENT)`) and MiniGL's `mglWriteShotPPM`,
+  through Picasso96 from the card's memory (about 4 MB a second on a
+  Mediator).
 - **Fragments:** blending, alpha test, depth test with every function,
   depth mask, polygon offset and `mglSetZOffset`, back-face culling,
   scissor, colour mask, flat and smooth shading, point size.
@@ -75,20 +82,21 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL implements 116 of the 205 functions of `minigl.library` 29.1:
+RadeonGL implements 122 of the 205 functions of `minigl.library` 29.1:
 everything GLQuake uses, and more. A missing function draws nothing and
 sets GL_INVALID_OPERATION; the library's log names every such call.
 
-- Fog, display lists, `glTexCoord4f`.
+- Display lists, `glTexCoord4f`.
 - The texture environment `GL_BLEND` (drawn as `GL_MODULATE`) and
-  `GL_DECAL` with an RGBA texture; 32-bit textures are stored with 16 bits.
+  `GL_DECAL` with an RGBA texture; generic 32-bit textures (`GL_RGBA`, 4)
+  are stored with 16 bits -- ask for `GL_RGBA8` or `GL_RGB8` to keep 8 bits.
 - Stencil and accumulation buffers, line and polygon stipple, logic
   operations.
-- `glReadPixels`, `glCopyTexImage2D`, `glCopyTexSubImage2D`,
-  `glPixelStorei`, `glDrawBuffer`, `glReadBuffer`.
+- Reading the depth buffer, `glCopyTexImage2D`, `glCopyTexSubImage2D`,
+  `glDrawBuffer`, `glReadBuffer`.
 - The double-precision calls, `glArrayElement`, `glInterleavedArrays`,
   `glMultiDrawArrays`, edge flags, colour-index mode,
-  `glBlendEquation`, `glBlendFuncSeparate`, `glLineWidth`, `glColorTable`.
+  `glBlendEquation`, `glBlendFuncSeparate`, `glColorTable`.
 - GLU and GLUT; MiniGL's own main loop and callbacks; contexts on a 24-bit
   or 8-bit screen (the Radeon draws 15, 16 and 32 bit).
 - One program at a time; textures beyond 16 MB are not swapped out.

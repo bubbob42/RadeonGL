@@ -514,6 +514,188 @@ static void TexCases(void)
     Ortho();
 }
 
+/* --- fog and wide lines (fog.c) ------------------------------------------------- */
+
+/* the quad over the frame at eye depth z, in one colour */
+static void FlatQuad(GLfloat z)
+{
+    glBegin(GL_QUADS);
+    glNormal3f(0.0f, 0.0f, 1.0f);
+    glVertex3f(0.0f, 0.0f, z);
+    glVertex3f((GLfloat) S, 0.0f, z);
+    glVertex3f((GLfloat) S, (GLfloat) S, z);
+    glVertex3f(0.0f, (GLfloat) S, z);
+    glEnd();
+}
+
+static void FogCases(void)
+{
+    GLfloat v[4];
+    float f;
+
+    Ortho();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    V4(v, 0.0f, 0.0f, 1.0f, 1.0f);
+    glFogfv(GL_FOG_COLOR, v);
+    glEnable(GL_FOG);
+    glColor3f(1.0f, 0.0f, 0.0f);
+
+    /* F1. linear, start 0 end 10, the quad 5 deep: half fog */
+    glFogf(GL_FOG_MODE, (GLfloat) GL_LINEAR);
+    glFogf(GL_FOG_START, 0.0f);
+    glFogf(GL_FOG_END, 10.0f);
+    Begin(); FlatQuad(-5.0f); Show();
+    Want("fog linear, half way", S / 2, S / 2, 0.5f, 0.0f, 0.5f);
+
+    /* F2. exp, density 0.1: f = exp(-0.5) */
+    glFogf(GL_FOG_MODE, (GLfloat) GL_EXP);
+    glFogf(GL_FOG_DENSITY, 0.1f);
+    Begin(); FlatQuad(-5.0f); Show();
+    f = 0.60653f;
+    Want("fog exp, density 0.1, depth 5", S / 2, S / 2, f, 0.0f, 1.0f - f);
+
+    /* F3. exp2: f = exp(-0.25) */
+    glFogf(GL_FOG_MODE, (GLfloat) GL_EXP2);
+    Begin(); FlatQuad(-5.0f); Show();
+    f = 0.77880f;
+    Want("fog exp2, density 0.1, depth 5", S / 2, S / 2, f, 0.0f, 1.0f - f);
+
+    /* F4. over a lit surface: green, half fogged */
+    glFogf(GL_FOG_MODE, (GLfloat) GL_LINEAR);
+    Reset();
+    V4(v, 1, 1, 1, 1);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, v);
+    V4(v, 0, 0, 1, 0);
+    glLightfv(GL_LIGHT0, GL_POSITION, v);
+    V4(v, 0, 1, 0, 1);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, v);
+    glEnable(GL_LIGHT0);
+    Begin(); FlatQuad(-5.0f); Show();
+    Want("fog linear over lighting", S / 2, S / 2, 0.0f, 0.5f, 0.5f);
+    glDisable(GL_LIGHTING);
+
+    /* F5. off again */
+    glDisable(GL_FOG);
+    glColor3f(1.0f, 0.0f, 0.0f);
+    Begin(); FlatQuad(-5.0f); Show();
+    Want("fog off", S / 2, S / 2, 1.0f, 0.0f, 0.0f);
+
+    /* L1. a horizontal line 5 wide: lit 2 above its middle, dark 4 above;
+     * 1 wide: dark 2 above */
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glLineWidth(5.0f);
+    Begin();
+    glBegin(GL_LINES);
+    glVertex3f(10.0f, S / 2.0f + 0.5f, 0.0f);
+    glVertex3f(S - 10.0f, S / 2.0f + 0.5f, 0.0f);
+    glEnd();
+    Show();
+    Want("line width 5, 2 off the middle", S / 2, S / 2 - 2, 1.0f, 1.0f, 1.0f);
+    Want("line width 5, 4 off the middle", S / 2, S / 2 - 4, 0.0f, 0.0f, 0.0f);
+    glLineWidth(1.0f);
+    Begin();
+    glBegin(GL_LINES);
+    glVertex3f(10.0f, S / 2.0f + 0.5f, 0.0f);
+    glVertex3f(S - 10.0f, S / 2.0f + 0.5f, 0.0f);
+    glEnd();
+    Show();
+    Want("line width 1, the middle", S / 2, S / 2, 1.0f, 1.0f, 1.0f);
+    Want("line width 1, 2 off the middle", S / 2, S / 2 - 2, 0.0f, 0.0f, 0.0f);
+}
+
+/* --- true-colour textures (W2) ---------------------------------------------------- */
+
+static void Tex32Cases(void)
+{
+    static const UBYTE px[2 * 2 * 4] = { 8, 12, 200, 255, 8, 12, 200, 255, 8, 12, 200, 255, 8, 12, 200, 255 };
+    LONG keep;
+
+    Ortho();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_FOG);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 3);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    keep = tol;
+    tol = (tol > 6) ? tol : 2;      /* a 16-bit screen cannot tell either */
+    /* GL_RGBA8: 8, 12, 200 as given (ARGB4444 would make 0, 0, 204) */
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, (void *) px);
+    Begin(); TexQuad(0, (GLfloat) S); Show();
+    Want("GL_RGBA8 texture, 8 bits a component", S / 2, S / 2, 8 / 255.0f, 12 / 255.0f, 200 / 255.0f);
+    /* the generic GL_RGBA: 4 bits a component, as GLQuake's */
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, (void *) px);
+    Begin(); TexQuad(0, (GLfloat) S); Show();
+    Want("GL_RGBA texture, ARGB4444 as before", S / 2, S / 2, 0.0f, 0.0f, 204 / 255.0f);
+    tol = keep;
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glDisable(GL_TEXTURE_2D);
+}
+
+/* --- glReadPixels and mglWriteShotPPM (lib/rglread.c) ------------------------------- */
+
+static void ReadCases(void)
+{
+    UBYTE rgb[8 * 3 * 3];           /* 7 pixels a row, rows padded to 24 bytes */
+    UBYTE hdr[16];
+    BPTR f;
+    LONG n;
+    int i;
+    BOOL ok;
+
+    Ortho();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_FOG);
+    glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glBegin(GL_QUADS);              /* red over the top half (window y 0 .. S/2) */
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f((GLfloat) S, 0.0f, 0.0f);
+    glVertex3f((GLfloat) S, S / 2.0f, 0.0f);
+    glVertex3f(0.0f, S / 2.0f, 0.0f);
+    glEnd();
+    Show();
+    /* GL_RGB, 7 wide, 3 high, GL_PACK_ALIGNMENT 4: rows of 21 bytes padded
+     * to 24, row 0 at the bottom; from GL row S/2 - 2: blue, blue, red */
+    memset(rgb, 0x77, sizeof(rgb));
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(10, S / 2 - 2, 7, 3, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+    ok = (BOOL) (rgb[0] < 16 && rgb[2] > 240                     /* row 0: blue */
+                 && rgb[24] < 16 && rgb[24 + 2] > 240            /* row 1 (GL S/2 - 1): blue */
+                 && rgb[48] > 240 && rgb[48 + 2] < 16            /* row 2 (GL S/2): red */
+                 && rgb[21] == 0x77 && rgb[23] == 0x77);        /* padding untouched */
+    for (i = 0; i < 7; i++)
+        if (rgb[i * 3 + 2] < 240 || rgb[48 + i * 3] < 240)
+            ok = FALSE;
+    if (ok)
+        passed++;
+    else
+        failed++;
+    Printf("%s glReadPixels GL_RGB, rows padded to 4, bottom up: %ld %ld %ld / %ld %ld %ld / %ld %ld %ld\n",
+           (LONG) (ok ? "PASS" : "FAIL"), (LONG) rgb[0], (LONG) rgb[1], (LONG) rgb[2], (LONG) rgb[24],
+           (LONG) rgb[25], (LONG) rgb[26], (LONG) rgb[48], (LONG) rgb[49], (LONG) rgb[50]);
+
+    /* mglWriteShotPPM: the header, and the first pixel (top left: red) */
+    mglWriteShotPPM("RAM:gllight-shot.ppm");
+    ok = FALSE;
+    f = Open((CONST_STRPTR) "RAM:gllight-shot.ppm", MODE_OLDFILE);
+    if (f != 0)
+    {
+        n = Read(f, hdr, 16);
+        ok = (BOOL) (n == 16 && memcmp(hdr, "P6\n128 128\n255\n", 15) == 0 && hdr[15] > 240);
+        Close(f);
+    }
+    if (ok)
+        passed++;
+    else
+        failed++;
+    Printf("%s mglWriteShotPPM (RAM:gllight-shot.ppm)\n", (LONG) (ok ? "PASS" : "FAIL"));
+}
+
 int main(void)
 {
     struct RDArgs *rd;
@@ -579,6 +761,9 @@ int main(void)
     Printf("GLLight on a %ld-bit screen, frame %ld x %ld, tolerance %ld\n", depth, (LONG) S, (LONG) S, tol);
     Cases();
     TexCases();
+    FogCases();
+    Tex32Cases();
+    ReadCases();
     mglDeleteContext();
     Printf("GLLight: %ld passed, %ld failed\n", passed, failed);
     rc = (failed != 0) ? RETURN_WARN : RETURN_OK;

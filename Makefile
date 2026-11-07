@@ -656,7 +656,7 @@ glquake glquake-data clean-glquake:
 
 # The GL core's modules (src/core): defined here, before the probe rules
 # that list them as prerequisites (those expand when the Makefile is read).
-CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen
+CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen fog
 CORE_HDRS       := $(wildcard src/core/*.h)
 
 # --- Probes: the day-one tools for the real machine (docs/probes.md) --------
@@ -1047,7 +1047,7 @@ build/core-sasc/%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS) | $(VAMOSRC)
 # stub that records GL_INVALID_OPERATION and the slot name for the log.
 # -m68060 -m68881 together (without -m68881 GCC 6.5 falls back to soft float).
 RGL_LIB    := dist/Libs/RadeonGL/minigl.library
-RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c lib/rgllight.c | sort -u | paste -sd, -}
+RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c lib/rgllight.c lib/rglread.c | sort -u | paste -sd, -}
 RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
               -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
               -fno-strict-aliasing -m68060 -m68881 -DRGL_CPU_040 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl \
@@ -1057,19 +1057,23 @@ RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declarat
 RGL_DEFS   ?=
 # rgllight.o goes last: code added in front of the core moved its hot
 # functions and cost GLQuake ~0.8% (lib/rgllight.c, MEASURED 2026-11-07)
+# The 2026-11-07 modules (lighting, texgen, fog) likewise go after the hot
+# ones, so that GLQuake's code keeps its places.
+CORE_LATE  := light texgen fog
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
-              $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_MODULES))) \
+              $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
               $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES))) \
-              build/rgl/rgllight.o
+              $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_LATE))) \
+              build/rgl/rgllight.o build/rgl/rglread.o
 
-build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c Makefile
+build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c Makefile
 	@mkdir -p build/rgl
 	$(PYTHON) -I tools/gen_dispatch.py $(MGL_DISPATCH) build/rgl/rgl_dispatch \
 	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' \
 	    --include rgl.h --hooks $(RGL_HOOKS)
 
-build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
+build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
                src/RadeonGL_rev.h
 	@mkdir -p build/rgl
 	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
@@ -1105,7 +1109,7 @@ RGL030_LIB    := dist/Libs/RadeonGL030/minigl.library
 RGL030_CFLAGS := $(filter-out -DRGL_CPU_040,$(subst -m68060,-m68030,$(RGL_CFLAGS)))
 RGL030_OBJS   := $(patsubst build/rgl/%,build/rgl030/%,$(RGL_OBJS))
 
-build/rgl030/%.o: lib/%.c lib/backend.h lib/rgl.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) \
+build/rgl030/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) \
                   $(R200_HDRS) src/RadeonGL_rev.h
 	@mkdir -p build/rgl030
 	$(GCC_CC) $(RGL030_CFLAGS) -c $< -o $@

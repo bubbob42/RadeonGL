@@ -45,6 +45,7 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     Tex_Defaults(c->tex[0], 0);
     Light_Defaults(c);
     Texgen_Defaults(c);
+    Fog_Defaults(c);
     c->stream_off = Heap_Alloc(c, CORE_STREAM_BYTES, 32);
     c->stream_size = (c->stream_off != 0xffffffffUL) ? CORE_STREAM_BYTES : 0;
     c->stream_cpu = (c->stream_size != 0) ? heap_cpu + c->stream_off / 4 : NULL;

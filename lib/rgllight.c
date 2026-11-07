@@ -1,6 +1,6 @@
 /*
- * rgllight.c -- the lighting and texgen hooks (2026-11-07,
- * src/core/light.c and texgen.c do the work).
+ * rgllight.c -- the lighting, texgen, fog and line width hooks
+ * (2026-11-07, src/core/light.c, texgen.c and fog.c do the work).
  *
  * A file of their own, linked after everything else (Makefile RGL_OBJS):
  * MEASURED 2026-11-07 on the A4000D, the same hooks at the end of rgl.c
@@ -126,4 +126,34 @@ void Hook_GLTexGenfv(GLcontext context, GLenum coord, GLenum pname, const GLfloa
     if ((c = Rgl_Core()) == NULL)
         return;
     Core_TexGenfv(c, coord, pname, params, 4);
+}
+
+void Hook_GLFogf(GLcontext context, GLenum pname, GLfloat param)
+{
+    struct Core *c;
+
+    (void) context;
+    if ((c = Rgl_Core()) == NULL)
+        return;
+    Core_Fogfv(c, pname, &param, 1);
+}
+
+void Hook_GLFogfv(GLcontext context, GLenum pname, GLfloat *param)
+{
+    struct Core *c;
+
+    (void) context;
+    if ((c = Rgl_Core()) == NULL)
+        return;
+    Core_Fogfv(c, pname, param, 4);
+}
+
+void Hook_GLLineWidth(GLcontext context, GLfloat width)
+{
+    struct Core *c;
+
+    (void) context;
+    if ((c = Rgl_Core()) == NULL)
+        return;
+    Core_LineWidth(c, width);
 }

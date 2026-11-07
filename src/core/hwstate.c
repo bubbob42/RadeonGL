@@ -121,6 +121,8 @@ static ULONG SeCntl(struct Core *c)
     }
     if (c->enables & (EN_POLY_OFFSET | EN_ZOFFSET))
         v |= R_ZBIAS_ENABLE_TRI;
+    if (c->wide_line)
+        v |= 1UL << 20;             /* WIDELINE_ENABLE (fog.c) */
     return v;
 }
 
@@ -129,6 +131,8 @@ static ULONG UcpCtl(struct Core *c)
     ULONG v;
 
     v = R_UCP_IN_CLIP_SPACE;
+    if (c->enables & EN_FOG)
+        v |= c->fog_tcl;            /* the TCL's fog mode (fog.c) */
     if (c->front_face == GL_CCW)
         v |= R_CULL_FRONT_IS_CCW;
     if (c->enables & EN_CULL_FACE)
@@ -339,6 +343,8 @@ static ULONG PpCntl(struct Core *c, ULONG units)
             v |= (R_TEX_0_ENABLE << u) | (R_TEX_BLEND_0_ENABLE << u);
     if (c->enables & EN_ALPHA_TEST)
         v |= R_ALPHA_TEST_ENABLE;
+    if (c->enables & EN_FOG)
+        v |= 0x00400000UL;          /* FOG_ENABLE (fog.c) */
     return v;
 }
 
@@ -363,9 +369,13 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
      * the TCL -- a sphere map needs the normal but lights nothing */
     if (c->enables & EN_LIGHTING)
         compsel |= R_OUTPUT_COLOR_0;
+    /* fog (fog.c): the TCL's factor in the specular colour's alpha */
+    if (c->enables & EN_FOG)
+        compsel |= R_OUTPUT_COLOR_1;
     R2E_VertexFormat(c->cs, R_VTX_Z0 | (c->vnorm ? R_VTX_N0 : 0) | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
-                     fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT), fmt1,
-                     compsel);
+                     fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT)
+                     | ((c->enables & EN_FOG) ? (R_VTX_FP_RGBA << (R_VTX_COLOR_0_SHIFT + 2)) : 0),
+                     fmt1, compsel);
     c->hw_units = units;
     c->dirty &= ~D_VTXFMT;
 }
@@ -444,6 +454,7 @@ static LONG ValidateOnce(struct Core *c)
         Hw_Forget(c);
         Light_Reset(c);             /* the lighting controls as the defaults left them */
         Texgen_Forget(c);           /* and the texgen registers */
+        Fog_Forget(c);
     }
     units = Core_UnitsOn(c);
     if (d & D_VAP)
@@ -536,6 +547,8 @@ static LONG ValidateOnce(struct Core *c)
         Light_Emit(c);
     if ((d & D_TEXGEN) && Texgen_Update(c))
         d |= D_VTXFMT;              /* COMP_SEL names the units the TCL computes */
+    if (d & D_FOG)
+        Fog_Emit(c);
     /* a frame dropped while this was written (a flush in one of the
      * emitters): it went with the frame, and the rebase asked for all */
     c->dirty = (c->rebase_gen == gen) ? (d & D_VTXFMT) : D_ALL;

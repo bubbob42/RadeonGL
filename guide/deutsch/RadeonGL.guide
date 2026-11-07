@@ -505,43 +505,48 @@ Für gar kein Protokoll:
       Solange sie an ist, werden kompilierte Vertex-Arrays auf dem
       langsameren direkten Weg gezeichnet.
     * Texturkoordinaten kann die Radeon erzeugen (glTexGen: objekt- und
-      augenlinear, Kugelkarte; S und T), und Texturmatrizen wirken.
+      augenlinear, Kugelkarte; S und T), und Texturmatrizen wirken. Nebel
+      (glFog) und breite Linien (glLineWidth) ebenso.
+    * glReadPixels und mglWriteShotPPM lesen das Bild über Picasso96 aus
+      dem Kartenspeicher zurück: etwa 4 MB pro Sekunde, ein Bild von
+      640 x 480 in 32 Bit dauert also etwa eine Viertelsekunde.
     * Texturen liegen in bis zu 16 MB des Kartenspeichers, und RadeonGL
       lagert sie noch nicht aus: Ein Programm, das mehr braucht, bekommt
       für den Rest weiße Texturen.
-    * Texturen werden mit 16 Bit pro Texel gespeichert: 32-Bit-RGBA-
-      Texturen verlieren an Genauigkeit (ARGB4444), RGB-Texturen werden
-      RGB565.
+    * Texturen werden mit 16 Bit pro Texel gespeichert: RGBA-Texturen
+      verlieren an Genauigkeit (ARGB4444), RGB-Texturen werden RGB565 --
+      außer ein Programm verlangt GL_RGBA8 oder GL_RGB8, die 8 Bit pro
+      Komponente behalten (und doppelt so viel Kartenspeicher brauchen).
+      GLQuake verlangt keines davon.
     * Bildschirme bis 2048 x 2048, in 16 oder 32 Bit.
     * Die Karte wird nur über Picasso96 und seinen Radeon-Treiber
       erreicht.
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL setzt 116 der 205 Funktionen der minigl.library 29.1 um: alles,
+RadeonGL setzt 122 der 205 Funktionen der minigl.library 29.1 um: alles,
 was GLQuake verwendet, und mehr. Ein Programm, das eine der anderen
 aufruft, bekommt dafür nur den Fehler GL_INVALID_OPERATION; die
 @{" Protokolldatei " link Log} nennt solche Aufrufe.
 
-    * Nebel (glFog).
     * Display-Listen (glNewList, glCallList und die übrigen).
     * glTexCoord4f, die Texturumgebung GL_BLEND (wie GL_MODULATE
       gezeichnet) und GL_DECAL mit einer RGBA-Textur.
     * Stencil- und Akkumulationspuffer, Linien- und Flächenmuster,
       logische Verknüpfungen.
-    * Pixel lesen und kopieren (glReadPixels, glCopyTexImage2D,
-      glCopyTexSubImage2D, glPixelStorei, glDrawBuffer, glReadBuffer).
+    * Den Tiefenpuffer lesen, Pixel kopieren (glCopyTexImage2D,
+      glCopyTexSubImage2D), glDrawBuffer, glReadBuffer.
     * Die Aufrufe mit doppelter Genauigkeit (glLoadMatrixd, glMultMatrixd,
       glRotated, glScaled, glTranslated, glGetDoublev).
     * glArrayElement, glInterleavedArrays, glMultiDrawArrays, Kantenmarken
       und der Farbindex-Modus.
-    * glBlendEquation, glBlendFuncSeparate, glLineWidth, glColorTable,
-      glTexEnvfv, Texturprioritäten.
+    * glBlendEquation, glBlendFuncSeparate, glColorTable, glTexEnvfv,
+      Texturprioritäten.
     * GLU und GLUT (gluPerspective, gluLookAt, gluBuild2DMipmaps, die
       Quadriken; die Fenster- und Körperfunktionen von GLUT).
     * Die eigene Hauptschleife von MiniGL mit ihren Rückrufen
       (mglMainLoop, mglIdleFunc, mglKeyFunc, mglMouseFunc), mglLockBack,
-      mglTexMemStat, mglWriteShotPPM.
+      mglTexMemStat.
 @endnode
 
 @node Inside "Wie es funktioniert"

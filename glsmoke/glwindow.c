@@ -162,6 +162,7 @@ static void Check(const char *what, struct RastPort *rp, LONG ox, LONG oy, GLint
 {
     static const char want[4] = { 'g', 'r', 'b', 'g' };
     LONG x[4], y[4];
+    UBYTE rgba[4];
     ULONG px;
     char got[5];
     int i;
@@ -183,6 +184,16 @@ static void Check(const char *what, struct RastPort *rp, LONG ox, LONG oy, GLint
             ok = FALSE;
             Printf("  %s: (%ld,%ld) is $%06lx, want %lc\n", (LONG) what, x[i], y[i], px & 0xffffffUL,
                    (LONG) want[i]);
+        }
+        /* the same point through glReadPixels (GL counts rows from the bottom) */
+        rgba[0] = rgba[1] = rgba[2] = rgba[3] = 0x55;
+        glReadPixels(x[i], h - 1 - y[i], 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        px = ((ULONG) rgba[0] << 16) | ((ULONG) rgba[1] << 8) | rgba[2];
+        if (Hue(px) != want[i])
+        {
+            ok = FALSE;
+            Printf("  %s: glReadPixels(%ld,%ld) is $%06lx, want %lc\n", (LONG) what, x[i], h - 1 - y[i],
+                   px, (LONG) want[i]);
         }
     }
     got[4] = 0;

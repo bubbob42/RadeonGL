@@ -690,6 +690,42 @@ static void test_texgen(void)
     (void) i;
 }
 
+/* W2: GL_RGBA8 and GL_RGB8 stored as ARGB8888, one texel a dword */
+static ULONG Texel(const struct CoreTex *t, ULONG l, ULONG x, ULONG y);
+
+static void test_tex32(void)
+{
+    static const UBYTE px[2 * 2 * 4] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                                         0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xf0, 0x01 };
+    struct CoreTex *t;
+    struct R2ChkState st;
+
+    Fresh(1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 7);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    t = core.tex[7];
+    CHECK(t != NULL);
+    if (t == NULL)
+        return;
+    CHECK_INT(t->cpp, 4);
+    CHECK_HEX(t->hwfmt, R_TXFORMAT_ARGB8888 | R_TXFORMAT_ALPHA_IN_MAP);
+    CHECK_HEX(Texel(t, 0, 0, 0), 0x44112233UL);     /* A R G B */
+    CHECK_HEX(Texel(t, 0, 1, 1), 0x01ddeef0UL);
+    /* RGB8: alpha 1, no alpha in the map */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    CHECK_HEX(t->hwfmt, R_TXFORMAT_ARGB8888);
+    CHECK_HEX(Texel(t, 0, 1, 0), 0xff556677UL);
+    /* generic GL_RGBA stays ARGB4444 (GLQuake's) */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    CHECK_INT(t->cpp, 2);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    Draw1();
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
 /* --- Textures ------------------------------------------------------------------- */
 
 /* texel k of a level, as the GPU reads it */
@@ -701,7 +737,7 @@ static ULONG Texel(const struct CoreTex *t, ULONG l, ULONG x, ULONG y)
     byte = t->lofs[l] + y * t->pitch[l] + x * t->cpp;
     g = R2Cs_Swap32(vram[(t->gpu - TEX_GPU + byte) / 4]);   /* tex_swap: stored reversed */
     g >>= (byte & 3) * 8;
-    return t->cpp == 1 ? (g & 0xff) : (g & 0xffff);
+    return t->cpp == 1 ? (g & 0xff) : t->cpp == 4 ? g : (g & 0xffff);
 }
 
 static void test_textures(void)
@@ -3714,6 +3750,7 @@ int main(void)
     test_triangle();
     test_lighting();
     test_texgen();
+    test_tex32();
     test_textures();
     test_state();
     test_state_max();

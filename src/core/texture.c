@@ -6,6 +6,10 @@
  *
  *   RGB (3, GL_RGB, GL_RGB5, MGL 5_6_5)        RGB565
  *   RGBA (4, GL_RGBA, MGL 4_4_4_4, ...)        ARGB4444
+ *   GL_RGB8, GL_RGBA8 (W2, 2026-11-07)          ARGB8888 -- true colour where a
+ *                                              program asks for 8 bits a
+ *                                              component by name (GLQuake asks
+ *                                              for 3 and 4: it stays 16 bit)
  *   LUMINANCE (1)                              I8      (alpha from the fragment)
  *   INTENSITY, ALPHA                           I8 | ALPHA_IN_MAP (Mesa's table)
  *   LUMINANCE_ALPHA (2)                        AI88
@@ -281,8 +285,21 @@ static ULONG BaseOf(LONG internal)
     return 0;
 }
 
-static void HwOf(ULONG base, ULONG *hwfmt, ULONG *cpp)
+/* GL_RGB8 and GL_RGBA8: stored with 8 bits a component (W2) */
+static ULONG DeepOf(LONG internal)
 {
+    return ((ULONG) internal == GL_RGB8 || (ULONG) internal == GL_RGBA8) ? 1UL : 0UL;
+}
+
+static void HwOf(ULONG base, ULONG deep, ULONG *hwfmt, ULONG *cpp)
+{
+    if (deep && (base == GL_RGB || base == GL_RGBA))
+    {
+        /* RGB: no alpha in the map, the R200 reads alpha 1 (Mesa XRGB8888) */
+        *hwfmt = R_TXFORMAT_ARGB8888 | ((base == GL_RGBA) ? R_TXFORMAT_ALPHA_IN_MAP : 0);
+        *cpp = 4;
+        return;
+    }
     switch (base)
     {
         case GL_RGB:            *hwfmt = R_TXFORMAT_RGB565; *cpp = 2; return;
@@ -358,9 +375,11 @@ static void Fetch(ULONG src, const UBYTE *p, ULONG *r, ULONG *g, ULONG *b, ULONG
     }
 }
 
-/* One texel in the storage format, as the GPU reads it. */
-static ULONG Encode(ULONG base, ULONG r, ULONG g, ULONG b, ULONG a)
+/* One texel in the storage format, as the GPU reads it (cpp 4: ARGB8888). */
+static ULONG Encode(ULONG base, ULONG cpp, ULONG r, ULONG g, ULONG b, ULONG a)
 {
+    if (cpp == 4)
+        return (a << 24) | (r << 16) | (g << 8) | b;
     switch (base)
     {
         case GL_RGB:
@@ -379,8 +398,10 @@ static ULONG Encode(ULONG base, ULONG r, ULONG g, ULONG b, ULONG a)
 
 /* A source pixel straight into the storage format, without the bytes in
  * between, where the layouts already agree. */
-static ULONG Direct(ULONG src, ULONG base, const UBYTE *p, ULONG *texel)
+static ULONG Direct(ULONG src, ULONG base, ULONG cpp, const UBYTE *p, ULONG *texel)
 {
+    if (cpp == 4)
+        return 0;
     if ((src == SRC_4444 && base == GL_RGBA) || (src == SRC_565 && base == GL_RGB))
     {
         *texel = ((ULONG) p[0] << 8) | p[1];
@@ -547,15 +568,28 @@ static void WriteRow(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG 
         WriteRow8(c, dst, first, w, row);
         return;
     }
+    if (cpp == 4 && bpp == 4 && src == SRC_RGBA)
+    {
+        /* true colour from RGBA bytes: one texel a dword (W2) */
+        for (i = 0; i < w; i++)
+        {
+            texel = ((ULONG) row[3] << 24) | ((ULONG) row[0] << 16) | ((ULONG) row[1] << 8) | row[2];
+            if (t->base == GL_RGB)
+                texel |= 0xff000000UL;
+            *dst++ = Out(c, texel);
+            row += 4;
+        }
+        return;
+    }
     acc = 0;
     mask = 0;
     slot = first;
     for (i = 0; i < w; i++)
     {
-        if (!Direct(src, t->base, row + i * bpp, &texel))
+        if (!Direct(src, t->base, cpp, row + i * bpp, &texel))
         {
             Fetch(src, row + i * bpp, &r, &g, &b, &a);
-            texel = Encode(t->base, r, g, b, a);
+            texel = Encode(t->base, cpp, r, g, b, a);
         }
         acc |= texel << (slot * cpp * 8);
         mask |= unit << (slot * cpp * 8);
@@ -618,7 +652,7 @@ static ULONG Log2(ULONG v)
 }
 
 /* Storage for level 0 of w x h in base: allocate the chain. */
-static ULONG Allocate(struct Core *c, struct CoreTex *t, ULONG w, ULONG h, ULONG base)
+static ULONG Allocate(struct Core *c, struct CoreTex *t, ULONG w, ULONG h, ULONG base, ULONG deep)
 {
     ULONG hwfmt;
     ULONG cpp;
@@ -629,7 +663,7 @@ static ULONG Allocate(struct Core *c, struct CoreTex *t, ULONG w, ULONG h, ULONG
     ULONG off;
     ULONG pot;
 
-    HwOf(base, &hwfmt, &cpp);
+    HwOf(base, deep, &hwfmt, &cpp);
     pot = (w & (w - 1)) == 0 && (h & (h - 1)) == 0;
     if (t->gpu != 0 && t->w == w && t->h == h && t->hwfmt == hwfmt)
     {
@@ -707,7 +741,7 @@ void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
         return;
     if (level == 0)
     {
-        err = Allocate(c, t, (ULONG) w, (ULONG) h, base);
+        err = Allocate(c, t, (ULONG) w, (ULONG) h, base, DeepOf(internal));
         if (err != GL_NO_ERROR)
         {
             Core_Error(c, err);
@@ -721,7 +755,7 @@ void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
         if (t->gpu == 0 || !t->pot
             || (ULONG) w != ((t->w >> level) ? (t->w >> level) : 1)
             || (ULONG) h != ((t->h >> level) ? (t->h >> level) : 1)
-            || BaseOf(internal) != t->base)
+            || BaseOf(internal) != t->base || (DeepOf(internal) ? 4UL : t->cpp) != t->cpp)
         {
             Core_Error(c, GL_INVALID_VALUE);
             return;

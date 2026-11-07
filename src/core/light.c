@@ -702,7 +702,7 @@ void Light_Matrices(struct Core *c)
 {
     float n[16];
 
-    if (!((c->enables & EN_LIGHTING) || c->tg_eyepos) || c->mv[c->mv_top].ver == c->hw_mvl_ver)
+    if (!((c->enables & (EN_LIGHTING | EN_FOG)) || c->tg_eyepos) || c->mv[c->mv_top].ver == c->hw_mvl_ver)
         return;
     R2E_Matrix(c->cs, R_VS_MATRIX_0_MV, c->mv[c->mv_top].m);
     NormalMatrix(n, c->mv[c->mv_top].m);

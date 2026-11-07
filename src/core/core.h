@@ -162,7 +162,8 @@ struct CoreArray
 #define D_VAP       0x00040000UL    /* SE_VAP_CNTL + SE_VTE_CNTL: back to TCL after a clear */
 #define D_LIGHT     0x00080000UL    /* TCL lighting: controls, lights, materials (light.c) */
 #define D_TEXGEN    0x00100000UL    /* TCL texgen and texture matrices (texgen.c) */
-#define D_ALL       0x001fffffUL
+#define D_FOG       0x00200000UL    /* fog colour and coefficients, line width (fog.c) */
+#define D_ALL       0x003fffffUL
 
 /* Enables (struct Core.enables) */
 #define EN_ALPHA_TEST   0x0001UL
@@ -402,6 +403,17 @@ struct Core
     ULONG tcl_tex;                  /* units whose coordinates the TCL computes (COMP_SEL) */
     ULONG hw_tg[5];                 /* TEX_PROC_CTL_2, _3, _0, _1, CYL_WRAP as last emitted */
     float hw_tm[CORE_UNITS][16];    /* each unit's TCL matrix as last uploaded */
+
+    /* Fog and wide lines (fog.c, 2026-11-07) */
+    ULONG fog_mode;                 /* GL_LINEAR, GL_EXP, GL_EXP2 */
+    float fog_density, fog_start, fog_end;
+    float fog_color[4];
+    float line_width;
+    ULONG wide_line;                /* line_width > 1: SE_CNTL's WIDELINE_ENABLE */
+    ULONG fog_tcl;                  /* fog_mode as UCP_VERT_BLEND_CTL's bits */
+    ULONG pack_align, unpack_align; /* glPixelStorei (lib/rglread.c) */
+    ULONG hw_fog[3];                /* PP_FOG_COLOR, the vector's c and d as last emitted */
+    ULONG hw_linew;                 /* SE_LINE_WIDTH as last emitted */
 };
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
@@ -561,6 +573,11 @@ void Core_Materialfv(struct Core *c, ULONG face, ULONG pname, const float *v, UL
 void Core_ColorMaterial(struct Core *c, ULONG face, ULONG mode);
 void Core_GetLightfv(struct Core *c, ULONG light, ULONG pname, float *v);
 void Core_GetMaterialfv(struct Core *c, ULONG face, ULONG pname, float *v);
+
+/* --- Fog and wide lines (fog.c) -------------------------------------------------- */
+
+void Core_Fogfv(struct Core *c, ULONG pname, const float *v, ULONG n);
+void Core_LineWidth(struct Core *c, float w);
 
 /* --- Texture coordinate generation (texgen.c) ----------------------------------- */
 

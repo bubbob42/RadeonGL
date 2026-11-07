@@ -62,6 +62,11 @@ void  Light_Matrices(struct Core *c);
 void  Texgen_Defaults(struct Core *c);
 void  Texgen_Forget(struct Core *c);
 ULONG Texgen_Update(struct Core *c);
+/* Fog (fog.c): defaults; the shadows forgotten at D_INIT; the TCL's fog
+ * mode bits for UCP_VERT_BLEND_CTL; what D_FOG asks for */
+void  Fog_Defaults(struct Core *c);
+void  Fog_Forget(struct Core *c);
+void  Fog_Emit(struct Core *c);
 /* c->vnorm from lighting and the sphere maps (texgen.c) */
 void  Core_UpdateVnorm(struct Core *c);
 

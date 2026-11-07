@@ -66,10 +66,13 @@ static ULONG Affects(ULONG bit)
         case EN_LIGHTING:       return D_LIGHT | D_VTXFMT | D_MATRIX;
         case EN_NORMALIZE:      return D_LIGHT;
         case EN_COLOR_MATERIAL: return D_LIGHT;
+        /* fog (fog.c): PP_CNTL, the TCL's fog mode, the specular output
+         * colour that carries the factor, the modelview for the depth */
+        case EN_FOG:            return D_FOG | D_PPCNTL | D_SECNTL | D_VTXFMT | D_MATRIX;
     }
     if (bit >= EN_LIGHT0 && bit <= (EN_LIGHT0 << 7))
         return D_LIGHT;         /* lights not drawn before: their vectors (light.c) */
-    return 0;           /* fog: stored, not drawn yet */
+    return 0;
 }
 
 void Core_Enable(struct Core *c, ULONG cap, ULONG on)
