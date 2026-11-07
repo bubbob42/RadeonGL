@@ -12,8 +12,4 @@
  * the client's context into it. */
 extern GLcontext Rgl_CurrentContext;
 
-/* The current context's core, NULL without one (lib/rgllight.c). */
-struct Core;
-struct Core *Rgl_Core(void);
-
 #endif /* RADEONGL_RGL_H */

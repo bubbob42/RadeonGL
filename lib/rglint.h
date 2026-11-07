@@ -15,7 +15,8 @@
 
 struct Rgl
 {
-    struct Core core;
+    struct Core core;           /* first: a context's pointer is its core's */
+    struct Rgl *next;           /* the list of contexts (W3) */
     ULONG real;                 /* the Radeon (rad), else the null card */
     struct Card rad;
     struct R2Ring ring;

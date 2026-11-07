@@ -28,6 +28,56 @@
 struct Library *P96Base = NULL;
 struct Device *TimerBase = NULL;
 
+/* W3 (2026-11-08): several contexts, each a card of its own, one Radeon.
+ * Everything that touches the chip holds card_sem (a task's own calls
+ * nest); a frame another card left running is settled first; with more
+ * than one card no frame is left running past a flush, and each flush
+ * leaves its core to send its whole state again, since another card may
+ * load the engine before its next one. */
+static struct SignalSemaphore card_sem;
+static ULONG card_users;            /* cards open */
+static ULONG card_p96;              /* our opens of Picasso96API.library */
+static struct Card *card_running;   /* the card whose kicked frame may still run */
+
+void Card_Init(void)
+{
+    InitSemaphore(&card_sem);
+}
+
+void Card_Obtain(void)
+{
+    ObtainSemaphore(&card_sem);
+}
+
+void Card_Release(void)
+{
+    ReleaseSemaphore(&card_sem);
+}
+
+/* P96Base stays while any card has it open */
+static BOOL P96Open(struct Card *k)
+{
+    struct Library *b;
+
+    b = OpenLibrary("Picasso96API.library", 2);
+    if (b == NULL)
+        return FALSE;
+    P96Base = b;
+    k->p96open = 1;
+    card_p96++;
+    return TRUE;
+}
+
+static void P96Release(struct Card *k)
+{
+    if (!k->p96open)
+        return;
+    k->p96open = 0;
+    CloseLibrary(P96Base);
+    if (--card_p96 == 0)
+        P96Base = NULL;
+}
+
 #define FENCE_REG     R_SCRATCH_REG2
 #define TIMEOUT_US    500000UL      /* every wait of a flush */
 #define CHUNK_DW      4096UL        /* commands copied into the ring at a time */
@@ -851,8 +901,6 @@ static void SettleAlone(struct Card *k, BOOL closing)
         UnlockBm(k, CARD_RING);
 }
 
-/* One flush. wait: the old way, the Radeon done before the unlock (always
- * without the overlap); else the frame is kicked and left running. */
 /* The window kind: the inner area of the window, in its own coordinates
  * (a GimmeZeroZero window's RastPort is the inner area already). */
 static void InnerArea(const struct Window *win, LONG *x, LONG *y, LONG *w, LONG *h)
@@ -910,6 +958,17 @@ static void ShowInWindow(struct Card *k)
     k->blits++;
 }
 
+/* Under card_sem: another card's kicked frame finished before this card
+ * touches the chip */
+static void SettleOthers(struct Card *k)
+{
+    if (card_running != NULL && card_running != k && card_running->pending)
+        SettleAlone(card_running, FALSE);
+}
+
+/* One flush. wait: the old way, the Radeon done before the unlock (always
+ * without the overlap, and with more than one card); else the frame is
+ * kicked and left running. Card_Flush holds card_sem around it. */
 static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
 {
     struct CoreScreen s;
@@ -1255,7 +1314,21 @@ unlock:
 
 LONG Card_Flush(struct Card *k, BOOL present)
 {
-    return CardFlush(k, present, (BOOL) !k->overlap);
+    LONG e;
+    ULONG ran;
+
+    Card_Obtain();
+    SettleOthers(k);
+    ran = k->flushes;
+    e = CardFlush(k, present, (BOOL) (!k->overlap || card_users > 1));
+    if (k->pending)
+        card_running = k;
+    /* several cards: the next commands may follow another card's on the
+     * engine -- they carry the whole state (the dropped-frame path) */
+    if (card_users > 1 && k->flushes != ran && k->core != NULL)
+        Core_Forget(k->core);
+    Card_Release();
+    return e;
 }
 
 /* Everything built drawn, the Radeon idle: a texture hazard, a stream
@@ -1263,22 +1336,39 @@ LONG Card_Flush(struct Card *k, BOOL present)
 LONG Card_WaitIdle(struct Card *k)
 {
     LONG e;
+    ULONG ran;
 
     if (k->in_flush)
         return R2_OK;
+    Card_Obtain();
+    SettleOthers(k);
+    ran = k->flushes;
     e = CardFlush(k, FALSE, TRUE);
     SettleAlone(k, FALSE);
+    if (card_users > 1 && k->flushes != ran && k->core != NULL)
+        Core_Forget(k->core);
+    Card_Release();
     return (k->lost != 0) ? R2_ETIMEOUT : e;
 }
 
 ULONG *Card_VramBegin(struct Card *k)
 {
+    Card_Obtain();                  /* Card_VramEnd releases it */
     if (k->in_flush)
-        return (k->b[CARD_HEAP].mem != NULL) ? (ULONG *) HeapCpu(k) : NULL;
+    {
+        if (k->b[CARD_HEAP].mem != NULL)
+            return (ULONG *) HeapCpu(k);
+        Card_Release();
+        return NULL;
+    }
+    SettleOthers(k);
     OvLock(k, CARD_OV_VRAM);
     WHERE(20, k->pending);
     if (!LockBm(k, CARD_HEAP, TRUE))
+    {
+        Card_Release();
         return NULL;
+    }
     if (k->pending)
     {
         /* the kicked frame may still read what is about to be written */
@@ -1299,6 +1389,7 @@ void Card_VramEnd(struct Card *k)
         k->vram_lock = 0;
     }
     WHERE(22, 0);
+    Card_Release();
 }
 
 /* --- opening -------------------------------------------------------------------------- */
@@ -1694,7 +1785,20 @@ static ULONG ResizeOffscreen(struct Card *k, ULONG w, ULONG h, char *why, ULONG 
     return ok ? CARD_OK : CARD_FAILED;
 }
 
+static ULONG CardResize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen);
+
 ULONG Card_Resize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen)
+{
+    ULONG res;
+
+    Card_Obtain();
+    SettleOthers(k);
+    res = CardResize(k, w, h, why, whylen);
+    Card_Release();
+    return res;
+}
+
+static ULONG CardResize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen)
 {
     ULONG id, oldid, oldw, oldh, bpp;
     BOOL ok;
@@ -1819,15 +1923,20 @@ ULONG Card_EachMode(ULONG depth, BOOL (*fn)(const struct CardMode *m, void *ud),
     ULONG found;
 
     found = CARD_BESTMODE;
+    Card_Obtain();
     own = P96Own();
     if (P96Base == NULL)
+    {
+        Card_Release();
         return found;
+    }
     ew.fn = fn;
     ew.ud = ud;
     found = WalkModes((depth == 32) ? RGBFB_B8G8R8A8 : RGBFB_R5G6B5PC, EachToClient, &ew);
     if (found == (ULONG) INVALID_ID)
         found = CARD_BESTMODE;
     P96Close(own);
+    Card_Release();
     return found;
 }
 
@@ -1837,6 +1946,7 @@ BOOL Card_ModeSize(ULONG id, ULONG *w, ULONG *h)
     BOOL ok;
 
     ok = FALSE;
+    Card_Obtain();
     own = P96Own();
     if (P96Base != NULL && id != 0 && id != CARD_BESTMODE
         && p96GetModeIDAttr(id, P96IDA_ISP96) && BoardIsRadeon(id))
@@ -1846,6 +1956,7 @@ BOOL Card_ModeSize(ULONG id, ULONG *w, ULONG *h)
         ok = (BOOL) (*w != 0 && *h != 0);
     }
     P96Close(own);
+    Card_Release();
     return ok;
 }
 
@@ -1989,8 +2100,61 @@ static ULONG OpenRest(struct Card *k, ULONG check, char *why, ULONG whylen)
     return CARD_OK;
 }
 
+/* The opens, under card_sem; a card that opened counts (card_users) */
+static ULONG Counted(struct Card *k, ULONG res)
+{
+    if (res == CARD_OK)
+    {
+        k->counted = 1;
+        card_users++;
+    }
+    Card_Release();
+    return res;
+}
+
+static ULONG CardOpen(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULONG check,
+                      char *why, ULONG whylen);
+static ULONG CardOpenWindow(struct Card *k, struct Window *win, const struct CardOpts *o, ULONG check,
+                            char *why, ULONG whylen);
+static ULONG CardOpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h, const struct CardOpts *o,
+                               ULONG check, char *why, ULONG whylen);
+static ULONG CardOpenBitMap(struct Card *k, struct BitMap *bm, const struct CardOpts *o, ULONG check,
+                            char *why, ULONG whylen);
+
 ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULONG check,
                 char *why, ULONG whylen)
+{
+    Card_Obtain();
+    SettleOthers(k);
+    return Counted(k, CardOpen(k, w, h, depth, modeid, check, why, whylen));
+}
+
+ULONG Card_OpenWindow(struct Card *k, struct Window *win, const struct CardOpts *o, ULONG check,
+                      char *why, ULONG whylen)
+{
+    Card_Obtain();
+    SettleOthers(k);
+    return Counted(k, CardOpenWindow(k, win, o, check, why, whylen));
+}
+
+ULONG Card_OpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h, const struct CardOpts *o,
+                         ULONG check, char *why, ULONG whylen)
+{
+    Card_Obtain();
+    SettleOthers(k);
+    return Counted(k, CardOpenOwnWindow(k, x, y, w, h, o, check, why, whylen));
+}
+
+ULONG Card_OpenBitMap(struct Card *k, struct BitMap *bm, const struct CardOpts *o, ULONG check,
+                      char *why, ULONG whylen)
+{
+    Card_Obtain();
+    SettleOthers(k);
+    return Counted(k, CardOpenBitMap(k, bm, o, check, why, whylen));
+}
+
+static ULONG CardOpen(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULONG check,
+                      char *why, ULONG whylen)
 {
     static struct Card zero;
     ULONG id;
@@ -1999,8 +2163,7 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULO
 
     *k = zero;
     Why(why, whylen, "");
-    P96Base = OpenLibrary("Picasso96API.library", 2);
-    if (P96Base == NULL)
+    if (!P96Open(k))
         return CARD_NOT_RADEON;
     want = (depth == 32) ? 32UL : 16UL;
     /* the mode asked for (MGLCreateContextFromID), if it is a Radeon's;
@@ -2215,8 +2378,8 @@ static ULONG OpenWindowKind(struct Card *k, struct Window *win, ULONG own, const
     return res;
 }
 
-ULONG Card_OpenWindow(struct Card *k, struct Window *win, const struct CardOpts *o, ULONG check,
-                      char *why, ULONG whylen)
+static ULONG CardOpenWindow(struct Card *k, struct Window *win, const struct CardOpts *o, ULONG check,
+                            char *why, ULONG whylen)
 {
     static struct Card zero;
     ULONG res;
@@ -2228,8 +2391,7 @@ ULONG Card_OpenWindow(struct Card *k, struct Window *win, const struct CardOpts 
         Why(why, whylen, "no window");
         return CARD_FAILED;
     }
-    P96Base = OpenLibrary("Picasso96API.library", 2);
-    if (P96Base == NULL)
+    if (!P96Open(k))
         return CARD_NOT_RADEON;
     res = OpenWindowKind(k, win, 0, o, check, why, whylen);
     if (res != CARD_OK)
@@ -2237,8 +2399,8 @@ ULONG Card_OpenWindow(struct Card *k, struct Window *win, const struct CardOpts 
     return res;
 }
 
-ULONG Card_OpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h, const struct CardOpts *o,
-                         ULONG check, char *why, ULONG whylen)
+static ULONG CardOpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h, const struct CardOpts *o,
+                               ULONG check, char *why, ULONG whylen)
 {
     static struct Card zero;
     struct TagItem t[14];
@@ -2248,8 +2410,7 @@ ULONG Card_OpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h, const
 
     *k = zero;
     Why(why, whylen, "");
-    P96Base = OpenLibrary("Picasso96API.library", 2);
-    if (P96Base == NULL)
+    if (!P96Open(k))
         return CARD_NOT_RADEON;
     scr = LockPubScreen(NULL);
     if (scr == NULL)
@@ -2349,8 +2510,8 @@ static BOOL BitMapRows(struct Card *k, char *why, ULONG whylen)
     return ok;
 }
 
-ULONG Card_OpenBitMap(struct Card *k, struct BitMap *bm, const struct CardOpts *o, ULONG check,
-                      char *why, ULONG whylen)
+static ULONG CardOpenBitMap(struct Card *k, struct BitMap *bm, const struct CardOpts *o, ULONG check,
+                            char *why, ULONG whylen)
 {
     static struct Card zero;
     ULONG bpp;
@@ -2364,8 +2525,7 @@ ULONG Card_OpenBitMap(struct Card *k, struct BitMap *bm, const struct CardOpts *
         Why(why, whylen, "no bitmap");
         return CARD_FAILED;
     }
-    P96Base = OpenLibrary("Picasso96API.library", 2);
-    if (P96Base == NULL)
+    if (!P96Open(k))
         return CARD_NOT_RADEON;
     k->kind = CARD_KIND_BITMAP;
     res = CARD_FAILED;
@@ -2437,6 +2597,7 @@ void Card_Close(struct Card *k)
 {
     ULONG i;
 
+    Card_Obtain();
     UnlockAll(k);
     k->vram_lock = 0;
     SettleAlone(k, TRUE);           /* the last frame drawn, the CP off */
@@ -2492,10 +2653,15 @@ void Card_Close(struct Card *k)
         DeleteMsgPort(k->tport);
         k->tport = NULL;
     }
-    TimerBase = NULL;
-    if (P96Base != NULL)
+    if (k->counted)
     {
-        CloseLibrary(P96Base);
-        P96Base = NULL;
+        k->counted = 0;
+        card_users--;
     }
+    if (card_running == k)
+        card_running = NULL;
+    if (card_users == 0)
+        TimerBase = NULL;           /* (every card's timer.device is the same base) */
+    P96Release(k);
+    Card_Release();
 }

@@ -96,10 +96,12 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
         FreeVec(buf);
         return TRUE;
     }
+    Card_Obtain();                  /* no other card's frame while this one is read (W3) */
     (void) Card_WaitIdle(k);
     b = &k->b[(k->kind == CARD_KIND_BITMAP) ? CARD_SCREEN : CARD_TARGET];
     if (b->bm == NULL || b->lock != 0)
     {
+        Card_Release();
         FreeVec(buf);
         return FALSE;
     }
@@ -108,6 +110,7 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
     {
         if (lock != 0)
             p96UnlockBitMap(b->bm, lock);
+        Card_Release();
         FreeVec(buf);
         return FALSE;
     }
@@ -134,6 +137,7 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
         fn(ud, row, buf);
     }
     p96UnlockBitMap(b->bm, lock);
+    Card_Release();
     FreeVec(buf);
     return TRUE;
 }
@@ -194,8 +198,7 @@ void Hook_GLReadPixels(GLcontext context, GLint x, GLint y, GLsizei width, GLsiz
     LONG x0, x1, y0, y1;
     ULONG align;
 
-    (void) context;
-    r = (struct Rgl *) Rgl_Core();
+    r = (struct Rgl *) context;
     if (r == NULL)
         return;
     if (IN_BEGIN(&r->core))
@@ -244,8 +247,7 @@ void Hook_GLPixelStorei(GLcontext context, GLenum pname, GLint param)
 {
     struct Rgl *r;
 
-    (void) context;
-    r = (struct Rgl *) Rgl_Core();
+    r = (struct Rgl *) context;
     if (r == NULL)
         return;
     if (param != 1 && param != 2 && param != 4 && param != 8)
@@ -312,8 +314,7 @@ void Hook_MGLWriteShotPPM(GLcontext context, char *filename)
     ULONG n;
     BPTR f;
 
-    (void) context;
-    r = (struct Rgl *) Rgl_Core();
+    r = (struct Rgl *) context;
     if (r == NULL || filename == NULL)
         return;
     s.w = (LONG) r->core.target.width;

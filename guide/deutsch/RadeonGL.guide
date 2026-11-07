@@ -497,8 +497,12 @@ Für gar kein Protokoll:
 
 @{b}Grenzen dieser Version@{ub}
 
-    * Immer nur ein Programm: auf einem eigenen Bildschirm, in einem
-      Fenster oder in eine Bitmap (siehe @{" Der Bildschirm " link Screen}).
+    * Mehrere Programme können gleichzeitig zeichnen, jedes auf einem
+      eigenen Bildschirm, in einem Fenster oder in eine Bitmap (siehe
+      @{" Der Bildschirm " link Screen}). Sie wechseln sich auf der Radeon
+      ab; solange mehr als eines zeichnet, ist jedes etwas langsamer als
+      allein. Jedes braucht eigenen Kartenspeicher: ein Bildschirmkontext
+      bis zu 16 MB Texturen, ein Fenster- oder Bitmap-Kontext 8 MB.
     * Die Beleuchtung (glLight, glMaterial, glLightModel, glColorMaterial,
       Normalen aus glNormal und glNormalPointer) übernimmt die Radeon:
       acht Lichter, gerichtet, punktförmig und als Spot, mit Abschwächung.

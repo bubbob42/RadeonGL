@@ -464,8 +464,12 @@ To have no log at all:
 
 @{b}Limits of this version@{ub}
 
-    * One program at a time: on a screen of its own, in a window or into
-      a bitmap (see @{" The screen " link Screen}).
+    * Several programs can draw at once, each on a screen of its own, in
+      a window or into a bitmap (see @{" The screen " link Screen}). They
+      take turns on the Radeon; while more than one draws, each is a
+      little slower than alone. Each needs card memory of its own: a
+      screen context up to 16 MB of textures, a window or bitmap context
+      8 MB.
     * Lighting (glLight, glMaterial, glLightModel, glColorMaterial, normals
       from glNormal and glNormalPointer) is done by the Radeon: eight
       lights, directional, local and spot, with attenuation. While it is

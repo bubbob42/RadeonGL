@@ -75,6 +75,10 @@ needs.
   program's board bitmap (`mglCreateContextFromBitMap`, the program shows
   it and can draw into it too), on any 15-, 16- or 32-bit screen of the
   Radeon; resizable with `mglResizeContext`.
+- **Several programs at once:** each its own context (a screen, a window or
+  a bitmap) and its own dispatch table; they take turns on the Radeon flush
+  by flush. While more than one draws, each waits for its frame and sends
+  its whole state again; one program alone runs exactly as before.
 - **Safety:** every command list is checked before the Radeon runs it
   (`RadeonGLCheck=0` turns it off for speed).
 - **The package:** an Installer, manuals in English and German, a card test,
@@ -99,7 +103,7 @@ sets GL_INVALID_OPERATION; the library's log names every such call.
   `glBlendEquation`, `glBlendFuncSeparate`, `glColorTable`.
 - GLU and GLUT; MiniGL's own main loop and callbacks; contexts on a 24-bit
   or 8-bit screen (the Radeon draws 15, 16 and 32 bit).
-- One program at a time; textures beyond 16 MB are not swapped out.
+- Textures beyond 16 MB are not swapped out.
 
 ## GLQuake benchmarks
 

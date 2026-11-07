@@ -22,7 +22,7 @@ void Hook_GLLightf(GLcontext context, GLenum light, GLenum pname, GLfloat param)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_Lightfv(c, light, pname, &param, 1);
 }
@@ -31,7 +31,7 @@ void Hook_GLLightfv(GLcontext context, GLenum light, GLenum pname, const GLfloat
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_Lightfv(c, light, pname, params, 4);
 }
@@ -40,7 +40,7 @@ void Hook_GLLightModelf(GLcontext context, GLenum pname, GLfloat param)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_LightModelfv(c, pname, &param, 1);
 }
@@ -49,7 +49,7 @@ void Hook_GLLightModelfv(GLcontext context, GLenum pname, const GLfloat *params)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_LightModelfv(c, pname, params, 4);
 }
@@ -58,7 +58,7 @@ void Hook_GLMaterialf(GLcontext context, GLenum face, GLenum pname, GLfloat para
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_Materialfv(c, face, pname, &param, 1);
 }
@@ -67,7 +67,7 @@ void Hook_GLMaterialfv(GLcontext context, GLenum face, GLenum pname, const GLflo
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_Materialfv(c, face, pname, params, 4);
 }
@@ -76,7 +76,7 @@ void Hook_GLGetLightfv(GLcontext context, GLenum light, GLenum pname, GLfloat *p
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_GetLightfv(c, light, pname, params);
 }
@@ -85,7 +85,7 @@ void Hook_GLGetMaterialfv(GLcontext context, GLenum face, GLenum pname, GLfloat 
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_GetMaterialfv(c, face, pname, params);
 }
@@ -94,7 +94,7 @@ void Hook_GLColorMaterial(GLcontext context, GLenum face, GLenum mode)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_ColorMaterial(c, face, mode);
 }
@@ -103,7 +103,7 @@ void Hook_GLNormalPointer(GLcontext context, GLenum type, GLsizei stride, const 
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_NormalPointer(c, type, stride, pointer);
 }
@@ -113,7 +113,7 @@ void Hook_GLTexGeni(GLcontext context, GLenum coord, GLenum mode, GLenum map)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_TexGeni(c, coord, mode, map);
 }
@@ -123,7 +123,7 @@ void Hook_GLTexGenfv(GLcontext context, GLenum coord, GLenum pname, const GLfloa
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_TexGenfv(c, coord, pname, params, 4);
 }
@@ -133,7 +133,7 @@ void Hook_GLFogf(GLcontext context, GLenum pname, GLfloat param)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_Fogfv(c, pname, &param, 1);
 }
@@ -143,7 +143,7 @@ void Hook_GLFogfv(GLcontext context, GLenum pname, GLfloat *param)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_Fogfv(c, pname, param, 4);
 }
@@ -153,7 +153,7 @@ void Hook_GLLineWidth(GLcontext context, GLfloat width)
     struct Core *c;
 
     (void) context;
-    if ((c = Rgl_Core()) == NULL)
+    if ((c = (struct Core *) context) == NULL)
         return;
     Core_LineWidth(c, width);
 }

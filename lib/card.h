@@ -97,6 +97,8 @@ struct Card
     ULONG show_w, show_h;       /* the size of b[CARD_SCREEN] */
     ULONG heap_top, heap_min;   /* the heap ladder: first size, smallest size (bytes) */
     ULONG blits, blit_cut;      /* window kind: frames blitted; ... cut to a smaller inner area */
+    ULONG counted;              /* W3: open, counted in card_users */
+    ULONG p96open;              /* W3: holds one open of Picasso96API.library */
     struct CardBm b[CARD_NBM];
     ULONG width, height;
     ULONG bpp;                  /* bytes a pixel of the screen (2 or 4) */
@@ -312,6 +314,12 @@ LONG Card_Flush(struct Card *k, BOOL present);
 LONG Card_WaitIdle(struct Card *k);
 ULONG *Card_VramBegin(struct Card *k);
 void Card_VramEnd(struct Card *k);
+
+/* W3: the card semaphore (once, from Back_Init), and holding it around
+ * work on a card's bitmaps outside these calls (lib/rglread.c) */
+void Card_Init(void);
+void Card_Obtain(void);
+void Card_Release(void);
 
 /* Free everything. No file I/O (LibClose may call it under Forbid). */
 void Card_Close(struct Card *k);

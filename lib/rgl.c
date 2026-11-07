@@ -10,7 +10,9 @@
  * requester.
  *
  * One context at a time, owned by the task that made it (concept 7.1).
- * The hooks ignore their context argument: there is only `rgl`.
+ * W3 (2026-11-08): several contexts, each program its own; a hook draws
+ * with the context it is called with (the SDK passes the calling task's
+ * current context: shell.c gives every task a table of its own).
  *
  * Log: when the context is deleted, a summary goes to the file named by
  * the variable RadeonGLLog (default PROGDIR:radeongl.log): frames, bus
@@ -87,7 +89,7 @@ const char Back_IdString[] =
 #include "rglint.h"
 
 GLcontext Rgl_CurrentContext = 0;
-static struct Rgl *rgl = NULL;
+static struct Rgl *rgl_list = NULL;     /* every context, newest first (W3) */
 static ULONG choose_depth = 16;     /* mglChoosePixelDepth */
 static ULONG choose_window = 0;     /* mglChooseWindowMode: MGLCreateContext opens a window */
 static ULONG unimpl_early[(DISPATCH_SLOTS + 31) / 32];
@@ -144,14 +146,40 @@ static LONG HeapPeek(APTR ctx, ULONG gpu, ULONG *val)
     return 0;
 }
 
+/* A stub was called (no context argument): the calling task's context
+ * notes it */
 void Rgl_Unimpl(ULONG slot)
 {
+    struct Rgl *r;
+    struct Task *me;
     ULONG *bits;
 
-    bits = (rgl != NULL) ? rgl->unimpl : unimpl_early;
+    me = FindTask(NULL);
+    for (r = rgl_list; r != NULL && r->owner != me; r = r->next)
+        ;
+    bits = (r != NULL) ? r->unimpl : unimpl_early;
     bits[slot / 32] |= 1UL << (slot % 32);
-    if (rgl != NULL)
-        Core_Error(&rgl->core, GL_INVALID_OPERATION);
+    if (r != NULL)
+        Core_Error(&r->core, GL_INVALID_OPERATION);
+}
+
+/* Making and freeing contexts, one at a time (P96Base, the card's
+ * globals): wait for another task's turn instead of refusing (W3) */
+static void Busy(void)
+{
+    ULONG got;
+
+    for (;;)
+    {
+        Forbid();
+        got = rgl_busy ? 0UL : 1UL;
+        if (got)
+            rgl_busy = 1;
+        Permit();
+        if (got)
+            return;
+        Delay(1);
+    }
 }
 
 /* --- The log ------------------------------------------------------------------------- */
@@ -593,6 +621,7 @@ static void FreeRgl(struct Rgl *r)
 
 void Back_Init(void)
 {
+    Card_Init();                    /* the card semaphore (W3) */
 }
 
 /* The null card's ring and heap in fast RAM, and its checker. FALSE when
@@ -862,13 +891,7 @@ static void *CreateContext(const struct Ask *a)
 
     if (!AskSize(a, &w, &h))
         return NULL;
-    Forbid();
-    i = (rgl == NULL && !rgl_busy) ? 1UL : 0UL;
-    if (i)
-        rgl_busy = 1;
-    Permit();
-    if (!i)
-        return NULL;                /* one program at a time */
+    Busy();
     r = (struct Rgl *) AllocVec(sizeof(*r), MEMF_ANY | MEMF_CLEAR);
     if (r == NULL)
     {
@@ -1025,37 +1048,46 @@ static void *CreateContext(const struct Ask *a)
         rgl_busy = 0;
         return NULL;
     }
-    rgl = r;
+    Forbid();
+    r->next = rgl_list;
+    rgl_list = r;
+    Permit();
     Trap_Install();                 /* RadeonGLTrap=1, debug builds only */
     rgl_busy = 0;
     return (void *) r;
 }
 
-/* Only the owner deletes its context. The SDK's mglDeleteContext reads
- * the library's ONE currentContext pointer, shared by every opener, and
- * zeroes it before the call: a second program whose mglCreateContext was
- * refused (GLQuake's VID_Shutdown deletes unconditionally) would otherwise
- * free the first one's context under it (audit 2026-11-03). */
+/* Only the owner deletes its context, and only a context in the list
+ * (GLQuake's VID_Shutdown deletes unconditionally, NULL after a refused
+ * create; the audit of 2026-11-03 found a second program freeing the
+ * first one's context through the shared currentContext). */
 void Hook_MGLDeleteContext(GLcontext context)
 {
     struct Rgl *r;
+    struct Rgl **pp;
     ULONG mine;
 
-    (void) context;
+    r = (struct Rgl *) context;
+    if (r == NULL)
+        return;
+    Busy();
+    mine = 0;
     Forbid();
-    r = rgl;
-    mine = (r != NULL && r->owner == FindTask(NULL) && !rgl_busy) ? 1UL : 0UL;
-    if (mine)
+    for (pp = &rgl_list; *pp != NULL && *pp != r; pp = &(*pp)->next)
+        ;
+    if (*pp != NULL && r->owner == FindTask(NULL))
     {
-        rgl_busy = 1;
-        rgl = NULL;
+        *pp = r->next;
+        mine = 1;
     }
-    else if (r != NULL)
-        Rgl_CurrentContext = (GLcontext) r;     /* the wrapper zeroed it */
     Permit();
     if (!mine)
+    {
+        rgl_busy = 0;
         return;
-    Rgl_CurrentContext = 0;
+    }
+    if (Rgl_CurrentContext == context)
+        Rgl_CurrentContext = 0;
     if (!r->real)
         R2Ring_Idle(&r->ring);
     WriteLog(r);
@@ -1069,17 +1101,32 @@ void Hook_MGLDeleteContext(GLcontext context)
 void Back_ClientGone(struct Task *task)
 {
     struct Rgl *r;
+    struct Rgl **pp;
 
-    r = rgl;
-    if (r == NULL || r->owner != task || rgl_busy)
-        return;
+    if (rgl_busy)
+        return;                     /* (under Forbid: no waiting here) */
     rgl_busy = 1;
-    rgl = NULL;
-    Rgl_CurrentContext = 0;
-    FreeRgl(r);
+    pp = &rgl_list;
+    while (*pp != NULL)
+    {
+        r = *pp;
+        if (r->owner != task)
+        {
+            pp = &r->next;
+            continue;
+        }
+        *pp = r->next;
+        if (Rgl_CurrentContext == (GLcontext) r)
+            Rgl_CurrentContext = 0;
+        FreeRgl(r);
+    }
     choose_window = 0;
     rgl_busy = 0;
 }
+
+/* From here on every hook draws with the context it is given (W3): the
+ * old single context's name now means the argument */
+#define rgl ((struct Rgl *) context)
 
 void Hook_MGLSwitchDisplay(GLcontext context)
 {
@@ -1087,8 +1134,7 @@ void Hook_MGLSwitchDisplay(GLcontext context)
     ULONG seq;
     ULONG dw;
 
-    (void) context;
-    r = rgl;
+    r = (struct Rgl *) context;
     if (r == NULL)
         return;
     if (r->real)
@@ -1650,11 +1696,4 @@ void Hook_GLFinish(GLcontext context)
     }
     if (rgl->real ? Card_WaitIdle(&rgl->rad) == R2_OK : R2Ring_Idle(&rgl->ring) == R2_OK)
         Core_GpuIdle(C);
-}
-
-/* The lighting hooks' way to the context (lib/rgllight.c): NULL when there
- * is none */
-struct Core *Rgl_Core(void)
-{
-    return (rgl != NULL) ? &rgl->core : NULL;
 }

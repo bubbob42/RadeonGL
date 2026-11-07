@@ -13,7 +13,11 @@
  *     -- the opens are counted per task;
  *   - nothing runs MGLInit inside LibOpen;
  *   - LibInit refuses a CPU the build cannot run on (the 68040/68060 build
- *     holds FPU instructions a 68881/68882 does not know).
+ *     holds FPU instructions a 68881/68882 does not know);
+ *   - W3 (2026-11-08): every task gets a dispatch table of its own, whose
+ *     currentContext is that task's -- the SDK's inline calls pass
+ *     *currentContext as each call's context, and one table for all made
+ *     every program draw with the last-made context (our report, A1).
  *
  * This file must stay first in the link: LibNoExec is the first code in the
  * hunk, so running the library as a program returns at once.
@@ -25,6 +29,7 @@
 #include <exec/resident.h>
 #include <exec/libraries.h>
 #include <exec/semaphores.h>
+#include <exec/memory.h>
 #include <dos/dos.h>
 #include <intuition/intuitionbase.h>
 #include <graphics/gfxbase.h>
@@ -57,6 +62,10 @@ static const char LibName[] = LIBNAME;
 #define OPENERS 32
 static struct Task *opener[OPENERS];
 static UWORD opens[OPENERS];
+/* each task's dispatch table (a copy of MiniGLDispatchTable) and the
+ * context slot its currentContext points at (W3) */
+static MGLDispatchTable *table[OPENERS];
+static GLcontext slot_ctx[OPENERS];
 
 /* The CPU this build needs: RGL_CPU_040 (Makefile) for the 68040/68060
  * build, else a 68020 or 68030 with a 68881/68882. Either needs an FPU. */
@@ -101,9 +110,37 @@ static void FreeBase(struct MiniGLBase *base)
             (ULONG)(base->lib.lib_NegSize + base->lib.lib_PosSize));
 }
 
+/* The calling task's own copy of the table (made at its first call, freed
+ * at its last close); a task beyond OPENERS, or without memory for one,
+ * gets the shared table. */
 static const MGLDispatchTable *LibGetDispatchTable(void)
 {
-    return &MiniGLDispatchTable;
+    struct Task *me;
+    MGLDispatchTable *t;
+    ULONG i;
+
+    me = FindTask(NULL);
+    t = NULL;
+    Forbid();
+    for (i = 0; i < OPENERS && opener[i] != me; i++)
+        ;
+    if (i < OPENERS)
+    {
+        t = table[i];
+        if (t == NULL)
+        {
+            t = (MGLDispatchTable *) AllocVec(sizeof(MGLDispatchTable), MEMF_ANY);
+            if (t != NULL)
+            {
+                CopyMem((APTR) &MiniGLDispatchTable, (APTR) t, sizeof(MGLDispatchTable));
+                slot_ctx[i] = 0;
+                t->currentContext = &slot_ctx[i];
+                table[i] = t;
+            }
+        }
+    }
+    Permit();
+    return (t != NULL) ? t : &MiniGLDispatchTable;
 }
 
 static struct MiniGLBase *LibInit(
@@ -193,6 +230,12 @@ static BPTR LibClose(register struct MiniGLBase *base __asm("a6"))
         }
     if (last)
         Back_ClientGone(me);
+    if (last && i < OPENERS && table[i] != NULL)
+    {
+        FreeVec(table[i]);          /* after the context went (Back_ClientGone) */
+        table[i] = NULL;
+        slot_ctx[i] = 0;
+    }
     if (base->lib.lib_OpenCnt)
         base->lib.lib_OpenCnt--;
     if (base->lib.lib_OpenCnt == 0 && (base->lib.lib_Flags & LIBF_DELEXP))
