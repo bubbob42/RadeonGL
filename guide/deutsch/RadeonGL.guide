@@ -264,6 +264,28 @@ zeichnet: Die Workbench und die anderen Programme laufen weiter. Solange
 der GL-Bildschirm hinter einem anderen liegt, zeichnet RadeonGL nichts;
 das Programm läuft weiter.
 
+@{b}In einem Fenster oder in eine Bitmap des Programms@{ub}
+
+Ein Programm kann auch in einem Fenster zeichnen, auf der Workbench oder
+einem anderen Bildschirm, wenn dieser auf der Radeon liegt und 15, 16 oder
+32 Bit hat (R5G5B5PC, R5G6B5PC, B8G8R8A8):
+
+    * in seinem eigenen Fenster (mglCreateContextFromWindow): RadeonGL
+      zeichnet jedes Bild auf der Karte und kopiert es bei
+      mglSwitchDisplay in das Innere des Fensters;
+    * in einem Fenster, das RadeonGL auf dem voreingestellten öffentlichen
+      Bildschirm öffnet (mglChooseWindowMode vor mglCreateContext);
+    * in eine Bitmap des Programms auf der Radeon
+      (mglCreateContextFromBitMap): RadeonGL zeichnet direkt hinein, und
+      das Programm zeigt sie, allein oder zusammen mit seinen eigenen
+      Zeichnungen.
+
+Ein Bildschirm mit 24 Bit (R8G8B8, B8G8R8) oder 8 Bit nimmt kein
+GL-Fenster: Die Radeon kann in diesen Formaten nicht zeichnen. Ein solches
+Programm bekommt keinen Requester; die @{" Protokolldatei " link Log}
+nennt den Grund. Ein Fenster- oder Bitmap-Kontext beginnt mit 8 MB
+Texturspeicher (RadeonGLHeapMax stellt weniger ein).
+
 Über DVI zeigten Modi mit einem Pixeltakt über etwa 110 MHz (1680 x 1050
 und größer bei 60 Hz) auf dem Testrechner Punkte oder setzten aus,
 während die Radeon zeichnete. Timings mit reduzierter Austastung im
@@ -475,8 +497,8 @@ Für gar kein Protokoll:
 
 @{b}Grenzen dieser Version@{ub}
 
-    * Immer nur ein Programm, auf einem eigenen Bildschirm (kein Zeichnen
-      in ein Workbench-Fenster oder eine Bitmap).
+    * Immer nur ein Programm: auf einem eigenen Bildschirm, in einem
+      Fenster oder in eine Bitmap (siehe @{" Der Bildschirm " link Screen}).
     * Texturen liegen in bis zu 16 MB des Kartenspeichers, und RadeonGL
       lagert sie noch nicht aus: Ein Programm, das mehr braucht, bekommt
       für den Rest weiße Texturen.
@@ -489,7 +511,7 @@ Für gar kein Protokoll:
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL setzt 102 der 205 Funktionen der minigl.library 29.1 um: alles,
+RadeonGL setzt 104 der 205 Funktionen der minigl.library 29.1 um: alles,
 was GLQuake verwendet, und mehr. Ein Programm, das eine der anderen
 aufruft, bekommt dafür nur den Fehler GL_INVALID_OPERATION; die
 @{" Protokolldatei " link Log} nennt solche Aufrufe.

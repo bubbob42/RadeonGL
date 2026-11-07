@@ -55,11 +55,7 @@ void Core_Clear(struct Core *c, ULONG mask)
     {
         if (c->color_mask != 0xf)
             rb3d |= R_PLANE_MASK_ENABLE;
-        plane = (c->target.color_format == R_COLOR_FORMAT_RGB565)
-              ? (((c->color_mask & 1) ? 0xf800UL : 0) | ((c->color_mask & 2) ? 0x07e0UL : 0)
-                 | ((c->color_mask & 4) ? 0x001fUL : 0))
-              : (((c->color_mask & 8) ? 0xff000000UL : 0) | ((c->color_mask & 1) ? 0x00ff0000UL : 0)
-                 | ((c->color_mask & 2) ? 0x0000ff00UL : 0) | ((c->color_mask & 4) ? 0x000000ffUL : 0));
+        plane = Core_PlaneMask(c->target.color_format, c->color_mask);
     }
     else
         rb3d |= R_PLANE_MASK_ENABLE;    /* depth only: no colour writes at all */

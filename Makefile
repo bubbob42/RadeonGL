@@ -1168,8 +1168,18 @@ $(GLMODES): glsmoke/glmodes.c
 	    -I$(MGL_SDK_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
+# GLWindow: window and bitmap contexts, each checked by reading pixels back
+# (glsmoke/glwindow.c, W1, 2026-11-07)
+GLWINDOW := dist/GLSmoke/GLWindow
+
+$(GLWINDOW): glsmoke/glwindow.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -I$(P96_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLBENCH) $(GLMODES) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLBENCH) $(GLMODES) $(GLWINDOW) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke

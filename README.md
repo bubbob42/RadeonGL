@@ -54,6 +54,12 @@ needs.
   card (`mglGetSupportedScreenModes`), a context in a chosen mode, the size
   switched while the program runs (`mglResizeContext`), vertical sync
   (`mglEnableSync`).
+- **Windows and bitmaps:** a context in the program's window
+  (`mglCreateContextFromWindow`), in a window of its own on the default
+  public screen (`mglChooseWindowMode`), or drawing straight into the
+  program's board bitmap (`mglCreateContextFromBitMap`, the program shows
+  it and can draw into it too), on any 15-, 16- or 32-bit screen of the
+  Radeon; resizable with `mglResizeContext`.
 - **Safety:** every command list is checked before the Radeon runs it
   (`RadeonGLCheck=0` turns it off for speed).
 - **The package:** an Installer, manuals in English and German, a card test,
@@ -61,7 +67,7 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL implements 102 of the 205 functions of `minigl.library` 29.1:
+RadeonGL implements 104 of the 205 functions of `minigl.library` 29.1:
 everything GLQuake uses, and more. A missing function draws nothing and
 sets GL_INVALID_OPERATION; the library's log names every such call.
 
@@ -78,8 +84,8 @@ sets GL_INVALID_OPERATION; the library's log names every such call.
 - The double-precision calls, `glArrayElement`, `glInterleavedArrays`,
   `glMultiDrawArrays`, `glNormalPointer`, edge flags, colour-index mode,
   `glBlendEquation`, `glBlendFuncSeparate`, `glLineWidth`, `glColorTable`.
-- GLU and GLUT; MiniGL's own main loop and callbacks; contexts in a window
-  or a bitmap.
+- GLU and GLUT; MiniGL's own main loop and callbacks; contexts on a 24-bit
+  or 8-bit screen (the Radeon draws 15, 16 and 32 bit).
 - One program at a time; textures beyond 16 MB are not swapped out.
 
 ## GLQuake benchmarks

@@ -40,6 +40,9 @@ void  Tex_Defaults(struct CoreTex *t, ULONG name);
 /* An object for name (created on first use), or NULL out of memory. */
 struct CoreTex *Tex_Get(struct Core *c, ULONG name);
 
+/* RB3D_PLANEMASK for glColorMask's bits in a colour format (hwstate.c). */
+ULONG Core_PlaneMask(ULONG format, ULONG m);
+
 /* Errors that a call inside glBegin/glEnd must raise. */
 #define IN_BEGIN(c) ((c)->prim != CORE_NO_PRIM)
 

@@ -45,6 +45,7 @@
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
+#include <proto/graphics.h>
 #include <libraries/minigl_dispatch.h>
 
 #include "rgl_dispatch.h"
@@ -93,7 +94,9 @@ struct Rgl
     ULONG *ring_mem;
     ULONG *heap_mem;
     ULONG heap_size;
-    struct Window *win;
+    struct Window *win;         /* the null card's window */
+    ULONG win_app;              /* ... is the program's (FromWindow): not ours to close */
+    ULONG kind;                 /* CARD_KIND_* asked for */
     struct Task *owner;
     ULONG frame;
     ULONG frame_dw_max;
@@ -115,6 +118,7 @@ struct Rgl
 GLcontext Rgl_CurrentContext = 0;
 static struct Rgl *rgl = NULL;
 static ULONG choose_depth = 16;     /* mglChoosePixelDepth */
+static ULONG choose_window = 0;     /* mglChooseWindowMode: MGLCreateContext opens a window */
 static ULONG unimpl_early[(DISPATCH_SLOTS + 31) / 32];
 /* a context is being made or freed: one at a time, and none while another
  * is torn down (P96Base, TimerBase and the card's globals are shared) */
@@ -275,8 +279,23 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
 
     k = &r->rad;
     Put(f, "RadeonGL on the Radeon (PCI "); PutX(f, k->pci_id); Put(f, ")\n");
-    Put(f, "screen: "); PutU(f, k->width); Put(f, " x "); PutU(f, k->height);
-    Put(f, k->bpp == 2 ? ", 16 bit (R5G6B5PC)\n" : ", 32 bit (B8G8R8A8)\n");
+    Put(f, (k->kind == CARD_KIND_WINDOW) ? (k->own_win ? "context: its own window on the default public screen\n"
+                                                      : "context: the program's window\n")
+         : (k->kind == CARD_KIND_BITMAP) ? "context: the program's bitmap\n" : "context: a screen of its own\n");
+    Put(f, (k->kind == CARD_KIND_SCREEN) ? "screen: " : "frame: ");
+    PutU(f, k->width); Put(f, " x "); PutU(f, k->height);
+    Put(f, k->show_format == R_COLOR_FORMAT_ARGB1555 ? ", 15 bit (R5G5B5PC)\n"
+         : k->bpp == 2 ? ", 16 bit (R5G6B5PC)\n" : ", 32 bit (B8G8R8A8)\n");
+    if (k->kind != CARD_KIND_SCREEN)
+    {
+        Put(f, "texture heap: "); PutU(f, k->heap_size >> 10); Put(f, " KB");
+        if (k->kind == CARD_KIND_WINDOW)
+        {
+            Put(f, "; frames blitted into the window: "); PutU(f, k->blits);
+            Put(f, ", cut to a smaller window: "); PutU(f, k->blit_cut);
+        }
+        Put(f, "\n");
+    }
     if (r->resizes != 0 || r->resize_failed != 0)
     {
         Put(f, "resized: "); PutU(f, r->resizes); Put(f, " times, refused "); PutU(f, r->resize_failed);
@@ -426,7 +445,9 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     PutSlots(r, f);
 }
 
-/* A context refused on a Radeon: why, in the log and a requester. */
+/* A context refused on a Radeon: why, in the log and a requester -- not
+ * for a window or bitmap context, whose program falls back to its own
+ * drawing without a word (Reflector, Herald). */
 static void Refused(struct Rgl *r, const char *why)
 {
     struct EasyStruct es;
@@ -440,6 +461,8 @@ static void Refused(struct Rgl *r, const char *why)
         Put(f, "\n");
         Close(f);
     }
+    if (r->kind != CARD_KIND_SCREEN)
+        return;
     es.es_StructSize = sizeof(es);
     es.es_Flags = 0;
     es.es_Title = (UBYTE *) "RadeonGL";
@@ -581,7 +604,7 @@ static void FreeRgl(struct Rgl *r)
     Core_Free(&r->core);
     if (r->real)
         Card_Close(&r->rad);
-    if (r->win != NULL)
+    if (r->win != NULL && !r->win_app)
     {
         ModifyIDCMP(r->win, 0);
         CloseWindow(r->win);
@@ -678,13 +701,73 @@ static BOOL NullCardWindow(struct Rgl *r)
     return (BOOL) (r->win != NULL);
 }
 
-static void *CreateContext(int w, int h, ULONG modeid);
+/* What a program asked for (W1: a screen, a window, its window, its bitmap) */
+struct Ask
+{
+    ULONG kind;                 /* CARD_KIND_* */
+    LONG x, y;                  /* our own window's place */
+    LONG w, h;                  /* the screen's or our own window's size */
+    ULONG modeid;               /* MGLCreateContextFromID */
+    struct Window *win;         /* MGLCreateContextFromWindow */
+    struct BitMap *bm;          /* MGLCreateContextFromBitMap */
+};
 
+static void *CreateContext(const struct Ask *a);
+
+static void *CreateScreenOrWindow(LONG x, LONG y, LONG w, LONG h, ULONG modeid)
+{
+    struct Ask a;
+
+    a.kind = choose_window ? CARD_KIND_WINDOW : CARD_KIND_SCREEN;
+    a.x = x;
+    a.y = y;
+    a.w = w;
+    a.h = h;
+    a.modeid = modeid;
+    a.win = NULL;
+    a.bm = NULL;
+    return CreateContext(&a);
+}
+
+/* mglChooseWindowMode(GL_TRUE) first: a window of ours on the default
+ * public screen, offx/offy its place (W1) */
 void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
 {
-    (void) offx;
-    (void) offy;
-    return CreateContext(w, h, 0);
+    return CreateScreenOrWindow(offx, offy, w, h, 0);
+}
+
+/* W1: the program's window; the drawable is its inner area, the frame is
+ * blitted in at every MGLSwitchDisplay. The window stays the program's. */
+void *Hook_MGLCreateContextFromWindow(struct Window *window)
+{
+    struct Ask a;
+
+    if (window == NULL)
+        return NULL;
+    a.kind = CARD_KIND_WINDOW;
+    a.x = a.y = 0;
+    a.w = a.h = 0;
+    a.modeid = 0;
+    a.win = window;
+    a.bm = NULL;
+    return CreateContext(&a);
+}
+
+/* W1: the program's bitmap; MGLSwitchDisplay copies the frame into it and
+ * the program shows it itself. */
+void *Hook_MGLCreateContextFromBitMap(struct BitMap *bitmap)
+{
+    struct Ask a;
+
+    if (bitmap == NULL)
+        return NULL;
+    a.kind = CARD_KIND_BITMAP;
+    a.x = a.y = 0;
+    a.w = a.h = 0;
+    a.modeid = 0;
+    a.win = NULL;
+    a.bm = bitmap;
+    return CreateContext(&a);
 }
 
 /* 2026-11-06: a context in exactly that Picasso96 mode (*w, *h get its
@@ -692,17 +775,37 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
  * MGL_SM_WINDOWMODE (a window on the Workbench): not offered, NULL. */
 void *Hook_MGLCreateContextFromID(GLint ID, GLint *w, GLint *h)
 {
+    struct Ask a;
     ULONG mw, mh;
 
-    if (w == NULL || h == NULL || (ULONG) ID == MGL_SM_WINDOWMODE)
+    if (w == NULL || h == NULL)
         return NULL;
+    if ((ULONG) ID == MGL_SM_WINDOWMODE)
+    {
+        /* W1: a window of ours on the default public screen */
+        a.kind = CARD_KIND_WINDOW;
+        a.x = a.y = 0;
+        a.w = *w;
+        a.h = *h;
+        a.modeid = 0;
+        a.win = NULL;
+        a.bm = NULL;
+        return CreateContext(&a);
+    }
     if ((ULONG) ID == MGL_SM_BESTMODE)
-        return CreateContext(*w, *h, 0);
+        return CreateScreenOrWindow(0, 0, *w, *h, 0);
     if (!Card_ModeSize((ULONG) ID, &mw, &mh))
         return NULL;
     *w = (GLint) mw;
     *h = (GLint) mh;
-    return CreateContext((int) mw, (int) mh, (ULONG) ID);
+    a.kind = CARD_KIND_SCREEN;
+    a.x = a.y = 0;
+    a.w = (LONG) mw;
+    a.h = (LONG) mh;
+    a.modeid = (ULONG) ID;
+    a.win = NULL;
+    a.bm = NULL;
+    return CreateContext(&a);
 }
 
 /* 2026-11-06: the Radeon boards' modes in the depth mglChoosePixelDepth
@@ -740,11 +843,42 @@ GLint Hook_mglGetSupportedScreenModes(MGLScreenModeCallback CallbackFn)
     return (GLint) Card_EachMode(choose_depth, ModeToClient, &mw);
 }
 
-static void *CreateContext(int w, int h, ULONG modeid)
+/* The null card's size for what was asked (it draws nothing; tests) */
+static BOOL AskSize(const struct Ask *a, LONG *w, LONG *h)
+{
+    const struct Window *win;
+
+    *w = a->w;
+    *h = a->h;
+    if (a->win != NULL)
+    {
+        win = a->win;
+        if (win->Flags & WFLG_GIMMEZEROZERO)
+        {
+            *w = win->GZZWidth;
+            *h = win->GZZHeight;
+        }
+        else
+        {
+            *w = win->Width - win->BorderLeft - win->BorderRight;
+            *h = win->Height - win->BorderTop - win->BorderBottom;
+        }
+    }
+    else if (a->bm != NULL)
+    {
+        *w = (LONG) GetBitMapAttr(a->bm, BMA_WIDTH);
+        *h = (LONG) GetBitMapAttr(a->bm, BMA_HEIGHT);
+    }
+    return (BOOL) (*w > 0 && *h > 0 && *w <= 2048 && *h <= 2048);
+}
+
+static void *CreateContext(const struct Ask *a)
 {
     struct Rgl *r;
     struct CoreTarget t;
     struct CoreEnv env;
+    struct CardOpts opts;
+    LONG w, h;
     char why[96];
     char which[12];
     ULONG check;
@@ -755,7 +889,7 @@ static void *CreateContext(int w, int h, ULONG modeid)
     ULONG staged;
     char flag[8];
 
-    if (w <= 0 || h <= 0 || w > 2048 || h > 2048)
+    if (!AskSize(a, &w, &h))
         return NULL;
     Forbid();
     i = (rgl == NULL && !rgl_busy) ? 1UL : 0UL;
@@ -771,6 +905,7 @@ static void *CreateContext(int w, int h, ULONG modeid)
         return NULL;
     }
     r->owner = FindTask(NULL);
+    r->kind = a->kind;
     n = GetVar((STRPTR) "RadeonGLLog", (STRPTR) r->log, sizeof(r->log), 0);
     if (n <= 0)
         for (i = 0; i < sizeof("PROGDIR:radeongl.log"); i++)
@@ -799,9 +934,21 @@ static void *CreateContext(int w, int h, ULONG modeid)
         /* RadeonGLHeapNarrow=1: straight to the last rung, 0.4's narrow heap */
         Card_HeapNarrow = (GetVar((STRPTR) "RadeonGLHeapNarrow", (STRPTR) flag, sizeof(flag), 0) > 0
                            && flag[0] == '1') ? 1UL : 0UL;
-        res = Card_Open(&r->rad, (ULONG) w, (ULONG) h, choose_depth, modeid, check, why, sizeof(why));
+        opts.heap_top = 0;
+        if (a->kind == CARD_KIND_SCREEN)
+            res = Card_Open(&r->rad, (ULONG) w, (ULONG) h, choose_depth, a->modeid, check, why, sizeof(why));
+        else if (a->win != NULL)
+            res = Card_OpenWindow(&r->rad, a->win, &opts, check, why, sizeof(why));
+        else if (a->bm != NULL)
+            res = Card_OpenBitMap(&r->rad, a->bm, &opts, check, why, sizeof(why));
+        else
+            res = Card_OpenOwnWindow(&r->rad, a->x, a->y, (ULONG) w, (ULONG) h, &opts, check, why,
+                                     sizeof(why));
+        /* W1: a window or bitmap context goes to the null card only when a
+         * test asks for it (RadeonGLCard=n): a program drawing into its own
+         * window must hear that nothing would be drawn */
         if (res == CARD_FAILED
-            || (res == CARD_NOT_RADEON && (which[0] == 'r' || which[0] == 'R')))
+            || (res == CARD_NOT_RADEON && (which[0] == 'r' || which[0] == 'R' || a->kind != CARD_KIND_SCREEN)))
         {
             Refused(r, res == CARD_FAILED ? why : "there is no R200 Radeon on a P96 board");
             FreeRgl(r);
@@ -896,7 +1043,12 @@ static void *CreateContext(int w, int h, ULONG modeid)
     /* RadeonGLUploadCache=0: every locked upload written again (A/B) */
     if (GetVar((STRPTR) "RadeonGLUploadCache", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
         r->core.no_ucache = 1;
-    if (!r->real && !NullCardWindow(r))
+    if (!r->real && a->win != NULL)
+    {
+        r->win = a->win;            /* the program's window gives the input */
+        r->win_app = 1;
+    }
+    else if (!r->real && a->bm == NULL && !NullCardWindow(r))
     {
         FreeRgl(r);
         rgl_busy = 0;
@@ -937,6 +1089,7 @@ void Hook_MGLDeleteContext(GLcontext context)
         R2Ring_Idle(&r->ring);
     WriteLog(r);
     FreeRgl(r);
+    choose_window = 0;              /* what one program chose is not the next one's */
     rgl_busy = 0;
 }
 
@@ -953,6 +1106,7 @@ void Back_ClientGone(struct Task *task)
     rgl = NULL;
     Rgl_CurrentContext = 0;
     FreeRgl(r);
+    choose_window = 0;
     rgl_busy = 0;
 }
 
@@ -1164,7 +1318,7 @@ void Hook_mglChooseNumberOfBuffers(int number) { (void) number; }
 void Hook_mglChoosePixelDepth(int depth) { choose_depth = (depth > 16) ? 32UL : 16UL; }
 void Hook_mglChooseTextureBufferSize(int size) { (void) size; }
 void Hook_mglChooseVertexBufferSize(int size) { (void) size; }
-void Hook_mglChooseWindowMode(GLboolean flag) { (void) flag; }
+void Hook_mglChooseWindowMode(GLboolean flag) { choose_window = (flag != GL_FALSE) ? 1UL : 0UL; }
 void Hook_mglChooseZBufferDepth(int bits) { (void) bits; }
 
 /* --- GL --------------------------------------------------------------------------- */

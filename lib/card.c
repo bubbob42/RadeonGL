@@ -361,7 +361,7 @@ static BOOL AllocData(struct Card *k, ULONG i, ULONG bytes)
 {
     struct BitMap *sbm;
 
-    sbm = k->scr->RastPort.BitMap;
+    sbm = k->friend;
     k->b[i].bytes = bytes;
     k->b[i].bpp = k->bpp;
     k->b[i].p96 = 0;
@@ -428,7 +428,7 @@ static BOOL AllocHeapScreen(struct Card *k, ULONG bytes, ULONG row, BOOL blit)
     struct CardBm *b;
     ULONG rows;
 
-    sbm = k->scr->RastPort.BitMap;
+    sbm = k->friend;
     b = &k->b[CARD_HEAP];
     rows = (bytes + row - 1) / row;
     b->bytes = bytes;
@@ -525,6 +525,13 @@ static void DisplayPriority(struct Card *k);
 
 static void TargetAt(struct Card *k, ULONG *color, ULONG *depth)
 {
+    if (k->kind == CARD_KIND_BITMAP)
+    {
+        /* W1: the program's bitmap is the colour buffer, ours the depth */
+        *color = k->b[CARD_SCREEN].gpu;
+        *depth = Align4k(k->b[CARD_TARGET].gpu);
+        return;
+    }
     *color = Align4k(k->b[CARD_TARGET].gpu);
     *depth = Align4k(*color + k->color_bytes);
 }
@@ -846,6 +853,63 @@ static void SettleAlone(struct Card *k, BOOL closing)
 
 /* One flush. wait: the old way, the Radeon done before the unlock (always
  * without the overlap); else the frame is kicked and left running. */
+/* The window kind: the inner area of the window, in its own coordinates
+ * (a GimmeZeroZero window's RastPort is the inner area already). */
+static void InnerArea(const struct Window *win, LONG *x, LONG *y, LONG *w, LONG *h)
+{
+    if (win->Flags & WFLG_GIMMEZEROZERO)
+    {
+        *x = 0;
+        *y = 0;
+        *w = win->GZZWidth;
+        *h = win->GZZHeight;
+    }
+    else
+    {
+        *x = win->BorderLeft;
+        *y = win->BorderTop;
+        *w = win->Width - win->BorderLeft - win->BorderRight;
+        *h = win->Height - win->BorderTop - win->BorderBottom;
+    }
+}
+
+void Card_InnerSize(const struct Card *k, ULONG *w, ULONG *h)
+{
+    LONG x, y, iw, ih;
+
+    *w = 0;
+    *h = 0;
+    if (k->win == NULL)
+        return;
+    InnerArea(k->win, &x, &y, &iw, &ih);
+    if (iw > 0 && ih > 0)
+    {
+        *w = (ULONG) iw;
+        *h = (ULONG) ih;
+    }
+}
+
+/* The window kind, after the flush's unlock (D4): the show bitmap into the
+ * window by Radeon.card's blitter, which clips to the window's layer. The
+ * flush waited for the Radeon first (CardFlush), so the copy is complete.
+ * A window the program made smaller than the context gets what fits. */
+static void ShowInWindow(struct Card *k)
+{
+    LONG x, y, w, h;
+
+    InnerArea(k->win, &x, &y, &w, &h);
+    if (w <= 0 || h <= 0)
+        return;
+    if ((ULONG) w < k->width || (ULONG) h < k->height)
+        k->blit_cut++;
+    if ((ULONG) w > k->width)
+        w = (LONG) k->width;
+    if ((ULONG) h > k->height)
+        h = (LONG) k->height;
+    BltBitMapRastPort(k->b[CARD_SCREEN].bm, 0, 0, k->win->RPort, x, y, w, h, 0xc0);
+    k->blits++;
+}
+
 static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
 {
     struct CoreScreen s;
@@ -880,6 +944,10 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     e = R2_OK;
     scr_ok = FALSE;
     tail = ~0UL;
+    /* a window's frame is blitted, a bitmap's read by the program, right
+     * after this: the Radeon must have finished the copy (no overlap) */
+    if (present && k->kind != CARD_KIND_SCREEN)
+        wait = TRUE;
 
     /* 0. every packet through the checker before the CP sees one -- outside
      * the lock (the GUI waits while it is held), against the addresses the
@@ -914,9 +982,11 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     OvLock(k, present ? CARD_OV_FRAME : CARD_OV_FLUSH);
     WHERE(1, n);
 
-    /* 1. the locks: target, ring, heap, on the board */
+    /* 1. the locks: target, ring, heap (and a bitmap context's colour
+     * buffer, the program's bitmap), on the board */
     if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
-        || !LockBm(k, CARD_HEAP, FALSE))
+        || !LockBm(k, CARD_HEAP, FALSE)
+        || (k->kind == CARD_KIND_BITMAP && !LockBm(k, CARD_SCREEN, FALSE)))
     {
         UnlockAll(k);
         SettleAlone(k, FALSE);
@@ -951,7 +1021,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
      * dropped like one whose bitmaps moved (the uploads it carried are
      * forgotten, Core_Rebase), and the program waits a little, so that a
      * hidden game does not spin. */
-    if (present && k->scr != NULL && IntuitionBase->FirstScreen != k->scr)
+    if (present && k->kind == CARD_KIND_SCREEN && k->scr != NULL
+        && IntuitionBase->FirstScreen != k->scr)
     {
         UnlockAll(k);
         Drop(k);
@@ -981,16 +1052,18 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
 
     /* 3. the present, at the screen bitmap's address of this lock */
     i = n;
-    if (present)
+    if (present && k->kind == CARD_KIND_BITMAP)
+        k->presents++;              /* drawn into the program's bitmap already: nothing to copy */
+    else if (present)
     {
         scr_ok = LockBm(k, CARD_SCREEN, FALSE);
         if (scr_ok && (k->b[CARD_SCREEN].gpu & 15) == 0 && (k->b[CARD_SCREEN].bpr / k->bpp) % 8 == 0)
         {
             s.gpu = k->b[CARD_SCREEN].gpu;
             s.pitch = k->b[CARD_SCREEN].bpr / k->bpp;
-            s.format = k->color_format;
-            s.width = k->width;
-            s.height = k->height;
+            s.format = k->show_format;
+            s.width = k->show_w;
+            s.height = k->show_h;
             k->cs.end = k->cmd + CARD_CMD_DW;   /* the reserve */
             if (k->core->sync)
             {
@@ -1038,7 +1111,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         k->cfg.range[2].size = k->heap_size;
         k->cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;
         k->cfg.range[3].gpu = k->b[CARD_SCREEN].gpu;
-        k->cfg.range[3].size = k->b[CARD_SCREEN].bpr * k->height;
+        k->cfg.range[3].size = k->b[CARD_SCREEN].bpr * k->show_h;
         k->cfg.range[3].kinds = R2K_COLOR;
         k->cfg.nranges = 4;
         e = R2Chk_Run(&k->cfg, &k->chk, k->cmd + i, n - i, 1, i, &k->err);
@@ -1173,6 +1246,8 @@ unlock:
     k->lock_flushes++;
     ResetCs(k);
     k->in_flush = 0;
+    if (scr_ok && k->kind == CARD_KIND_WINDOW && k->lost == 0)
+        ShowInWindow(k);
     return (k->lost != 0) ? R2_ETIMEOUT : R2_OK;
 }
 
@@ -1484,6 +1559,10 @@ static BOOL OpenGLScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG bpp, 
     k->color_format = (k->bpp == 2) ? R_COLOR_FORMAT_RGB565 : R_COLOR_FORMAT_ARGB8888;
     k->width = w;
     k->height = h;
+    k->friend = sbm;
+    k->show_format = k->color_format;
+    k->show_w = w;
+    k->show_h = h;
     if (!OpenInputWindow(k))
     {
         Why(why, whylen, "the input window did not open");
@@ -1505,11 +1584,24 @@ static BOOL OpenGLScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG bpp, 
  * depth pitch is its own, in whole tiles, and the rows whole bands. */
 static BOOL AllocTarget(struct Card *k, char *why, ULONG whylen)
 {
-    k->pitch = (k->width + 15) & ~15UL;     /* rows a multiple of 32 bytes (the present) */
+    ULONG colour;
+
     k->depth_pitch = (k->width + 63) & ~63UL;
-    k->color_bytes = k->pitch * k->height * k->bpp;
     k->depth_bytes = Align4k(k->depth_pitch * ((k->height + 15) & ~15UL) * 2);
-    if (!AllocData(k, CARD_TARGET, Align4k(k->color_bytes) + k->depth_bytes + 8192))
+    if (k->kind == CARD_KIND_BITMAP)
+    {
+        /* W1: the colour buffer is the program's bitmap (k->pitch from its
+         * rows, Card_OpenBitMap); ours holds the depth buffer only */
+        k->color_bytes = k->pitch * k->show_h * k->bpp;
+        colour = 0;
+    }
+    else
+    {
+        k->pitch = (k->width + 15) & ~15UL;     /* rows a multiple of 32 bytes (the present) */
+        k->color_bytes = k->pitch * k->height * k->bpp;
+        colour = Align4k(k->color_bytes);
+    }
+    if (!AllocData(k, CARD_TARGET, colour + k->depth_bytes + 8192))
     {
         Why(why, whylen, "not enough memory for the back buffer (colour and depth)");
         return FALSE;
@@ -1543,12 +1635,77 @@ static BOOL CloseGLScreen(struct Card *k)
     return TRUE;
 }
 
+static BOOL AllocShow(struct Card *k, char *why, ULONG whylen);
+static const char *ShowCheck(struct Card *k);
+
+/* Card_Resize for the window and bitmap kinds: the back buffer (and the
+ * window's show bitmap) anew; on failure the old size again. */
+static ULONG ResizeOffscreen(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen)
+{
+    const char *bad;
+    ULONG oldw, oldh;
+    BOOL ok;
+
+    if (k->kind == CARD_KIND_BITMAP && (w > k->show_w || h > k->show_h))
+    {
+        Why(why, whylen, "larger than the program's bitmap");
+        return CARD_FAILED;
+    }
+    oldw = k->width;
+    oldh = k->height;
+    UnlockAll(k);
+    SettleAlone(k, FALSE);
+    WaitBlit();
+    FreeBm(k, CARD_TARGET);
+    if (k->kind == CARD_KIND_WINDOW)
+        FreeBm(k, CARD_SCREEN);
+    k->width = w;
+    k->height = h;
+    ok = AllocTarget(k, why, whylen) && (k->kind != CARD_KIND_WINDOW || AllocShow(k, why, whylen));
+    if (!ok)
+    {
+        FreeBm(k, CARD_TARGET);
+        if (k->kind == CARD_KIND_WINDOW)
+            FreeBm(k, CARD_SCREEN);
+        k->width = oldw;
+        k->height = oldh;
+        if (!AllocTarget(k, why, whylen) || (k->kind == CARD_KIND_WINDOW && !AllocShow(k, why, whylen)))
+        {
+            k->lost = CARD_LOST_SCREEN;
+            return CARD_FAILED;
+        }
+    }
+    if (!LockBm(k, CARD_TARGET, FALSE)
+        || (k->kind == CARD_KIND_BITMAP && !LockBm(k, CARD_SCREEN, FALSE)))
+    {
+        UnlockAll(k);
+        Why(why, whylen, "the back buffer is not on the board");
+        k->lost = CARD_LOST_SCREEN;
+        return CARD_FAILED;
+    }
+    TargetAt(k, &k->color_gpu, &k->depth_gpu);
+    UnlockAll(k);
+    if (k->kind == CARD_KIND_WINDOW && (bad = ShowCheck(k)) != NULL)
+    {
+        Why(why, whylen, bad);
+        k->lost = CARD_LOST_SCREEN;
+        return CARD_FAILED;
+    }
+    return ok ? CARD_OK : CARD_FAILED;
+}
+
 ULONG Card_Resize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen)
 {
     ULONG id, oldid, oldw, oldh, bpp;
     BOOL ok;
 
     Why(why, whylen, "");
+    if (k->lost == 0 && P96Base != NULL && k->kind != CARD_KIND_SCREEN)
+    {
+        if (w == k->width && h == k->height)
+            return CARD_OK;
+        return ResizeOffscreen(k, w, h, why, whylen);
+    }
     if (k->lost != 0 || k->scr == NULL || P96Base == NULL)
     {
         Why(why, whylen, "the context is lost");
@@ -1692,17 +1849,153 @@ BOOL Card_ModeSize(ULONG id, ULONG *w, ULONG *h)
     return ok;
 }
 
+/* The clock: the waits are bounded in microseconds. */
+static BOOL OpenTimer(struct Card *k, char *why, ULONG whylen)
+{
+    struct EClockVal ev;
+
+    k->tport = CreateMsgPort();
+    k->treq = (k->tport != NULL)
+        ? (struct timerequest *) CreateIORequest(k->tport, sizeof(struct timerequest)) : NULL;
+    if (k->treq == NULL || OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ, (struct IORequest *) k->treq, 0) != 0)
+    {
+        if (k->treq != NULL)
+            DeleteIORequest((struct IORequest *) k->treq);
+        k->treq = NULL;
+        Why(why, whylen, "timer.device did not open");
+        return FALSE;
+    }
+    TimerBase = k->treq->tr_node.io_Device;
+    clk_Freq = ReadEClock(&ev);
+    if (clk_Freq == 0)
+        clk_Freq = 709379;
+    k->clock_base = Ticks();
+    return TRUE;
+}
+
+/* What every kind of context needs once its target is there: the ring, the
+ * texture heap, the fast-RAM buffers, and the chip checked inside one lock.
+ * CARD_OK, or CARD_FAILED with why[] (the caller closes). */
+static ULONG OpenRest(struct Card *k, ULONG check, char *why, ULONG whylen)
+{
+    const char *bad;
+    ULONG size;
+    ULONG top;
+    ULONG step;
+    BOOL ok;
+
+    if (!AllocData(k, CARD_RING, CARD_RING_DW * 4 + 4096))
+    {
+        Why(why, whylen, "no memory for the ring bitmap");
+        return CARD_FAILED;
+    }
+    if (!OnBoard(k, CARD_RING))
+    {
+        Why(why, whylen, "P96 did not put the ring bitmap on the board");
+        return CARD_FAILED;
+    }
+    /* the heap, until P96 places one on the board (a bitmap it cannot or
+     * will not place stays in fast RAM): the GL screen's format, 16 MB down
+     * to 4 MB in 2 MB steps, each with wide rows as a friend of the GL
+     * screen, then moved on by a blit. The Workbench has no say: only where
+     * neither gets the full size does a 32-bit friend of a 32-bit Workbench
+     * get a try at it (RadeonGL 0.4/0.5 tried that first; the wide friend
+     * got 16 MB on the board on the A4000D's 8- and 32-bit Workbench alike,
+     * 2026-11-05). Nothing else: RadeonGL 0.4's 4096-byte rows (16, 8, 4 MB) froze
+     * GLQuake on the A4000D's 8-bit Workbench every time, at 8 MB, where
+     * the same 8 MB with 8192-byte rows ran demo1 through (2026-11-05,
+     * 0.4 and this code alike); a refusal beats a freeze. The narrow heap
+     * stays for investigation only (RadeonGLHeapNarrow=1).
+     * W1: a window or bitmap context starts smaller (k->heap_top, 8 MB by
+     * default) and goes down to 2 MB, a friend of the window's screen or of
+     * the program's bitmap; the Workbench way is the screen kind's only. */
+    top = k->heap_top;
+    step = 2UL << 20;
+    ok = FALSE;
+    for (size = top; !ok && !Card_HeapNarrow && size >= k->heap_min; size -= step)
+    {
+        if (HeapTry(k, size, CARD_HEAP_WIDE) || HeapTry(k, size, CARD_HEAP_BLIT)
+            || (k->kind == CARD_KIND_SCREEN && size == top && !Card_NoHeap32
+                && HeapTry(k, size, CARD_HEAP_WB32)))
+            ok = TRUE;
+        if (size < step)
+            break;
+    }
+    for (size = top; !ok && Card_HeapNarrow && size >= k->heap_min; size >>= 1)
+    {
+        if (HeapTry(k, size, CARD_HEAP_NARROW))
+            ok = TRUE;
+    }
+    if (!ok)
+    {
+        Why(why, whylen, (k->heap_min >= (4UL << 20)) ? "no texture heap of 4 MB or more on the board"
+                                                      : "no texture heap of 2 MB or more on the board");
+        return CARD_FAILED;
+    }
+
+    /* buffers in fast RAM */
+    /* 16-byte aligned (MOVE16 lines; AllocVec gives 4 past 8) */
+    k->cmd_mem = AllocVec(CARD_CMD_DW * 4 + 16, MEMF_ANY);
+    k->staging_mem = AllocVec(CORE_STREAM_BYTES + 16, MEMF_ANY | MEMF_CLEAR);
+    k->cmd = (k->cmd_mem != NULL) ? (ULONG *) (((ULONG) k->cmd_mem + 15UL) & ~15UL) : NULL;
+    k->staging = (k->staging_mem != NULL) ? (ULONG *) (((ULONG) k->staging_mem + 15UL) & ~15UL) : NULL;
+    if (k->cmd == NULL || k->staging == NULL)
+    {
+        Why(why, whylen, "no fast RAM for the command buffer");
+        return CARD_FAILED;
+    }
+
+    /* the chip, inside one lock of the three */
+    if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
+        || !LockBm(k, CARD_HEAP, FALSE))
+    {
+        UnlockAll(k);
+        Why(why, whylen, "the bitmaps are not on the board");
+        return CARD_FAILED;
+    }
+    k->mmio = (APTR) p96GetBitMapAttr(k->b[CARD_TARGET].bm, P96BMA_BOARDMEMIOBASE);
+    k->membase = (APTR) p96GetBitMapAttr(k->b[CARD_TARGET].bm, P96BMA_BOARDMEMBASE);
+    k->hw.read_reg = HwRead;
+    k->hw.write_reg = HwWrite;
+    k->hw.read_back = HwReadBack;
+    k->hw.clock_us = HwClock;
+    k->hw.hw = k;
+    bad = (k->mmio == NULL || k->membase == NULL) ? "P96 gives no register base" : ChipCheck(k);
+    if (bad == NULL)
+    {
+        TargetAt(k, &k->color_gpu, &k->depth_gpu);
+        k->heap_delta = Align4k(k->b[CARD_HEAP].gpu) - k->b[CARD_HEAP].gpu;
+        k->heap_gpu = k->b[CARD_HEAP].gpu + k->heap_delta;
+    }
+    UnlockAll(k);
+    if (bad == NULL && k->kind != CARD_KIND_SCREEN)
+        bad = ShowCheck(k);
+    if (bad == NULL && k->kind == CARD_KIND_BITMAP)
+        k->color_gpu = k->b[CARD_SCREEN].gpu;     /* from ShowCheck's lock */
+    if (bad != NULL)
+    {
+        Why(why, whylen, bad);
+        return CARD_FAILED;
+    }
+
+    R2Cs_InitBuffer(&k->cs, k->cmd, CARD_CMD_DW - CARD_RESERVE, 1);
+    k->cs.need = Need;
+    k->cs.owner = k;
+    k->check = check;
+    k->cfg.fence_reg = FENCE_REG;
+    k->cfg.peek = Peek;
+    k->cfg.peek_ctx = k;
+    R2Chk_Reset(&k->chk);
+    return CARD_OK;
+}
+
 ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULONG check,
                 char *why, ULONG whylen)
 {
     static struct Card zero;
-    struct EClockVal ev;
-    const char *bad;
     ULONG id;
-    ULONG size;
-    ULONG top;
     ULONG want;
-    BOOL ok;
+    ULONG res;
 
     *k = zero;
     Why(why, whylen, "");
@@ -1725,130 +2018,401 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULO
         Card_Close(k);
         return CARD_NOT_RADEON;
     }
+    k->kind = CARD_KIND_SCREEN;
+    k->heap_top = (Card_HeapMax >= 4 && Card_HeapMax < 16) ? Card_HeapMax << 20 : 16UL << 20;
+    k->heap_min = 4UL << 20;
 
-    /* the clock (the waits are bounded in microseconds) */
-    k->tport = CreateMsgPort();
-    k->treq = (k->tport != NULL)
-        ? (struct timerequest *) CreateIORequest(k->tport, sizeof(struct timerequest)) : NULL;
-    if (k->treq == NULL || OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ, (struct IORequest *) k->treq, 0) != 0)
-    {
-        if (k->treq != NULL)
-            DeleteIORequest((struct IORequest *) k->treq);
-        k->treq = NULL;
-        Why(why, whylen, "timer.device did not open");
+    /* the clock, the GL screen and its input window, the back buffer, the rest */
+    res = CARD_FAILED;
+    if (OpenTimer(k, why, whylen) && OpenGLScreen(k, id, w, h, 0, why, whylen)
+        && AllocTarget(k, why, whylen))
+        res = OpenRest(k, check, why, whylen);
+    if (res != CARD_OK)
         Card_Close(k);
-        return CARD_FAILED;
-    }
-    TimerBase = k->treq->tr_node.io_Device;
-    clk_Freq = ReadEClock(&ev);
-    if (clk_Freq == 0)
-        clk_Freq = 709379;
-    k->clock_base = Ticks();
+    return res;
+}
 
-    /* the GL screen and its input window, the back buffer and the ring */
-    if (!OpenGLScreen(k, id, w, h, 0, why, whylen) || !AllocTarget(k, why, whylen))
+/* --- W1: windows and the program's bitmaps ---------------------------------------- */
+
+/* The present's colour format for a P96 bitmap the R200 writes as it is
+ * stored -- the "PC" formats are the chip's own little-endian ones -- and
+ * the back buffer's bytes a pixel (2 or 4); 0 for any other bitmap. */
+static ULONG ShowFormat(struct BitMap *bm, ULONG *bpp)
+{
+    ULONG fmt;
+
+    *bpp = 0;
+    if (bm == NULL || !p96GetBitMapAttr(bm, P96BMA_ISP96))
+        return 0;
+    fmt = p96GetBitMapAttr(bm, P96BMA_RGBFORMAT);
+    if (fmt == RGBFB_R5G6B5PC && p96GetBitMapAttr(bm, P96BMA_BYTESPERPIXEL) == 2)
     {
+        *bpp = 2;
+        return R_COLOR_FORMAT_RGB565;
+    }
+    if (fmt == RGBFB_R5G5B5PC && p96GetBitMapAttr(bm, P96BMA_BYTESPERPIXEL) == 2)
+    {
+        *bpp = 2;
+        return R_COLOR_FORMAT_ARGB1555;
+    }
+    if (fmt == RGBFB_B8G8R8A8 && p96GetBitMapAttr(bm, P96BMA_BYTESPERPIXEL) == 4)
+    {
+        *bpp = 4;
+        return R_COLOR_FORMAT_ARGB8888;
+    }
+    return 0;
+}
+
+static ULONG StrLen(const char *s)
+{
+    ULONG n;
+
+    for (n = 0; s[n] != 0; n++)
+        ;
+    return n;
+}
+
+/* Why a bitmap's format cannot take GL: its format named (the A4000D's
+ * 24-bit Workbench, 2026-11-07, was the first one refused). */
+static void FormatWhy(char *why, ULONG len, const char *whose, struct BitMap *bm)
+{
+    ULONG fmt;
+    const char *name;
+
+    fmt = p96GetBitMapAttr(bm, P96BMA_ISP96) ? p96GetBitMapAttr(bm, P96BMA_RGBFORMAT) : RGBFB_NONE;
+    name = (fmt == RGBFB_CLUT) ? " is 8 bit (CLUT)"
+         : (fmt == RGBFB_R8G8B8 || fmt == RGBFB_B8G8R8) ? " is 24 bit (R8G8B8 or B8G8R8)"
+         : (fmt == RGBFB_NONE) ? " is not a Picasso96 bitmap (planar)"
+         : " has a byte order the Radeon does not render";
+    Why(why, len, whose);
+    Why(why + StrLen(why), len - StrLen(why), name);
+    Why(why + StrLen(why), len - StrLen(why), ": the Radeon renders 15, 16 and 32 bit (R5G5B5PC, R5G6B5PC, B8G8R8A8)");
+}
+
+/* The window kind's show bitmap: a friend of the window's screen at the
+ * context's size, where the present copies the frame and from where it is
+ * blitted into the window. */
+static BOOL AllocShow(struct Card *k, char *why, ULONG whylen)
+{
+    struct CardBm *b;
+
+    b = &k->b[CARD_SCREEN];
+    k->own_show = 1;
+    b->p96 = 0;
+    b->bpp = k->bpp;
+    b->bytes = 0;
+    b->bm = AllocBitMap((k->width + 15) & ~15UL, k->height, GetBitMapAttr(k->friend, BMA_DEPTH),
+                        BMF_MINPLANES, k->friend);
+    if (b->bm == NULL || !p96GetBitMapAttr(b->bm, P96BMA_ISP96))
+    {
+        FreeBm(k, CARD_SCREEN);
+        Why(why, whylen, "not enough memory for the window's frame bitmap");
+        return FALSE;
+    }
+    if (!OnBoard(k, CARD_SCREEN))
+    {
+        FreeBm(k, CARD_SCREEN);
+        Why(why, whylen, "the window's frame bitmap did not fit on the graphics board");
+        return FALSE;
+    }
+    k->show_w = k->width;
+    k->show_h = k->height;
+    return TRUE;
+}
+
+/* Can the present write into b[CARD_SCREEN] (a window's show bitmap, the
+ * program's bitmap)? On the board, on the same board as ours, its first
+ * pixel 16-byte aligned and its rows a multiple of 8 pixels (the R200's
+ * colour pitch, Core_Present). NULL, or why not. Outside any lock. */
+static const char *ShowCheck(struct Card *k)
+{
+    struct CardBm *b;
+    const char *bad;
+
+    b = &k->b[CARD_SCREEN];
+    if (!LockBm(k, CARD_SCREEN, FALSE))
+        return (k->kind == CARD_KIND_BITMAP) ? "the program's bitmap is not on the graphics board"
+                                             : "the window's frame bitmap is not on the graphics board";
+    bad = NULL;
+    if ((APTR) p96GetBitMapAttr(b->bm, P96BMA_BOARDMEMBASE) != k->membase)
+        bad = "the bitmap is on another graphics board than the Radeon's";
+    else if ((b->gpu & 15) != 0 || (b->bpr % b->bpp) != 0 || ((b->bpr / b->bpp) % 8) != 0)
+        bad = "the bitmap's rows do not suit the Radeon (alignment, pitch)";
+    UnlockBm(k, CARD_SCREEN);
+    return bad;
+}
+
+/* Is there a Radeon board at all (a mode of one)? */
+static BOOL TakeAny(ULONG id, void *ud)
+{
+    (void) id;
+    (void) ud;
+    return TRUE;
+}
+
+static BOOL AnyRadeon(void)
+{
+    return (BOOL) (WalkModes(RGBFB_R5G6B5PC, TakeAny, NULL) != (ULONG) INVALID_ID
+                   || WalkModes(RGBFB_B8G8R8A8, TakeAny, NULL) != (ULONG) INVALID_ID);
+}
+
+/* The common part of the window kind. win stays the program's unless own. */
+static ULONG OpenWindowKind(struct Card *k, struct Window *win, ULONG own, const struct CardOpts *o,
+                            ULONG check, char *why, ULONG whylen)
+{
+    struct Screen *scr;
+    struct BitMap *sbm;
+    LONG id;
+    ULONG bpp;
+    ULONG w, h;
+    ULONG res;
+
+    k->kind = CARD_KIND_WINDOW;
+    k->win = win;
+    k->own_win = own;
+    scr = win->WScreen;
+    sbm = scr->RastPort.BitMap;
+    id = (LONG) GetVPModeID(&scr->ViewPort);
+    if (id == (LONG) INVALID_ID || !p96GetModeIDAttr((ULONG) id, P96IDA_ISP96)
+        || !BoardIsRadeon((ULONG) id))
+    {
+        if (AnyRadeon())
+        {
+            Why(why, whylen, "the window's screen is not on the Radeon's board");
+            return CARD_FAILED;
+        }
+        return CARD_NOT_RADEON;
+    }
+    k->show_format = ShowFormat(sbm, &bpp);
+    if (k->show_format == 0)
+    {
+        FormatWhy(why, whylen, "the window's screen", sbm);
+        return CARD_FAILED;
+    }
+    Card_InnerSize(k, &w, &h);
+    if (w == 0 || h == 0 || w > 2048 || h > 2048)
+    {
+        Why(why, whylen, "the window's inner area is empty or larger than 2048");
+        return CARD_FAILED;
+    }
+    k->friend = sbm;
+    k->board = p96GetModeIDAttr((ULONG) id, P96IDA_BOARDNUMBER);
+    k->compat = 0;
+    k->bpp = bpp;
+    k->color_format = (bpp == 2) ? R_COLOR_FORMAT_RGB565 : R_COLOR_FORMAT_ARGB8888;
+    k->width = w;
+    k->height = h;
+    k->heap_top = (o != NULL && o->heap_top >= (2UL << 20)) ? o->heap_top : (8UL << 20);
+    if (Card_HeapMax >= 2 && (Card_HeapMax << 20) < k->heap_top)
+        k->heap_top = Card_HeapMax << 20;
+    if (k->heap_top > (16UL << 20))
+        k->heap_top = 16UL << 20;
+    k->heap_top &= ~((2UL << 20) - 1);
+    k->heap_min = 2UL << 20;
+    res = CARD_FAILED;
+    if (OpenTimer(k, why, whylen) && AllocTarget(k, why, whylen) && AllocShow(k, why, whylen))
+        res = OpenRest(k, check, why, whylen);
+    return res;
+}
+
+ULONG Card_OpenWindow(struct Card *k, struct Window *win, const struct CardOpts *o, ULONG check,
+                      char *why, ULONG whylen)
+{
+    static struct Card zero;
+    ULONG res;
+
+    *k = zero;
+    Why(why, whylen, "");
+    if (win == NULL)
+    {
+        Why(why, whylen, "no window");
+        return CARD_FAILED;
+    }
+    P96Base = OpenLibrary("Picasso96API.library", 2);
+    if (P96Base == NULL)
+        return CARD_NOT_RADEON;
+    res = OpenWindowKind(k, win, 0, o, check, why, whylen);
+    if (res != CARD_OK)
+        Card_Close(k);
+    return res;
+}
+
+ULONG Card_OpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h, const struct CardOpts *o,
+                         ULONG check, char *why, ULONG whylen)
+{
+    static struct Card zero;
+    struct TagItem t[14];
+    struct Screen *scr;
+    struct Window *win;
+    ULONG res;
+
+    *k = zero;
+    Why(why, whylen, "");
+    P96Base = OpenLibrary("Picasso96API.library", 2);
+    if (P96Base == NULL)
+        return CARD_NOT_RADEON;
+    scr = LockPubScreen(NULL);
+    if (scr == NULL)
+    {
+        Why(why, whylen, "no default public screen");
         Card_Close(k);
         return CARD_FAILED;
     }
-    if (!AllocData(k, CARD_RING, CARD_RING_DW * 4 + 4096))
+    t[0].ti_Tag = WA_PubScreen;     t[0].ti_Data = (ULONG) scr;
+    t[1].ti_Tag = WA_Left;          t[1].ti_Data = (ULONG) ((x > 0) ? x : 30);
+    t[2].ti_Tag = WA_Top;           t[2].ti_Data = (ULONG) ((y > 0) ? y : 30);
+    t[3].ti_Tag = WA_InnerWidth;    t[3].ti_Data = w;
+    t[4].ti_Tag = WA_InnerHeight;   t[4].ti_Data = h;
+    t[5].ti_Tag = WA_Title;         t[5].ti_Data = (ULONG) "RadeonGL";
+    t[6].ti_Tag = WA_DragBar;       t[6].ti_Data = TRUE;
+    t[7].ti_Tag = WA_DepthGadget;   t[7].ti_Data = TRUE;
+    t[8].ti_Tag = WA_Activate;      t[8].ti_Data = TRUE;
+    t[9].ti_Tag = WA_RMBTrap;       t[9].ti_Data = TRUE;
+    t[10].ti_Tag = WA_SimpleRefresh; t[10].ti_Data = TRUE;
+    t[11].ti_Tag = WA_NoCareRefresh; t[11].ti_Data = TRUE;
+    t[12].ti_Tag = WA_AutoAdjust;   t[12].ti_Data = TRUE;
+    t[13].ti_Tag = TAG_DONE;        t[13].ti_Data = 0;
+    win = OpenWindowTagList(NULL, t);
+    UnlockPubScreen(NULL, scr);
+    if (win == NULL)
     {
-        Why(why, whylen, "no memory for the ring bitmap");
+        Why(why, whylen, "the window did not open");
         Card_Close(k);
         return CARD_FAILED;
     }
-    if (!OnBoard(k, CARD_RING))
+    res = OpenWindowKind(k, win, 1, o, check, why, whylen);
+    if (res != CARD_OK)
+        Card_Close(k);              /* closes the window too (own_win) */
+    return res;
+}
+
+/* Is bm on a Radeon's board? The screens tell: a screen on a Radeon board
+ * whose bitmap has the same board memory base. FALSE also when there is no
+ * screen on a Radeon at all. */
+#define CARD_SCAN 16
+static BOOL BitMapOnRadeon(struct BitMap *bm, ULONG *board)
+{
+    struct Screen *s;
+    APTR base[CARD_SCAN];
+    ULONG id[CARD_SCAN];
+    ULONG n;
+    ULONG lock;
+    ULONG i;
+    APTR mine;
+
+    /* collected under the lock, looked at after it (P96 calls may need
+     * Intuition) */
+    n = 0;
+    lock = LockIBase(0);
+    for (s = IntuitionBase->FirstScreen; s != NULL && n < CARD_SCAN; s = s->NextScreen)
     {
-        Why(why, whylen, "P96 did not put the ring bitmap on the board");
-        Card_Close(k);
-        return CARD_FAILED;
+        base[n] = (APTR) s->RastPort.BitMap;
+        id[n] = GetVPModeID(&s->ViewPort);
+        n++;
     }
-    /* the heap, until P96 places one on the board (a bitmap it cannot or
-     * will not place stays in fast RAM): the GL screen's format, 16 MB down
-     * to 4 MB in 2 MB steps, each with wide rows as a friend of the GL
-     * screen, then moved on by a blit. The Workbench has no say: only where
-     * neither gets the full size does a 32-bit friend of a 32-bit Workbench
-     * get a try at it (RadeonGL 0.4/0.5 tried that first; the wide friend
-     * got 16 MB on the board on the A4000D's 8- and 32-bit Workbench alike,
-     * 2026-11-05). Nothing else: RadeonGL 0.4's 4096-byte rows (16, 8, 4 MB) froze
-     * GLQuake on the A4000D's 8-bit Workbench every time, at 8 MB, where
-     * the same 8 MB with 8192-byte rows ran demo1 through (2026-11-05,
-     * 0.4 and this code alike); a refusal beats a freeze. The narrow heap
-     * stays for investigation only (RadeonGLHeapNarrow=1). */
-    top = (Card_HeapMax >= 4 && Card_HeapMax < 16) ? Card_HeapMax << 20 : 16UL << 20;
-    ok = FALSE;
-    for (size = top; !ok && !Card_HeapNarrow && size >= (4UL << 20); size -= 2UL << 20)
+    UnlockIBase(lock);
+    mine = (APTR) p96GetBitMapAttr(bm, P96BMA_BOARDMEMBASE);
+    for (i = 0; i < n; i++)
     {
-        if (HeapTry(k, size, CARD_HEAP_WIDE) || HeapTry(k, size, CARD_HEAP_BLIT)
-            || (size == top && !Card_NoHeap32 && HeapTry(k, size, CARD_HEAP_WB32)))
-            ok = TRUE;
+        if (id[i] == (ULONG) INVALID_ID || !p96GetModeIDAttr(id[i], P96IDA_ISP96)
+            || !BoardIsRadeon(id[i]))
+            continue;
+        if ((APTR) p96GetBitMapAttr((struct BitMap *) base[i], P96BMA_BOARDMEMBASE) == mine)
+        {
+            *board = p96GetModeIDAttr(id[i], P96IDA_BOARDNUMBER);
+            return TRUE;
+        }
     }
-    for (size = top; !ok && Card_HeapNarrow && size >= (4UL << 20); size >>= 1)
+    return FALSE;
+}
+
+/* The program's bitmap as the colour buffer: on the board, its first
+ * pixel 16-byte aligned, its rows a whole number of pixels and a multiple
+ * of 8 (the R200's colour pitch); k->pitch from them. The GPU address and
+ * the board are checked once the chip is known (ShowCheck). */
+static BOOL BitMapRows(struct Card *k, char *why, ULONG whylen)
+{
+    struct CardBm *b;
+    BOOL ok;
+
+    b = &k->b[CARD_SCREEN];
+    if (!LockBm(k, CARD_SCREEN, FALSE))
     {
-        if (HeapTry(k, size, CARD_HEAP_NARROW))
-            ok = TRUE;
+        Why(why, whylen, "the program's bitmap is not on the graphics board");
+        return FALSE;
     }
+    ok = (BOOL) (((ULONG) b->mem & 15) == 0 && (b->bpr % b->bpp) == 0 && ((b->bpr / b->bpp) % 8) == 0);
+    k->pitch = b->bpr / b->bpp;
+    UnlockBm(k, CARD_SCREEN);
     if (!ok)
-    {
-        Why(why, whylen, "no texture heap of 4 MB or more on the board");
-        Card_Close(k);
-        return CARD_FAILED;
-    }
-    size = k->heap_size;
+        Why(why, whylen, "the bitmap's rows do not suit the Radeon (alignment, pitch)");
+    return ok;
+}
 
-    /* buffers in fast RAM */
-    /* 16-byte aligned (MOVE16 lines; AllocVec gives 4 past 8) */
-    k->cmd_mem = AllocVec(CARD_CMD_DW * 4 + 16, MEMF_ANY);
-    k->staging_mem = AllocVec(CORE_STREAM_BYTES + 16, MEMF_ANY | MEMF_CLEAR);
-    k->cmd = (k->cmd_mem != NULL) ? (ULONG *) (((ULONG) k->cmd_mem + 15UL) & ~15UL) : NULL;
-    k->staging = (k->staging_mem != NULL) ? (ULONG *) (((ULONG) k->staging_mem + 15UL) & ~15UL) : NULL;
-    if (k->cmd == NULL || k->staging == NULL)
-    {
-        Why(why, whylen, "no fast RAM for the command buffer");
-        Card_Close(k);
-        return CARD_FAILED;
-    }
+ULONG Card_OpenBitMap(struct Card *k, struct BitMap *bm, const struct CardOpts *o, ULONG check,
+                      char *why, ULONG whylen)
+{
+    static struct Card zero;
+    ULONG bpp;
+    ULONG w, h;
+    ULONG res;
 
-    /* the chip, inside one lock of the three */
-    if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
-        || !LockBm(k, CARD_HEAP, FALSE))
+    *k = zero;
+    Why(why, whylen, "");
+    if (bm == NULL)
     {
-        UnlockAll(k);
-        Why(why, whylen, "the bitmaps are not on the board");
-        Card_Close(k);
+        Why(why, whylen, "no bitmap");
         return CARD_FAILED;
     }
-    k->mmio = (APTR) p96GetBitMapAttr(k->b[CARD_TARGET].bm, P96BMA_BOARDMEMIOBASE);
-    k->membase = (APTR) p96GetBitMapAttr(k->b[CARD_TARGET].bm, P96BMA_BOARDMEMBASE);
-    k->hw.read_reg = HwRead;
-    k->hw.write_reg = HwWrite;
-    k->hw.read_back = HwReadBack;
-    k->hw.clock_us = HwClock;
-    k->hw.hw = k;
-    bad = (k->mmio == NULL || k->membase == NULL) ? "P96 gives no register base" : ChipCheck(k);
-    if (bad == NULL)
+    P96Base = OpenLibrary("Picasso96API.library", 2);
+    if (P96Base == NULL)
+        return CARD_NOT_RADEON;
+    k->kind = CARD_KIND_BITMAP;
+    res = CARD_FAILED;
+    if (!p96GetBitMapAttr(bm, P96BMA_ISP96))
+        Why(why, whylen, "the bitmap is not a Picasso96 bitmap");
+    else if ((k->show_format = ShowFormat(bm, &bpp)) == 0)
+        FormatWhy(why, whylen, "the bitmap", bm);
+    else if (!BitMapOnRadeon(bm, &k->board))
     {
-        TargetAt(k, &k->color_gpu, &k->depth_gpu);
-        k->heap_delta = Align4k(k->b[CARD_HEAP].gpu) - k->b[CARD_HEAP].gpu;
-        k->heap_gpu = k->b[CARD_HEAP].gpu + k->heap_delta;
+        if (AnyRadeon())
+            Why(why, whylen, "the bitmap is not on the Radeon's board");
+        else
+            res = CARD_NOT_RADEON;
     }
-    UnlockAll(k);
-    if (bad != NULL)
+    else
     {
-        Why(why, whylen, bad);
+        w = GetBitMapAttr(bm, BMA_WIDTH);
+        h = GetBitMapAttr(bm, BMA_HEIGHT);
+        if (w == 0 || h == 0 || w > 2048 || h > 2048)
+            Why(why, whylen, "the bitmap is empty or larger than 2048");
+        else
+        {
+            k->friend = bm;
+            k->b[CARD_SCREEN].bm = bm;
+            k->b[CARD_SCREEN].bpp = bpp;
+            k->own_show = 0;
+            k->show_w = w;
+            k->show_h = h;
+            k->compat = 0;
+            k->bpp = bpp;
+            k->color_format = k->show_format;   /* drawn into as it is, 15-bit too */
+            k->width = w;
+            k->height = h;
+            k->heap_top = (o != NULL && o->heap_top >= (2UL << 20)) ? o->heap_top : (8UL << 20);
+            if (Card_HeapMax >= 2 && (Card_HeapMax << 20) < k->heap_top)
+                k->heap_top = Card_HeapMax << 20;
+            if (k->heap_top > (16UL << 20))
+                k->heap_top = 16UL << 20;
+            k->heap_top &= ~((2UL << 20) - 1);
+            k->heap_min = 2UL << 20;
+            if (BitMapRows(k, why, whylen) && OpenTimer(k, why, whylen) && AllocTarget(k, why, whylen))
+                res = OpenRest(k, check, why, whylen);
+        }
+    }
+    if (res != CARD_OK)
         Card_Close(k);
-        return CARD_FAILED;
-    }
-
-    R2Cs_InitBuffer(&k->cs, k->cmd, CARD_CMD_DW - CARD_RESERVE, 1);
-    k->cs.need = Need;
-    k->cs.owner = k;
-    k->check = check;
-    k->cfg.fence_reg = FENCE_REG;
-    k->cfg.peek = Peek;
-    k->cfg.peek_ctx = k;
-    R2Chk_Reset(&k->chk);
-    return CARD_OK;
+    return res;
 }
 
 void Card_Target(const struct Card *k, struct CoreTarget *t)
@@ -1886,11 +2450,17 @@ void Card_Close(struct Card *k)
     }
     for (i = 0; i < CARD_SCREEN; i++)
         FreeBm(k, i);
-    k->b[CARD_SCREEN].bm = NULL;
+    if (k->own_show)
+        FreeBm(k, CARD_SCREEN);     /* the window kind's show bitmap */
+    k->b[CARD_SCREEN].bm = NULL;    /* else the screen's or the program's */
     if (k->win != NULL)
     {
-        ModifyIDCMP(k->win, 0);
-        CloseWindow(k->win);
+        /* the program's window (FromWindow) stays as it is */
+        if (k->kind == CARD_KIND_SCREEN || k->own_win)
+        {
+            ModifyIDCMP(k->win, 0);
+            CloseWindow(k->win);
+        }
         k->win = NULL;
     }
     if (k->scr != NULL)

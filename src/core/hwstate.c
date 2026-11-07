@@ -72,22 +72,30 @@ static ULONG Rb3dCntl(struct Core *c)
         v |= R_ALPHA_BLEND_ENABLE;
     if (c->color_mask != 0xf)
         v |= R_PLANE_MASK_ENABLE;
-    if ((c->enables & EN_DITHER) && c->target.color_format == R_COLOR_FORMAT_RGB565)
+    if ((c->enables & EN_DITHER) && (c->target.color_format == R_COLOR_FORMAT_RGB565
+                                     || c->target.color_format == R_COLOR_FORMAT_ARGB1555))
         v |= R_DITHER_ENABLE;
     else
         v |= R_ROUND_ENABLE;
     return v;
 }
 
-static ULONG PlaneMask(struct Core *c)
+/* RB3D_PLANEMASK for glColorMask's bits (1 R, 2 G, 4 B, 8 A) in the
+ * target's format; ARGB1555 since W1 (a program's 15-bit bitmap) */
+ULONG Core_PlaneMask(ULONG format, ULONG m)
 {
-    ULONG m;
-
-    m = c->color_mask;
-    if (c->target.color_format == R_COLOR_FORMAT_RGB565)
+    if (format == R_COLOR_FORMAT_RGB565)
         return ((m & 1) ? 0xf800UL : 0) | ((m & 2) ? 0x07e0UL : 0) | ((m & 4) ? 0x001fUL : 0);
+    if (format == R_COLOR_FORMAT_ARGB1555)
+        return ((m & 8) ? 0x8000UL : 0) | ((m & 1) ? 0x7c00UL : 0) | ((m & 2) ? 0x03e0UL : 0)
+             | ((m & 4) ? 0x001fUL : 0);
     return ((m & 8) ? 0xff000000UL : 0) | ((m & 1) ? 0x00ff0000UL : 0)
          | ((m & 2) ? 0x0000ff00UL : 0) | ((m & 4) ? 0x000000ffUL : 0);
+}
+
+static ULONG PlaneMask(struct Core *c)
+{
+    return Core_PlaneMask(c->target.color_format, c->color_mask);
 }
 
 static ULONG SeCntl(struct Core *c)

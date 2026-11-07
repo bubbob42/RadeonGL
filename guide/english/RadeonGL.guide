@@ -246,6 +246,26 @@ You can switch to the Workbench and back while a program draws: the
 Workbench and the other programs keep running. While the GL screen is
 behind another one, RadeonGL draws nothing; the program goes on.
 
+@{b}In a window, or into a program's bitmap@{ub}
+
+A program can also draw in a window, on the Workbench or another screen,
+when that screen is on the Radeon and has 15, 16 or 32 bits (R5G5B5PC,
+R5G6B5PC, B8G8R8A8):
+
+    * in its own window (mglCreateContextFromWindow): RadeonGL draws each
+      picture on the card and copies it into the window's inner area at
+      mglSwitchDisplay;
+    * in a window RadeonGL opens on the default public screen
+      (mglChooseWindowMode before mglCreateContext);
+    * into a bitmap of the program's on the Radeon
+      (mglCreateContextFromBitMap): RadeonGL draws straight into it, and
+      the program shows it, alone or together with its own drawing.
+
+A 24-bit (R8G8B8, B8G8R8) or 8-bit screen takes no GL window: the Radeon
+cannot draw in those formats. Such a program gets no requester; the
+@{" log file " link Log} says why. A window or bitmap context starts with
+8 MB of texture memory (RadeonGLHeapMax sets less).
+
 Over DVI, modes with a pixel clock above about 110 MHz (1680 x 1050 and
 larger at 60 Hz) showed dots or dropped out on the test machine while the
 Radeon drew. Reduced-blanking timings in the Picasso96Mode preferences
@@ -444,8 +464,8 @@ To have no log at all:
 
 @{b}Limits of this version@{ub}
 
-    * One program at a time, on a screen of its own (no drawing into a
-      Workbench window or a bitmap).
+    * One program at a time: on a screen of its own, in a window or into
+      a bitmap (see @{" The screen " link Screen}).
     * Textures live in up to 16 MB of the card's memory, and RadeonGL
       does not yet swap them out: a program that needs more gets white
       textures for the rest.
@@ -456,7 +476,7 @@ To have no log at all:
 
 @{b}Not implemented yet@{ub}
 
-RadeonGL implements 102 of the 205 functions of minigl.library 29.1:
+RadeonGL implements 104 of the 205 functions of minigl.library 29.1:
 everything GLQuake uses, and more. A program calling one of the others
 gets nothing for it but the error GL_INVALID_OPERATION; the
 @{" log file " link Log} names such calls.

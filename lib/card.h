@@ -43,8 +43,17 @@
 #define CARD_TARGET  0          /* colour, then Z16 */
 #define CARD_RING    1
 #define CARD_HEAP    2
-#define CARD_SCREEN  3          /* the GL screen's own bitmap (not ours to free) */
+#define CARD_SCREEN  3          /* where the present copies the frame: the GL screen's bitmap,
+                                 * a window context's own show bitmap (ours, own_show); a bitmap
+                                 * context's colour buffer, the program's (not ours to free) */
 #define CARD_NBM     4
+
+/* What a context draws into (W1, docs/concept-window-contexts.md) */
+#define CARD_KIND_SCREEN  0     /* our own P96 screen: MGLCreateContext, ...FromID */
+#define CARD_KIND_WINDOW  1     /* a window on an RTG screen: the program's (FromWindow) or
+                                 * ours (mglChooseWindowMode); the frame is blitted into it */
+#define CARD_KIND_BITMAP  2     /* the program's board bitmap (FromBitMap): the colour buffer,
+                                 * the program shows it itself */
 
 #define CARD_RING_DW  65536UL   /* 256 KB */
 #define CARD_CMD_DW   65536UL   /* the fast-RAM command buffer, 256 KB */
@@ -77,8 +86,17 @@ struct CardBm
 
 struct Card
 {
-    struct Screen *scr;
-    struct Window *win;
+    ULONG kind;                 /* CARD_KIND_* */
+    struct Screen *scr;         /* the GL screen (screen kind only) */
+    struct Window *win;         /* screen kind: our input window; window kind: the window drawn into */
+    ULONG own_win;              /* window kind: win is ours (mglChooseWindowMode), closed with the context */
+    struct BitMap *friend;      /* the bitmap ours befriend: the GL screen's, the window
+                                 * screen's, or the program's (bitmap kind) */
+    ULONG own_show;             /* b[CARD_SCREEN] is ours (window kind) */
+    ULONG show_format;          /* the present's colour format: R_COLOR_FORMAT_RGB565, _ARGB1555, _ARGB8888 */
+    ULONG show_w, show_h;       /* the size of b[CARD_SCREEN] */
+    ULONG heap_top, heap_min;   /* the heap ladder: first size, smallest size (bytes) */
+    ULONG blits, blit_cut;      /* window kind: frames blitted; ... cut to a smaller inner area */
     struct CardBm b[CARD_NBM];
     ULONG width, height;
     ULONG bpp;                  /* bytes a pixel of the screen (2 or 4) */
@@ -217,6 +235,39 @@ extern ULONG Card_HeapNarrow;   /* test switch (RadeonGLHeapNarrow=1): only 0.4'
 ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULONG check,
                 char *why, ULONG whylen);
 
+/* Options for the window and bitmap contexts, set before the open */
+struct CardOpts
+{
+    ULONG heap_top;             /* the texture heap's first try, bytes (0: the default) */
+};
+
+/* W1: a context drawing into win's inner area (MGLCreateContextFromWindow),
+ * the window staying the program's. The window's screen must be on a
+ * Radeon's board, R5G6B5PC, R5G5B5PC or B8G8R8A8. The frame is rendered off
+ * screen and blitted into the window after each flush. CARD_OK,
+ * CARD_NOT_RADEON (nothing kept: the null card may take it) or CARD_FAILED
+ * with why[]. */
+ULONG Card_OpenWindow(struct Card *k, struct Window *win, const struct CardOpts *o, ULONG check,
+                      char *why, ULONG whylen);
+
+/* W1: the same with a window of our own, w x h inside, at x, y on the
+ * default public screen (mglChooseWindowMode + MGLCreateContext): a drag
+ * bar, a depth gadget, no IDCMP (the program asks for what it needs). */
+ULONG Card_OpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h, const struct CardOpts *o,
+                         ULONG check, char *why, ULONG whylen);
+
+/* W1: a context drawing into the program's bitmap bm (MGLCreateContextFromBitMap):
+ * a P96 bitmap on a Radeon's board, R5G6B5PC, R5G5B5PC or B8G8R8A8, its
+ * rows 16-byte aligned and a multiple of 8 pixels. The Radeon draws straight
+ * into bm (as MiniGLV3D does: what the program drew there stays where GL
+ * draws nothing); the depth buffer is ours. MGLSwitchDisplay returns with
+ * the frame finished; the program shows bm itself. */
+ULONG Card_OpenBitMap(struct Card *k, struct BitMap *bm, const struct CardOpts *o, ULONG check,
+                      char *why, ULONG whylen);
+
+/* The window kind: the window's inner size now (for the client's resize). */
+void Card_InnerSize(const struct Card *k, ULONG *w, ULONG *h);
+
 /* A Radeon board's screen mode (mglGetSupportedScreenModes). */
 struct CardMode
 {
@@ -239,7 +290,10 @@ BOOL Card_ModeSize(ULONG id, ULONG *w, ULONG *h);
  * the same format; the ring and the texture heap stay, so textures and
  * static arrays survive. CARD_OK; CARD_FAILED with why[] and the old size
  * kept (k->lost = CARD_LOST_SCREEN if not even that could be reopened). The
- * caller updates the core (Card_Target, Core_Retarget). */
+ * caller updates the core (Card_Target, Core_Retarget).
+ * Window kind: the back buffer and the show bitmap anew (the window is the
+ * program's to size). Bitmap kind: the back buffer anew, at most the
+ * program's bitmap's size; the frame lands in its top left corner. */
 ULONG Card_Resize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whylen);
 
 /* For Core_Init: the target and the heap (heap_cpu is NULL: the core
