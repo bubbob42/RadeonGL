@@ -1,0 +1,25 @@
+; GLQuakeNullPixArg -- frame 400 of demo1 from ONE GLQuake run twice on the null
+; card, with a fixed frame time (+host_framerate 0.03: particles and dynamic
+; lights no longer follow how fast each build runs), for a pixel A/B on the
+; Mac (build/host/r200view). A: GLQuake with the arguments in DEV:Test/pixA.args
+; (a switch that turns a change off), B: GLQuake as it is.
+; The dumps: DEV:Test/pixA.r2d, DEV:Test/pixB.r2d.
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== A ===" >DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/nullb-#? DEV:Test/pix#?.r2d
+Run >NIL: Execute DEV:Test/RunNullB GLQuake demo1 400 -anycpu `Type DEV:Test/pixA.args` +host_framerate 0.03
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/pixA.r2d
+Delete >NIL: DEV:Test/nullb-#?
+Echo "=== B ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunNullB GLQuake demo1 400 -anycpu +host_framerate 0.03
+Execute DEV:Test/WaitDone DEV:Test/nullb-demo1.done
+Type DEV:Test/nullb-demo1.log >>DEV:Test/auto.log
+Copy DEV:Test/nullb-demo1-f400.r2d DEV:Test/pixB.r2d
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

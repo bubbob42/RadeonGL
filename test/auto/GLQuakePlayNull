@@ -1,0 +1,29 @@
+; GLQuakePlayNull -- GLQuake's play benchmark (-playbench: e1m1 played by a
+; script with a fixed frame time, the server included) on the null card,
+; three times with one binary: the play caches off (-noplaycache), on, and
+; on again. Equal "playbench state" checksums = the caches change nothing
+; and the game is repeatable. Needs: gmake glquake glquake-data rgl-lib
+; (glquake-data copies GLQuake's playbench.txt, the e1m1 play script, to
+; dist/Quake/id1).
+; LIMIT 1800
+FailAt 1000
+Wait 12
+Stack 1000000
+Delete >NIL: DEV:Test/play-#?
+Echo "=== off ===" >DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunPlayB GLQuake off 600 -anycpu -noplaycache
+Execute DEV:Test/WaitDone DEV:Test/play-off.done
+Search DEV:Test/play-off.log "playbench" NONUM >>DEV:Test/auto.log
+Search DEV:Test/play-off.log "rc=" NONUM >>DEV:Test/auto.log
+Echo "=== on ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunPlayB GLQuake on 600 -anycpu
+Execute DEV:Test/WaitDone DEV:Test/play-on.done
+Search DEV:Test/play-on.log "playbench" NONUM >>DEV:Test/auto.log
+Search DEV:Test/play-on.log "rc=" NONUM >>DEV:Test/auto.log
+Echo "=== on again ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunPlayB GLQuake on2 600 -anycpu
+Execute DEV:Test/WaitDone DEV:Test/play-on2.done
+Search DEV:Test/play-on2.log "playbench" NONUM >>DEV:Test/auto.log
+Search DEV:Test/play-on2.log "rc=" NONUM >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

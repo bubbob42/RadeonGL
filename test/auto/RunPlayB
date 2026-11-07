@@ -1,0 +1,23 @@
+.KEY bin/A,tag/A,frames/A,extra/F
+.BRA {
+.KET }
+; RunPlayB -- GLQuake {bin} plays e1m1 by DEV:Quake/id1/playbench.txt on
+; the null card: -playbench {frames} with +host_framerate 0.03 (GLQuake's
+; cl_main.c: the speed and a checksum of the server's entities, then quit).
+; Logs DEV:Test/play-{tag}.log and DEV:Test/play-{tag}-lib.log, frame 500
+; dumped to DEV:Test/play-{tag}-f500.r2d (build/host/r200view), a done
+; marker at the end. No mouse or joystick: the game must not follow a
+; stray input (equal checksums between runs).
+FailAt 1000
+CD DEV:Quake
+SetEnv RadeonGLLog DEV:Test/play-{tag}-lib.log
+SetEnv RadeonGLDump 500
+SetEnv RadeonGLDumpFile DEV:Test/play-{tag}-f500.r2d
+Assign LIBS: DEV:Libs/RadeonGL ADD
+{bin} {extra} -stdout -nomouse -nojoy -nopsx -nosound -nocdaudio -noudp -nolan -playbench {frames} +host_framerate 0.03 +map e1m1 >DEV:Test/play-{tag}.log
+Echo "play {bin} {tag} rc=$RC" >>DEV:Test/play-{tag}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+UnSetEnv RadeonGLLog
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo >DEV:Test/play-{tag}.done done

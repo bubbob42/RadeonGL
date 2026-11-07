@@ -1,0 +1,24 @@
+; GLQuakePlayNull040 -- the play benchmark (-playbench) on the null card with
+; ONE GLQuake040 run twice: A with the arguments in DEV:Test/playA.args (a
+; switch that turns a change off), B as it is. Equal "playbench state"
+; checksums = the game is the same; frame 500 of each (DEV:Test/play-A-f500.r2d,
+; play-B-f500.r2d, rendered on the Mac with build/host/r200view) = what the
+; server sent and the client drew is the same. Needs: gmake glquake
+; glquake-data rgl-lib.
+; LIMIT 1200
+FailAt 1000
+Wait 12
+Stack 1000000
+Delete >NIL: DEV:Test/play-#?
+Echo "=== A ===" >DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunPlayB GLQuake040 A 600 `Type DEV:Test/playA.args`
+Execute DEV:Test/WaitDone DEV:Test/play-A.done
+Search DEV:Test/play-A.log "playbench" NONUM >>DEV:Test/auto.log
+Search DEV:Test/play-A.log "rc=" NONUM >>DEV:Test/auto.log
+Echo "=== B ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunPlayB GLQuake040 B 600
+Execute DEV:Test/WaitDone DEV:Test/play-B.done
+Search DEV:Test/play-B.log "playbench" NONUM >>DEV:Test/auto.log
+Search DEV:Test/play-B.log "rc=" NONUM >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
