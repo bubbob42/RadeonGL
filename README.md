@@ -211,6 +211,8 @@ was tested on real hardware.
 - **Frank Wille, Steffen Häuser and Dennis Boon:** GLQuake for
   `minigl.library`, after id Software's Quake.
 - **Advanced Micro Devices:** the R200 microcode.
+- **Martin "Mason" Merz:** the Install icon, AmigaOS 3.2's installer icon,
+  used with his permission.
 - **ATI Technologies, VA Linux Systems, Precision Insight, The Weather
   Channel and Tungsten Graphics, Red Hat**, and the authors of the Linux
   radeon and Mesa r200 drivers (among them Dave Airlie, Alex Deucher,

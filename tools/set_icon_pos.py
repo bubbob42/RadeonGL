@@ -142,6 +142,22 @@ def set_show_mode(data, flags, viewmode):
     return True
 
 
+
+def glow_width(data):
+    """The GlowIcon's width (its FACE chunk: width - 1 in the first byte)
+    when the icon has an appended FORM ICON, else 0. 2026-11-07: 3.2 draws
+    the GlowIcon, so --center-x centres by its width, not the classic one's
+    (the 3.2 installer icon: classic 63 wide, GlowIcon 45)."""
+    i = data.find(b"FORM")
+    while i >= 0:
+        if data[i + 8:i + 12] == b"ICON":
+            f = data.find(b"FACE", i + 12)
+            if f >= 0 and f + 9 <= len(data):
+                return data[f + 8] + 1
+            return 0
+        i = data.find(b"FORM", i + 4)
+    return 0
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -164,9 +180,13 @@ def main():
         elif op == "--center-x":
             cx, y = int(args.pop(0)), int(args.pop(0))
             w = struct.unpack_from(">H", data, ICON_W_OFF)[0]
+            gw = glow_width(data)
+            if gw:
+                w = gw     # icon.library V44+ (3.2) draws the GlowIcon
             x = cx - w // 2
             struct.pack_into(">ll", data, 58, x, y)
-            done.append("center-x %d (w=%d -> x=%d), y=%d" % (cx, w, x, y))
+            done.append("center-x %d (w=%d%s -> x=%d), y=%d"
+                        % (cx, w, " glow" if gw else "", x, y))
         elif op == "--no-pos":
             struct.pack_into(">ll", data, 58, NO_POS, NO_POS)
             done.append("pos free")

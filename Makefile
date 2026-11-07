@@ -346,7 +346,10 @@ guides:
 
 # Installer: stage install/Install (project name substituted) + its Workbench
 # icon into dist/, so on the Amiga the user double-clicks the Install icon.
-# Regenerate the icon with tools/make_install_icon.py.
+# The icon is AmigaOS 3.2's installer icon (Martin "Mason" Merz, with his
+# permission): regenerate it with
+#   tools/make_install_icon_os32.py RadeonGL install/Install.info
+# from the originals in icons/install/.
 installer:
 	@# Lint before staging. The trap it guards -- a multi-line message wrapped
 	@# in the substitution form, where every line after the first silently
