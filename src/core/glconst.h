@@ -742,6 +742,11 @@
 #ifndef GL_RGL_ARRAYS_TAG_HINT
 #define GL_RGL_ARRAYS_TAG_HINT                   0x52474c04UL
 #endif
+/* 2026-11-07, extension GL_RGL_resize_error: glGetString of it = why the
+ * last mglResizeContext that kept the old size did so ("" if none did) */
+#ifndef GL_RGL_RESIZE_ERROR
+#define GL_RGL_RESIZE_ERROR                      0x52474c05UL
+#endif
 #ifndef MGL_W_ONE_HINT
 #define MGL_W_ONE_HINT                           0x7016UL
 #endif

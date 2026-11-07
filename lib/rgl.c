@@ -289,8 +289,26 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     Put(f, "frames: "); PutU(f, r->frame); Put(f, "\n");
     Put(f, "flushes: "); PutU(f, k->flushes); Put(f, ", presents: "); PutU(f, k->presents);
     Put(f, ", without the screen on the board: "); PutU(f, k->noscreen); Put(f, "\n");
+    Put(f, "vertical sync (mglEnableSync): "); Put(f, r->core.sync ? "on" : "off");
+    Put(f, "; presents that waited for the beam: "); PutU(f, k->vsyncs);
+    if (k->vsyncs != 0)
+    {
+        Put(f, " (CRTC"); Put(f, k->vsync_crtc ? "2" : ""); Put(f, ", ");
+        PutU(f, k->vsync_lines); Put(f, " lines)");
+    }
+    Put(f, ", with no CRTC running: "); PutU(f, k->vsync_off); Put(f, "\n");
     Put(f, "frames dropped: "); PutU(f, k->dropped); Put(f, " (bitmaps moved "); PutU(f, k->moved);
     Put(f, ", off the board "); PutU(f, k->offboard); Put(f, ")\n");
+    Put(f, "frames not drawn, the GL screen behind another: "); PutU(f, k->hidden); Put(f, "\n");
+    Put(f, "display FIFO (GRPH_BUFFER_CNTL): Radeon.card's "); PutX(f, k->grph_seen);
+    if (k->dprio_on)
+    {
+        Put(f, ", RadeonGLDisplayPriority: critical point "); PutU(f, k->dprio_point);
+        Put(f, " ("); PutU(f, k->dprio_writes); Put(f, " writes)");
+    }
+    else
+        Put(f, ", RadeonGLDisplayPriority not set");
+    Put(f, "\n");
     Put(f, "dwords: ");
     if (k->dwords_hi != 0)
     {
@@ -805,6 +823,25 @@ static void *CreateContext(int w, int h, ULONG modeid)
         && GetVar((STRPTR) "RadeonGLMove16", (STRPTR) flag, sizeof(flag), 0) > 0
         && (flag[0] == '1' || flag[0] == '2'))
         r->rad.move16 = (ULONG) (flag[0] - '0');
+    /* 2026-11-07, RadeonGLDisplayPriority=high (the display FIFO's critical
+     * point 0: high priority always) or a critical point 0-127, while the
+     * context lives; unset leaves Radeon.card's (card.c DisplayPriority) */
+    if (r->real && GetVar((STRPTR) "RadeonGLDisplayPriority", (STRPTR) flag, sizeof(flag), 0) > 0)
+    {
+        if (flag[0] == 'h' || flag[0] == 'H')
+        {
+            r->rad.dprio_on = 1;
+            r->rad.dprio_point = 0;
+        }
+        else if (flag[0] >= '0' && flag[0] <= '9')
+        {
+            r->rad.dprio_on = 1;
+            for (i = 0; i < sizeof(flag) && flag[i] >= '0' && flag[i] <= '9'; i++)
+                r->rad.dprio_point = r->rad.dprio_point * 10 + (ULONG) (flag[i] - '0');
+            if (r->rad.dprio_point > 127)
+                r->rad.dprio_point = 127;
+        }
+    }
     if (r->real)
         Card_Target(&r->rad, &t);
     else
@@ -999,6 +1036,7 @@ void *Hook_MGLGetInputWindowHandle(GLcontext context)
 GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height)
 {
     struct CoreTarget t;
+    char why[sizeof(rgl->resize_why)];
     ULONG res;
     ULONG pitch;
     ULONG i;
@@ -1017,8 +1055,7 @@ GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height
     {
         /* what was built for the old back buffer is drawn first */
         (void) Card_Flush(&rgl->rad, FALSE);
-        res = Card_Resize(&rgl->rad, (ULONG) width, (ULONG) height, rgl->resize_why,
-                          sizeof(rgl->resize_why));
+        res = Card_Resize(&rgl->rad, (ULONG) width, (ULONG) height, why, sizeof(why));
         /* the back buffer is new either way (the old size reopened) */
         if (rgl->rad.lost == 0)
         {
@@ -1041,12 +1078,18 @@ GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height
         t.depth_pitch = pitch;
         Core_Retarget(&rgl->core, &t);
     }
+    /* the reason stays until the next refusal: a client asks for it after a
+     * refusal (GL_RGL_RESIZE_ERROR), and the log names the last one even
+     * when a later resize worked (2026-11-07: "refused 1 (last: )", as
+     * Card_Resize empties its why[] first) */
     if (res == CARD_OK)
         rgl->resizes++;
     else
+    {
         rgl->resize_failed++;
-    for (i = 0; i < sizeof(rgl->resize_why) && res == CARD_OK; i++)
-        rgl->resize_why[i] = 0;
+        for (i = 0; i < sizeof(rgl->resize_why); i++)
+            rgl->resize_why[i] = why[i];
+    }
     if (hidden)
         Hook_MGLSetPointer(context);
     return (res == CARD_OK) ? GL_TRUE : GL_FALSE;
@@ -1453,6 +1496,8 @@ const GLubyte *Hook_GLGetString(GLcontext context, GLenum name)
     (void) context;
     if (rgl == NULL)
         return NULL;
+    if (name == GL_RGL_RESIZE_ERROR)
+        return (const GLubyte *) rgl->resize_why;      /* extension GL_RGL_resize_error */
     return (const GLubyte *) Core_GetString(C, name);
 }
 

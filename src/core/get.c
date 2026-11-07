@@ -167,7 +167,7 @@ const char *Core_GetString(struct Core *c, ULONG name)
         case GL_EXTENSIONS:
             /* MiniGLV3D's spelling, so clients take the same paths
              * (GLQuake finds GL_ARB_multitexture inside GL_MGL_...) */
-            return "GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array GL_MGL_packed_pixels GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag";
+            return "GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array GL_MGL_packed_pixels GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag GL_RGL_resize_error";
     }
     Core_Error(c, GL_INVALID_ENUM);
     return NULL;

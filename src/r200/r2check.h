@@ -154,6 +154,8 @@ struct R2ChkState
 #define R2CHK_HAVE_VEC      0x1000
 #define R2CHK_HAVE_SCAL     0x2000
 #define R2CHK_HAVE_RECNTL   0x4000
+#define R2CHK_HAVE_VLINE1   0x8000      /* a vertical-sync window for CRTC, not yet waited on */
+#define R2CHK_HAVE_VLINE2   0x10000     /* ... for CRTC2 */
 
 void R2Chk_Reset(struct R2ChkState *st);
 

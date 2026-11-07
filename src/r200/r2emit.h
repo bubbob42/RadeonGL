@@ -25,6 +25,12 @@
 
 LONG R2E_Reg(struct R2Cs *cs, ULONG reg, ULONG val);
 
+/* The CP waits until crtc's beam (0: CRTC, 1: CRTC2) is outside lines
+ * start..end-1 -- for the whole screen, its vertical blank. The present's
+ * vertical sync (xf86-video-ati 6.14.6 RADEONWaitForVLine, pre-AVIVO). The
+ * caller makes sure that CRTC runs: a stopped one never lets the CP go. */
+LONG R2E_WaitVline(struct R2Cs *cs, ULONG crtc, ULONG start, ULONG end);
+
 /* n values to n consecutive registers starting at reg (1 <= n <= 0x4000). */
 LONG R2E_Regs(struct R2Cs *cs, ULONG reg, ULONG n, const ULONG *vals);
 

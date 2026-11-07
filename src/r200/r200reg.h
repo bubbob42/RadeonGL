@@ -49,6 +49,27 @@
 /* --- CRTC (Radeon.card's) ------------------------------------------------- */
 #define R_CRTC_H_TOTAL_DISP     0x0200
 #define R_CRTC_V_TOTAL_DISP     0x0208
+#define   R_CRTC_V_DISP_SHIFT     16
+#define   R_CRTC_V_DISP_MASK      0x07ffUL  /* displayed lines - 1 */
+#define   R_CRTC_EN               (1UL << 25)   /* in CRTC_GEN_CNTL and CRTC2_GEN_CNTL */
+/* the vertical-sync wait (xf86-video-ati 6.14.6 radeon_reg.h, RADEONWaitForVLine) */
+#define R_CRTC_GUI_TRIG_VLINE   0x0218
+#define   R_TRIG_VLINE_START_SHIFT 0
+#define   R_TRIG_VLINE_END_SHIFT  16
+#define   R_TRIG_VLINE_LINE_MASK  0x07ffUL
+#define   R_TRIG_VLINE_INV        (1UL << 15)   /* WAIT_CRTC_VLINE waits while the beam is INSIDE */
+#define   R_TRIG_VLINE_STALL      (1UL << 30)
+#define R_CRTC2_V_TOTAL_DISP    0x0308
+/* the display's memory-request FIFO (Radeon.card's; xf86-video-ati 6.14.6
+ * legacy_crtc.c RADEONInitDispBandwidthLegacy): the display asks with high
+ * priority once fewer than CRITICAL_POINT octawords are left; 0 = always */
+#define R_GRPH_BUFFER_CNTL      0x02f0
+#define   R_GRPH_CRITICAL_POINT_SHIFT 16
+#define   R_GRPH_CRITICAL_POINT_MASK  (0x7fUL << 16)
+#define   R_GRPH_CRITICAL_CNTL    (1UL << 28)
+#define   R_GRPH_CRITICAL_AT_SOF  (1UL << 30)
+#define   R_GRPH_STOP_CNTL        (1UL << 31)
+#define R_CRTC2_GUI_TRIG_VLINE  0x0318
 #define R_CRTC_OFFSET           0x0224
 #define R_CRTC_OFFSET_CNTL      0x0228
 #define R_CRTC_PITCH            0x022c
@@ -115,6 +136,8 @@
 #define R_DP_DATATYPE           0x16c4
 #define   R_HOST_BIG_ENDIAN_EN    (1UL << 29)
 #define R_WAIT_UNTIL            0x1720
+#define   R_WAIT_CRTC_VLINE       (1UL << 3)    /* CRTC_GUI_TRIG_VLINE's condition */
+#define   R_ENG_DISPLAY_CRTC2     (1UL << 31)   /* ... of CRTC2 rather than CRTC */
 #define   R_WAIT_2D_IDLE          (1UL << 14)
 #define   R_WAIT_DMA_GUI_IDLE     (1UL << 9)
 #define   R_WAIT_3D_IDLE          (1UL << 15)

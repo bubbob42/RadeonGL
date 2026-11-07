@@ -9,8 +9,10 @@
 #include <utility/tagitem.h>
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
+#include <intuition/intuitionbase.h>
 #include <graphics/gfx.h>
 #include <graphics/modeid.h>
+#include <graphics/displayinfo.h>
 #include <libraries/Picasso96.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -54,6 +56,50 @@ static void Why(char *why, ULONG len, const char *s)
         return;
     for (i = 0; i + 1 < len && s[i] != 0; i++)
         why[i] = s[i];
+    why[i] = 0;
+}
+
+/* why[] and " ($id, w x h)" after it: the mode a failure was about */
+static void WhyMode(char *why, ULONG len, const char *s, ULONG id, ULONG w, ULONG h)
+{
+    char tail[40];
+    char num[12];
+    ULONG i, j, n, v;
+
+    Why(why, len, s);
+    if (why == NULL || len == 0)
+        return;
+    j = 0;
+    tail[j++] = ' ';
+    tail[j++] = '(';
+    tail[j++] = '$';
+    for (i = 0; i < 8; i++)
+        tail[j++] = "0123456789ABCDEF"[(id >> (28 - 4 * i)) & 15];
+    tail[j++] = ',';
+    for (n = 0; n < 2; n++)
+    {
+        v = (n == 0) ? w : h;
+        tail[j++] = ' ';
+        i = 0;
+        do
+        {
+            num[i++] = (char) ('0' + v % 10);
+            v /= 10;
+        } while (v != 0 && i < 10);
+        while (i > 0)
+            tail[j++] = num[--i];
+        if (n == 0)
+        {
+            tail[j++] = ' ';
+            tail[j++] = 'x';
+        }
+    }
+    tail[j++] = ')';
+    tail[j] = 0;
+    for (i = 0; why[i] != 0; i++)
+        ;
+    for (j = 0; i + 1 < len && tail[j] != 0; i++, j++)
+        why[i] = tail[j];
     why[i] = 0;
 }
 
@@ -187,6 +233,49 @@ static void HwWrite(APTR hw, ULONG reg, ULONG val)
 
     k = (struct Card *) hw;
     *(volatile ULONG *) ((UBYTE *) k->mmio + reg) = k->mmio_swap ? Swap32(val) : val;
+}
+
+static BOOL VsyncWindow(struct Card *k, ULONG *crtc, ULONG *lines)
+{
+    ULONG v;
+
+    if (HwRead(k, R_CRTC_GEN_CNTL) & R_CRTC_EN)
+    {
+        *crtc = 0;
+        v = HwRead(k, R_CRTC_V_TOTAL_DISP);
+    }
+    else if (HwRead(k, R_CRTC2_GEN_CNTL) & R_CRTC_EN)
+    {
+        *crtc = 1;
+        v = HwRead(k, R_CRTC2_V_TOTAL_DISP);
+    }
+    else
+        return FALSE;
+    *lines = ((v >> R_CRTC_V_DISP_SHIFT) & R_CRTC_V_DISP_MASK) + 1;
+    return (BOOL) (*lines >= 2 && *lines <= R_TRIG_VLINE_LINE_MASK);
+}
+
+static void DisplayPriority(struct Card *k)
+{
+    ULONG v;
+    ULONG want;
+
+    v = HwRead(k, R_GRPH_BUFFER_CNTL);
+    if (k->flushes == 1)
+        k->grph_seen = v;
+    if (!k->dprio_on)
+        return;
+    want = (v & ~(R_GRPH_CRITICAL_POINT_MASK | R_GRPH_CRITICAL_CNTL | R_GRPH_CRITICAL_AT_SOF | R_GRPH_STOP_CNTL))
+         | ((k->dprio_point << R_GRPH_CRITICAL_POINT_SHIFT) & R_GRPH_CRITICAL_POINT_MASK);
+    if (v == want)
+        return;
+    if (!k->grph_saved)
+    {
+        k->grph_seen = v;
+        k->grph_saved = 1;
+    }
+    HwWrite(k, R_GRPH_BUFFER_CNTL, want);
+    k->dprio_writes++;
 }
 
 static ULONG HwReadBack(APTR hw, volatile ULONG *p)
@@ -414,6 +503,21 @@ static BOOL OnBoard(struct Card *k, ULONG i)
     UnlockBm(k, i);
     return on;
 }
+
+/* The present's vertical sync (mglEnableSync): which CRTC shows the screen
+ * and how many lines it displays, so that the CP can wait until the beam has
+ * left them (R2E_WaitVline); the copy then outruns the beam. CRTC if it
+ * runs, else CRTC2; FALSE with neither -- a stopped CRTC never lets the CP
+ * go, so then no wait. Read in the flush's lock. */
+static BOOL VsyncWindow(struct Card *k, ULONG *crtc, ULONG *lines);
+
+/* The display FIFO's priority, in the flush's lock (RadeonGLDisplayPriority):
+ * MEASURED 2026-11-07 on the A4000D, Radeon.card leaves GRPH_BUFFER_CNTL at
+ * $20205C5C in every mode -- critical point 32 octawords, about 1.2 us of
+ * pixels at 1920 x 1080 -- and the user saw sparkles and DVI drop-outs at
+ * large modes while GLQuake drew. xf86-video-ati's "DisplayPriority HIGH"
+ * sets the critical point to 0 (high priority always). */
+static void DisplayPriority(struct Card *k);
 
 /* Where target and ring sit in their bitmaps, from this lock: 4 KB aligned
  * (their content does not outlive a flush). The heap's place in its bitmap
@@ -838,6 +942,25 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         k->in_flush = 0;
         return R2_OK;
     }
+    DisplayPriority(k);
+
+    /* 1c. 2026-11-07: a GL screen behind another screen is not drawn -- no
+     * one sees it, and its 3D work and copy load the board's memory while
+     * the screen in front is shown (the user: the 1920 x 1080 Workbench
+     * went black and back while GLQuake ran behind it). The frame is
+     * dropped like one whose bitmaps moved (the uploads it carried are
+     * forgotten, Core_Rebase), and the program waits a little, so that a
+     * hidden game does not spin. */
+    if (present && k->scr != NULL && IntuitionBase->FirstScreen != k->scr)
+    {
+        UnlockAll(k);
+        Drop(k);
+        k->dropped--;               /* counted on its own */
+        k->hidden++;
+        k->in_flush = 0;
+        Delay(2);
+        return R2_OK;
+    }
 
     /* 2. did a bitmap move since this frame was built? */
     TargetAt(k, &color, &depth);
@@ -869,6 +992,20 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
             s.width = k->width;
             s.height = k->height;
             k->cs.end = k->cmd + CARD_CMD_DW;   /* the reserve */
+            if (k->core->sync)
+            {
+                if (VsyncWindow(k, &k->vsync_crtc, &k->vsync_lines))
+                {
+                    /* the frame drawn first, then the beam: else a frame
+                     * still drawing would start the copy late */
+                    R2E_Reg(&k->cs, R_RB3D_DSTCACHE_CTLSTAT, R_RB3D_DC_FLUSH_ALL);
+                    R2E_Reg(&k->cs, R_WAIT_UNTIL, R_WAIT_3D_IDLECLEAN);
+                    R2E_WaitVline(&k->cs, k->vsync_crtc, 0, k->vsync_lines);
+                    k->vsyncs++;
+                }
+                else
+                    k->vsync_off++;
+            }
             Core_Present(k->core, &s, 0, 0);
             k->presents++;
         }
@@ -1091,9 +1228,62 @@ void Card_VramEnd(struct Card *k)
 
 /* --- opening -------------------------------------------------------------------------- */
 
+/* Every Picasso96 mode of a Radeon board in the format want, each to fn
+ * until it returns TRUE: that id, else INVALID_ID. P96Base open.
+ *
+ * graphics.library's display database, not Picasso96's lists:
+ * p96AllocModeListTagList stops at 256 modes (docs/p96-mode-list-256.md,
+ * for Thor), which on the A4000D left out 1680 x 1050 to 1920 x 1440 -- the
+ * Workbench's own 1920 x 1080 among them. The database has them all.
+ * MEASURED 2026-11-07: it also has a set of P96 ids $FFF01xxx, one 320 x 200
+ * in each format, ahead of the real ones; p96OpenScreenTagList refuses them
+ * and ModeNotAvailable says so (8192). Taken for 320 x 200 they made the GL
+ * screen fail to open: an id must be available. */
+static BOOL BoardIsRadeon(ULONG id);
+
+static ULONG WalkModes(ULONG want, BOOL (*fn)(ULONG id, void *ud), void *ud)
+{
+    ULONG id;
+
+    for (id = NextDisplayInfo((ULONG) INVALID_ID); id != (ULONG) INVALID_ID; id = NextDisplayInfo(id))
+    {
+        if (!p96GetModeIDAttr(id, P96IDA_ISP96)
+            || p96GetModeIDAttr(id, P96IDA_RGBFORMAT) != want
+            || ModeNotAvailable(id) != 0
+            || !BoardIsRadeon(id))
+            continue;
+        if (fn(id, ud))
+            return id;
+    }
+    return (ULONG) INVALID_ID;
+}
+
+struct ExactWalk
+{
+    ULONG w, h;
+};
+
+static BOOL IsExact(ULONG id, void *ud)
+{
+    struct ExactWalk *ex;
+
+    ex = (struct ExactWalk *) ud;
+    return (BOOL) (p96GetModeIDAttr(id, P96IDA_WIDTH) == ex->w
+                   && p96GetModeIDAttr(id, P96IDA_HEIGHT) == ex->h);
+}
+
 static ULONG BestMode(ULONG w, ULONG h, ULONG depth)
 {
     struct TagItem t[5];
+    struct ExactWalk ex;
+    ULONG id;
+
+    /* a mode of exactly that size first, from all of them (WalkModes) */
+    ex.w = w;
+    ex.h = h;
+    id = WalkModes((depth == 16) ? RGBFB_R5G6B5PC : RGBFB_B8G8R8A8, IsExact, &ex);
+    if (id != (ULONG) INVALID_ID)
+        return id;
 
     t[0].ti_Tag = P96BIDTAG_NominalWidth;   t[0].ti_Data = w;
     t[1].ti_Tag = P96BIDTAG_NominalHeight;  t[1].ti_Data = h;
@@ -1276,7 +1466,7 @@ static BOOL OpenGLScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG bpp, 
     k->scr = p96OpenScreenTagList(t);
     if (k->scr == NULL)
     {
-        Why(why, whylen, "the GL screen did not open");
+        WhyMode(why, whylen, "the GL screen did not open", id, w, h);
         return FALSE;
     }
     sbm = k->scr->RastPort.BitMap;
@@ -1302,20 +1492,31 @@ static BOOL OpenGLScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG bpp, 
     return TRUE;
 }
 
-/* The back buffer for k->width x k->height: colour, then Z16, on the board. */
+/* The back buffer for k->width x k->height: colour, then Z16, on the board.
+ *
+ * The R200 keeps its depth buffer tiled, always: Z16 in tiles of 64 x 16
+ * pixels, two to a 4 KB page, and it counts a row in WHOLE tiles (Mesa
+ * radeon_fbo.c get_depth_z16: pitch >> 7 bytes). With a pitch that is not a
+ * multiple of 64 pixels the last, partial tile of each band lands on the
+ * next band's second tile. MEASURED 2026-11-07, 800 x 600 (12.5 tiles):
+ * x 768-799 of each 16-row band and x 64-95 of the band below shared their
+ * depth, the surfaces behind the other's depth failed the test, and GLQuake
+ * (no colour clear) showed 32-pixel columns of an old frame there. So the
+ * depth pitch is its own, in whole tiles, and the rows whole bands. */
 static BOOL AllocTarget(struct Card *k, char *why, ULONG whylen)
 {
     k->pitch = (k->width + 15) & ~15UL;     /* rows a multiple of 32 bytes (the present) */
+    k->depth_pitch = (k->width + 63) & ~63UL;
     k->color_bytes = k->pitch * k->height * k->bpp;
-    k->depth_bytes = k->pitch * k->height * 2;
+    k->depth_bytes = Align4k(k->depth_pitch * ((k->height + 15) & ~15UL) * 2);
     if (!AllocData(k, CARD_TARGET, Align4k(k->color_bytes) + k->depth_bytes + 8192))
     {
-        Why(why, whylen, "no memory for the back buffer bitmap");
+        Why(why, whylen, "not enough memory for the back buffer (colour and depth)");
         return FALSE;
     }
     if (!OnBoard(k, CARD_TARGET))
     {
-        Why(why, whylen, "P96 did not put the back buffer bitmap on the board");
+        Why(why, whylen, "the back buffer did not fit on the graphics board");
         return FALSE;
     }
     return TRUE;
@@ -1425,47 +1626,50 @@ static void P96Close(struct Library *own)
     }
 }
 
+/* Card_EachMode's walker: each mode to the client (struct CardMode) */
+struct EachWalk
+{
+    BOOL (*fn)(const struct CardMode *m, void *ud);
+    void *ud;
+};
+
+static BOOL EachToClient(ULONG id, void *ud)
+{
+    struct EachWalk *ew;
+    struct NameInfo ni;
+    struct CardMode m;
+    ULONG i;
+
+    ew = (struct EachWalk *) ud;
+    m.id = id;
+    m.width = p96GetModeIDAttr(id, P96IDA_WIDTH);
+    m.height = p96GetModeIDAttr(id, P96IDA_HEIGHT);
+    m.depth = p96GetModeIDAttr(id, P96IDA_DEPTH);
+    m.name[0] = 0;
+    if (GetDisplayInfoData(NULL, (UBYTE *) &ni, sizeof(ni), DTAG_NAME, id) > 0)
+    {
+        for (i = 0; i < sizeof(m.name) - 1 && ni.Name[i] != 0; i++)
+            m.name[i] = ni.Name[i];
+        m.name[i] = 0;
+    }
+    return ew->fn(&m, ew->ud);
+}
+
 ULONG Card_EachMode(ULONG depth, BOOL (*fn)(const struct CardMode *m, void *ud), void *ud)
 {
     struct Library *own;
-    struct List *l;
-    struct P96Mode *pm;
-    struct TagItem t[2];
-    struct CardMode m;
+    struct EachWalk ew;
     ULONG found;
-    ULONG i;
 
     found = CARD_BESTMODE;
     own = P96Own();
     if (P96Base == NULL)
         return found;
-    t[0].ti_Tag = P96MA_FormatsAllowed;
-    t[0].ti_Data = (depth == 32) ? RGBFF_B8G8R8A8 : RGBFF_R5G6B5PC;
-    t[1].ti_Tag = TAG_DONE;
-    t[1].ti_Data = 0;
-    l = p96AllocModeListTagList(t);
-    if (l != NULL)
-    {
-        for (pm = (struct P96Mode *) l->lh_Head; pm->Node.ln_Succ != NULL;
-             pm = (struct P96Mode *) pm->Node.ln_Succ)
-        {
-            if (!BoardIsRadeon(pm->DisplayID))
-                continue;
-            m.id = pm->DisplayID;
-            m.width = pm->Width;
-            m.height = pm->Height;
-            m.depth = pm->Depth;
-            for (i = 0; i < sizeof(m.name) - 1 && pm->Description[i] != 0; i++)
-                m.name[i] = pm->Description[i];
-            m.name[i] = 0;
-            if (fn(&m, ud))
-            {
-                found = m.id;
-                break;
-            }
-        }
-        p96FreeModeList(l);
-    }
+    ew.fn = fn;
+    ew.ud = ud;
+    found = WalkModes((depth == 32) ? RGBFB_B8G8R8A8 : RGBFB_R5G6B5PC, EachToClient, &ew);
+    if (found == (ULONG) INVALID_ID)
+        found = CARD_BESTMODE;
     P96Close(own);
     return found;
 }
@@ -1655,7 +1859,7 @@ void Card_Target(const struct Card *k, struct CoreTarget *t)
     t->color_pitch = k->pitch;
     t->color_format = k->color_format;
     t->depth_gpu = k->depth_gpu;
-    t->depth_pitch = k->pitch;
+    t->depth_pitch = k->depth_pitch;
 }
 
 void Card_Attach(struct Card *k, struct Core *c)
@@ -1673,6 +1877,13 @@ void Card_Close(struct Card *k)
     k->vram_lock = 0;
     SettleAlone(k, TRUE);           /* the last frame drawn, the CP off */
     WaitBlit();
+    /* Radeon.card's display FIFO setting back (RadeonGLDisplayPriority) */
+    if (k->grph_saved && k->b[CARD_TARGET].bm != NULL && LockBm(k, CARD_TARGET, FALSE))
+    {
+        HwWrite(k, R_GRPH_BUFFER_CNTL, k->grph_seen);
+        UnlockBm(k, CARD_TARGET);
+        k->grph_saved = 0;
+    }
     for (i = 0; i < CARD_SCREEN; i++)
         FreeBm(k, i);
     k->b[CARD_SCREEN].bm = NULL;

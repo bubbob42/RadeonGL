@@ -1213,6 +1213,38 @@ static void test_checker_hardening(void)
     R2E_Reg(&cs, R_WAIT_UNTIL, R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN);
     CHECK_INT(HardRun(&cs), R2CE_OK);
 
+    /* the present's vertical sync (2026-11-07): R2E_WaitVline passes, for
+     * either CRTC; a wait needs a window of its own, of the same CRTC; a
+     * window must end and say INV */
+    HardSetup(&cs);
+    R2E_WaitVline(&cs, 0, 0, 480);
+    CHECK_INT(HardRun(&cs), R2CE_OK);
+    HardSetup(&cs);
+    R2E_WaitVline(&cs, 1, 0, 1080);
+    CHECK_INT(HardRun(&cs), R2CE_OK);
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_WAIT_UNTIL, R_WAIT_CRTC_VLINE);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);        /* no window */
+    HardSetup(&cs);
+    R2E_WaitVline(&cs, 0, 0, 480);
+    R2E_Reg(&cs, R_WAIT_UNTIL, R_WAIT_CRTC_VLINE);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);        /* the window was used up */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_CRTC_GUI_TRIG_VLINE, (480UL << R_TRIG_VLINE_END_SHIFT) | R_TRIG_VLINE_INV);
+    R2E_Reg(&cs, R_WAIT_UNTIL, R_WAIT_CRTC_VLINE | R_ENG_DISPLAY_CRTC2);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);        /* CRTC's window, CRTC2's wait */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_CRTC_GUI_TRIG_VLINE, (480UL << R_TRIG_VLINE_START_SHIFT) | (480UL << R_TRIG_VLINE_END_SHIFT)
+                                        | R_TRIG_VLINE_INV);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);        /* a window that never ends */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_CRTC_GUI_TRIG_VLINE, 480UL << R_TRIG_VLINE_END_SHIFT);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);        /* not INV: wait INSIDE the screen */
+    HardSetup(&cs);
+    R2E_Reg(&cs, R_CRTC_GUI_TRIG_VLINE, (480UL << R_TRIG_VLINE_END_SHIFT) | R_TRIG_VLINE_INV);
+    R2E_Reg(&cs, R_WAIT_UNTIL, R_WAIT_CRTC_VLINE | R_WAIT_3D_IDLECLEAN);
+    CHECK_INT(HardRun(&cs), R2CE_VALUE);        /* the vline wait goes alone */
+
     /* SE_VF_MIN_VTX_INDX: off the whitelist */
     HardSetup(&cs);
     R2E_Reg(&cs, R_SE_VF_MIN_VTX_INDX, 0x100);

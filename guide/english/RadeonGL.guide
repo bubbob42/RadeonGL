@@ -299,6 +299,17 @@ that is not set means the default.
     cannot burst (the BFG9060, for one) the machine may hang. RadeonGL
     tries one line first and stays off if it comes back wrong; a hang it
     cannot catch.
+
+@{b}RadeonGLDisplayPriority@{ub}  (default: not set)
+    high lets the screen read the card's memory with high priority all
+    the time while a program's display is open: against white pixels and
+    a picture that goes black at large screen modes while the Radeon
+    draws (the same as "DisplayPriority HIGH" in Linux' radeon driver).
+    A number from 0 to 127 says instead how far the screen's buffer may
+    run down before it gets priority (0 = always). Not set keeps the card
+    driver's setting, which also comes back when the program quits.
+
+        SetEnv SAVE RadeonGLDisplayPriority high
 @endnode
 
 @node Speed "Speed"

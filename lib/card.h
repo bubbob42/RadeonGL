@@ -83,7 +83,8 @@ struct Card
     ULONG width, height;
     ULONG bpp;                  /* bytes a pixel of the screen (2 or 4) */
     ULONG color_format;         /* R_COLOR_FORMAT_RGB565 or _ARGB8888 */
-    ULONG pitch;                /* the target's pitch in pixels */
+    ULONG pitch;                /* the target's colour pitch in pixels */
+    ULONG depth_pitch;          /* its Z16 pitch in pixels: whole 64-pixel tiles */
     ULONG color_bytes, depth_bytes;
     ULONG heap_size;
     ULONG compat;               /* P96IDA_COMPATIBLEFORMATS of the GL screen's mode */
@@ -151,6 +152,17 @@ struct Card
 
     /* for the log */
     ULONG flushes, presents, dropped, moved, offboard, noscreen;
+    ULONG vsyncs;               /* presents that waited for the beam (mglEnableSync) */
+    ULONG vsync_off;            /* ... asked to, with no CRTC running: not waited */
+    ULONG vsync_crtc, vsync_lines;  /* the last wait's CRTC (0, 1) and window */
+    ULONG hidden;               /* frames not drawn: the GL screen was behind another */
+    /* 2026-11-07, RadeonGLDisplayPriority=high or a number: the display FIFO's
+     * critical point while the context lives (GRPH_BUFFER_CNTL, card.c
+     * DisplayPriority), Radeon.card's value back at the close */
+    ULONG dprio_on, dprio_point;
+    ULONG grph_seen;            /* GRPH_BUFFER_CNTL as the first flush found it */
+    ULONG grph_saved;           /* 1: grph_seen to be written back at the close */
+    ULONG dprio_writes;
     ULONG dwords, fence_us_max, lock_us_max, lock_us_sum, vram_locks, cp_resets;
     ULONG dwords_hi;            /* dwords carried past 2^32 */
     ULONG lock_flushes;         /* the flushes lock_us_sum is the sum of */

@@ -26,6 +26,8 @@ struct Rule
 
 static const struct Rule rules[] =
 {
+    { 0x0218, 0x0218, 0x04, 0, "CRTC_GUI_TRIG_VLINE" },
+    { 0x0318, 0x0318, 0x04, 0, "CRTC2_GUI_TRIG_VLINE" },
     { 0x15e0, 0x15f4, 0x04, 0, "SCRATCH_REGn" },
     { 0x1720, 0x1720, 0x04, 0, "WAIT_UNTIL" },
     { 0x1c14, 0x1c14, 0x04, 0, "PP_MISC" },
@@ -380,9 +382,33 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
             if (val != 0)
                 return Err(c, R2CE_VALUE, reg, val);    /* second-pass lookups */
             return R2CE_OK;
+        case R_CRTC_GUI_TRIG_VLINE:
+        case R_CRTC2_GUI_TRIG_VLINE:
+            /* the present's vertical sync (R2E_WaitVline) and nothing else:
+             * "wait while inside start..end-1", a window that ends. Every
+             * WAIT_CRTC_VLINE needs one of its own (a stale or garbage
+             * window could hold the CP for good). */
+            if ((val & ~((R_TRIG_VLINE_LINE_MASK << R_TRIG_VLINE_START_SHIFT)
+                         | (R_TRIG_VLINE_LINE_MASK << R_TRIG_VLINE_END_SHIFT)
+                         | R_TRIG_VLINE_INV | R_TRIG_VLINE_STALL)) != 0
+                || !(val & R_TRIG_VLINE_INV)
+                || ((val >> R_TRIG_VLINE_START_SHIFT) & R_TRIG_VLINE_LINE_MASK)
+                   >= ((val >> R_TRIG_VLINE_END_SHIFT) & R_TRIG_VLINE_LINE_MASK))
+                return Err(c, R2CE_VALUE, reg, val);
+            st->have |= (reg == R_CRTC_GUI_TRIG_VLINE) ? R2CHK_HAVE_VLINE1 : R2CHK_HAVE_VLINE2;
+            return R2CE_OK;
         case R_WAIT_UNTIL:
+            if (val & R_WAIT_CRTC_VLINE)
+            {
+                /* the vertical sync: alone, after its window */
+                if ((val & ~(R_WAIT_CRTC_VLINE | R_ENG_DISPLAY_CRTC2)) != 0
+                    || !(st->have & ((val & R_ENG_DISPLAY_CRTC2) ? R2CHK_HAVE_VLINE2 : R2CHK_HAVE_VLINE1)))
+                    return Err(c, R2CE_VALUE, reg, val);
+                st->have &= ~((val & R_ENG_DISPLAY_CRTC2) ? R2CHK_HAVE_VLINE2 : R2CHK_HAVE_VLINE1);
+                return R2CE_OK;
+            }
             if (val & ~(R_WAIT_2D_IDLE | R_WAIT_3D_IDLE | R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN))
-                return Err(c, R2CE_VALUE, reg, val);    /* no display waits */
+                return Err(c, R2CE_VALUE, reg, val);    /* no other display waits */
             return R2CE_OK;
         case R_PP_CNTL:
             st->pp_cntl = val;

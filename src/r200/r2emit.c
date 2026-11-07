@@ -31,6 +31,15 @@ LONG R2E_Reg(struct R2Cs *cs, ULONG reg, ULONG val)
     return R2_OK;
 }
 
+LONG R2E_WaitVline(struct R2Cs *cs, ULONG crtc, ULONG start, ULONG end)
+{
+    R2E_Reg(cs, crtc ? R_CRTC2_GUI_TRIG_VLINE : R_CRTC_GUI_TRIG_VLINE,
+            ((start & R_TRIG_VLINE_LINE_MASK) << R_TRIG_VLINE_START_SHIFT)
+            | ((end & R_TRIG_VLINE_LINE_MASK) << R_TRIG_VLINE_END_SHIFT)
+            | R_TRIG_VLINE_INV | R_TRIG_VLINE_STALL);
+    return R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_CRTC_VLINE | (crtc ? R_ENG_DISPLAY_CRTC2 : 0));
+}
+
 static LONG RegsPkt(struct R2Cs *cs, ULONG header, ULONG n, const ULONG *vals)
 {
     ULONG *p;

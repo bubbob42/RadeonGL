@@ -312,13 +312,26 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
 @{b}RadeonGLMove16@{ub}  (Vorgabe: aus)
     Nur mit 68060. 1 oder 2 kopiert die Daten jedes Bildes in 16-Byte-
     Bursts (MOVE16) in den Speicher der Karte: 1 leert vorher den
-    Datencache darüber, 2 nicht (beim 68060 genügt das). Nur für
-    Turbokarten und Brücken, die Bursts weiterreichen: auf dem
+    Datencache darÃ¼ber, 2 nicht (beim 68060 genÃ¼gt das). Nur fÃ¼r
+    Turbokarten und BrÃ¼cken, die Bursts weiterreichen: auf dem
     Testrechner (68060, Mediator) kommen sie als Einzelzugriffe an und
     bringen nichts. ACHTUNG: auf einer Karte, die keine Bursts kann
-    (etwa der BFG9060), kann der Rechner hängen bleiben. RadeonGL
+    (etwa der BFG9060), kann der Rechner hÃ¤ngen bleiben. RadeonGL
     probiert zuerst eine Zeile und bleibt aus, wenn sie falsch
-    zurückkommt; einen Hänger kann es nicht abfangen.
+    zurÃ¼ckkommt; einen HÃ¤nger kann es nicht abfangen.
+
+@{b}RadeonGLDisplayPriority@{ub}  (Vorgabe: nicht gesetzt)
+    high lÃ¤sst den Bildschirm den Speicher der Karte immer mit hoher
+    PrioritÃ¤t lesen, solange die Anzeige eines Programms offen ist:
+    gegen weiÃŸe Pixel und ein Bild, das bei groÃŸen Bildschirmmodi
+    schwarz wird, wÃ¤hrend die Radeon zeichnet (wie "DisplayPriority
+    HIGH" im radeon-Treiber von Linux). Eine Zahl von 0 bis 127 sagt
+    stattdessen, wie weit der Puffer des Bildschirms leerlaufen darf,
+    bevor er Vorrang bekommt (0 = immer). Nicht gesetzt bleibt die
+    Einstellung des Kartentreibers; sie kommt auch zurÃ¼ck, wenn das
+    Programm endet.
+
+        SetEnv SAVE RadeonGLDisplayPriority high
 @endnode
 
 @node Speed "Geschwindigkeit"

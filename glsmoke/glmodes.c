@@ -6,6 +6,8 @@
  *
  *   GLModes                   the list: id, size, depth, name
  *   GLModes ID=$50051000      the list, then FRAMES frames (60) in that mode
+ *   GLModes ID=... SYNC        the same with mglEnableSync(GL_TRUE): the
+ *                             frames take the refresh rate (2026-11-07)
  *   GLModes ID=... RESIZE=640x480,1280x720,...
  *                             after the first frames, each size in turn
  *                             (mglResizeContext), FRAMES frames each, and
@@ -27,7 +29,7 @@
 #include <proto/minigl.h>
 #include <stdlib.h>
 
-#define TEMPLATE "ID/K,FRAMES/N,RESIZE/K"
+#define TEMPLATE "ID/K,FRAMES/N,RESIZE/K,SYNC/S"
 
 const char ver[] = "$VER: GLModes 0.1 (06.11.2026)";
 struct IntuitionBase *IntuitionBase;
@@ -90,8 +92,10 @@ static BOOL Frames(LONG frames, GLint w, GLint h)
 int main(void)
 {
     struct RDArgs *rd;
-    LONG args[3];
+    LONG args[4];
     LONG frames;
+    struct DateStamp t0, t1;
+    LONG ticks;
     ULONG id;
     GLint w, h, w0, h0, ret;
     char *p;
@@ -100,7 +104,7 @@ int main(void)
 
     rc = RETURN_FAIL;
     opened = FALSE;
-    args[0] = args[1] = args[2] = 0;
+    args[0] = args[1] = args[2] = args[3] = 0;
     rd = ReadArgs((CONST_STRPTR) TEMPLATE, args, NULL);
     if (rd == NULL)
     {
@@ -137,7 +141,17 @@ int main(void)
     Printf("mglCreateContextFromID($%08lx): %ld x %ld\n", id, (LONG) w, (LONG) h);
     w0 = w;
     h0 = h;
+    if (args[3])
+        mglEnableSync(GL_TRUE);
+    DateStamp(&t0);
     go = Frames(frames, w, h);
+    DateStamp(&t1);
+    ticks = (t1.ds_Days - t0.ds_Days) * 24 * 60 * 60 * TICKS_PER_SECOND
+          + (t1.ds_Minute - t0.ds_Minute) * 60 * TICKS_PER_SECOND + (t1.ds_Tick - t0.ds_Tick);
+    Printf("%ld frames%s in %ld ticks: %ld.%ld frames a second\n", frames,
+           (LONG) (args[3] ? " with sync" : ""), ticks,
+           ticks > 0 ? frames * TICKS_PER_SECOND / ticks : 0L,
+           ticks > 0 ? (frames * TICKS_PER_SECOND * 10 / ticks) % 10 : 0L);
 
     /* RESIZE=WxH,WxH,...: each in turn, then back to the first size */
     p = (char *) args[2];
