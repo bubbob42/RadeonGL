@@ -626,8 +626,8 @@ void Light_Emit(struct Core *c)
     v[0] = LM_SPECULAR | LM_COMBINE | LM_LOCAL_GL | LM_BACK_SHINE_MAT1;
     if (c->enables & EN_LIGHTING)
         v[0] |= LM_LIGHTING;
-    if (c->lm_local)
-        v[0] |= LM_LOCAL_VIEWER;
+    if (c->lm_local || c->tg_sphere)
+        v[0] |= LM_LOCAL_VIEWER;    /* a sphere map needs it (Mesa r200UpdateLocalViewer) */
     if (c->enables & EN_NORMALIZE)
         v[0] |= LM_NORMALIZE;
     if (c->lm_twoside)
@@ -702,7 +702,7 @@ void Light_Matrices(struct Core *c)
 {
     float n[16];
 
-    if (!(c->enables & EN_LIGHTING) || c->mv[c->mv_top].ver == c->hw_mvl_ver)
+    if (!((c->enables & EN_LIGHTING) || c->tg_eyepos) || c->mv[c->mv_top].ver == c->hw_mvl_ver)
         return;
     R2E_Matrix(c->cs, R_VS_MATRIX_0_MV, c->mv[c->mv_top].m);
     NormalMatrix(n, c->mv[c->mv_top].m);

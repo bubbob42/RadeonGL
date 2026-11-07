@@ -161,7 +161,8 @@ struct CoreArray
 #define D_POINTSIZE 0x00020000UL
 #define D_VAP       0x00040000UL    /* SE_VAP_CNTL + SE_VTE_CNTL: back to TCL after a clear */
 #define D_LIGHT     0x00080000UL    /* TCL lighting: controls, lights, materials (light.c) */
-#define D_ALL       0x000fffffUL
+#define D_TEXGEN    0x00100000UL    /* TCL texgen and texture matrices (texgen.c) */
+#define D_ALL       0x001fffffUL
 
 /* Enables (struct Core.enables) */
 #define EN_ALPHA_TEST   0x0001UL
@@ -389,6 +390,18 @@ struct Core
     struct CoreLight light[CORE_LIGHTS];
     struct CoreMaterial mtl[2];     /* front, back */
     ULONG lit_first[12];            /* first[] of a lit vertex (up to 11 dwords) */
+
+    /* Texture coordinate generation and texture matrices (texgen.c,
+     * 2026-11-07): per unit, S and T */
+    ULONG tg_on[CORE_UNITS];        /* bit 0 S, bit 1 T: glEnable(GL_TEXTURE_GEN_S/T) */
+    ULONG tg_mode[CORE_UNITS][2];   /* GL_OBJECT_LINEAR, GL_EYE_LINEAR, GL_SPHERE_MAP */
+    float tg_obj[CORE_UNITS][2][4]; /* object planes */
+    float tg_eye[CORE_UNITS][2][4]; /* eye planes, in eye coordinates */
+    ULONG tg_sphere;                /* units with a sphere map (normals, local viewer) */
+    ULONG tg_eyepos;                /* units that need the eye position (modelview in the TCL) */
+    ULONG tcl_tex;                  /* units whose coordinates the TCL computes (COMP_SEL) */
+    ULONG hw_tg[5];                 /* TEX_PROC_CTL_2, _3, _0, _1, CYL_WRAP as last emitted */
+    float hw_tm[CORE_UNITS][16];    /* each unit's TCL matrix as last uploaded */
 };
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
@@ -548,6 +561,13 @@ void Core_Materialfv(struct Core *c, ULONG face, ULONG pname, const float *v, UL
 void Core_ColorMaterial(struct Core *c, ULONG face, ULONG mode);
 void Core_GetLightfv(struct Core *c, ULONG light, ULONG pname, float *v);
 void Core_GetMaterialfv(struct Core *c, ULONG face, ULONG pname, float *v);
+
+/* --- Texture coordinate generation (texgen.c) ----------------------------------- */
+
+void Core_TexGenfv(struct Core *c, ULONG coord, ULONG pname, const float *v, ULONG n);
+void Core_TexGeni(struct Core *c, ULONG coord, ULONG pname, ULONG param);
+void Core_TexGenEnable(struct Core *c, ULONG cap, ULONG on);     /* GL_TEXTURE_GEN_S/T, active unit */
+ULONG Core_TexGenEnabled(struct Core *c, ULONG cap);
 
 /* --- Textures (texture.c) ------------------------------------------------------- */
 

@@ -51,6 +51,9 @@ needs.
   `GL_NORMALIZE`; eight lights, directional, local and spot, with
   attenuation; normals from `glNormal` and `glNormalPointer`. While lighting
   is on, compiled vertex arrays go the immediate way.
+- **Texture coordinates from the TCL:** `glTexGen` with `GL_OBJECT_LINEAR`,
+  `GL_EYE_LINEAR` and `GL_SPHERE_MAP` (S and T, per unit), and texture
+  matrices (`glMatrixMode(GL_TEXTURE)`).
 - **Fragments:** blending, alpha test, depth test with every function,
   depth mask, polygon offset and `mglSetZOffset`, back-face culling,
   scissor, colour mask, flat and smooth shading, point size.
@@ -72,12 +75,11 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL implements 114 of the 205 functions of `minigl.library` 29.1:
+RadeonGL implements 116 of the 205 functions of `minigl.library` 29.1:
 everything GLQuake uses, and more. A missing function draws nothing and
 sets GL_INVALID_OPERATION; the library's log names every such call.
 
-- Fog, display lists, texture coordinate generation (`glTexGen`),
-  `glTexCoord4f`.
+- Fog, display lists, `glTexCoord4f`.
 - The texture environment `GL_BLEND` (drawn as `GL_MODULATE`) and
   `GL_DECAL` with an RGBA texture; 32-bit textures are stored with 16 bits.
 - Stencil and accumulation buffers, line and polygon stipple, logic

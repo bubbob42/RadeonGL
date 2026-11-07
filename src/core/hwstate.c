@@ -358,10 +358,10 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
      * update_texturematrix); MEASURED on the A4000D (Tri, 2026-11-02):
      * OUTPUT_COLOR_0 with lighting off draws uninitialised material
      * colours. */
-    compsel = R_OUTPUT_XYZW;
+    compsel = R_OUTPUT_XYZW | (c->tcl_tex << 16);   /* texgen, texture matrices (texgen.c) */
     /* lighting (light.c): a normal in every vertex, the colour lit by
-     * the TCL */
-    if (c->vnorm)
+     * the TCL -- a sphere map needs the normal but lights nothing */
+    if (c->enables & EN_LIGHTING)
         compsel |= R_OUTPUT_COLOR_0;
     R2E_VertexFormat(c->cs, R_VTX_Z0 | (c->vnorm ? R_VTX_N0 : 0) | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
                      fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT), fmt1,
@@ -443,6 +443,7 @@ static LONG ValidateOnce(struct Core *c)
         d = D_ALL;                  /* the defaults overwrote every block */
         Hw_Forget(c);
         Light_Reset(c);             /* the lighting controls as the defaults left them */
+        Texgen_Forget(c);           /* and the texgen registers */
     }
     units = Core_UnitsOn(c);
     if (d & D_VAP)
@@ -533,6 +534,8 @@ static LONG ValidateOnce(struct Core *c)
         Light_Matrices(c);          /* lighting on: MV and its inverse transpose */
     if (d & D_LIGHT)
         Light_Emit(c);
+    if ((d & D_TEXGEN) && Texgen_Update(c))
+        d |= D_VTXFMT;              /* COMP_SEL names the units the TCL computes */
     /* a frame dropped while this was written (a flush in one of the
      * emitters): it went with the frame, and the rebase asked for all */
     c->dirty = (c->rebase_gen == gen) ? (d & D_VTXFMT) : D_ALL;

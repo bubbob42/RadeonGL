@@ -90,6 +90,11 @@ void Core_Enable(struct Core *c, ULONG cap, ULONG on)
         }
         return;
     }
+    if (cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T)
+    {
+        Core_TexGenEnable(c, cap, on);  /* per unit, as GL_TEXTURE_2D (texgen.c) */
+        return;
+    }
     bit = Bit(cap);
     if (bit == 0)
     {
@@ -101,7 +106,7 @@ void Core_Enable(struct Core *c, ULONG cap, ULONG on)
     c->enables ^= bit;
     c->dirty |= Affects(bit);
     if (bit == EN_LIGHTING)
-        c->vnorm = on ? 1UL : 0UL;  /* vertices with normals from the next glBegin (vertex.c) */
+        Core_UpdateVnorm(c);        /* vertices with normals from the next glBegin (vertex.c) */
 }
 
 ULONG Core_IsEnabled(struct Core *c, ULONG cap)
@@ -110,6 +115,8 @@ ULONG Core_IsEnabled(struct Core *c, ULONG cap)
 
     if (cap == GL_TEXTURE_2D)
         return c->tex_enabled[c->active_unit];
+    if (cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T)
+        return Core_TexGenEnabled(c, cap);
     bit = Bit(cap);
     if (bit == 0)
     {

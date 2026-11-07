@@ -28,6 +28,7 @@
 #include <proto/Picasso96.h>
 #include <proto/minigl.h>
 #include <string.h>
+#include <math.h>
 
 #define TEMPLATE "DEPTH/K/N,VERBOSE/S"
 #define S 128                   /* the frame: S x S */
@@ -375,6 +376,144 @@ static void Cases(void)
     Want("lighting off: the vertex colour", S / 2, S / 2, 0.1f, 0.5f, 0.9f);
 }
 
+/* --- texgen and texture matrices (texgen.c) ---------------------------------------- */
+
+static void TexQuad(GLfloat x0, GLfloat x1)
+{
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, 0.0f, 0.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(x1, 0.0f, 0.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, (GLfloat) S, 0.0f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(x0, (GLfloat) S, 0.0f);
+    glEnd();
+}
+
+/* the 2 x 2 texture: red green / blue white, at the four quarters */
+static void Quarters(const char *what, float r0, float g0, float b0, float r1, float g1, float b1)
+{
+    char name[64];
+    int i;
+
+    for (i = 0; what[i] != 0 && i < 40; i++)
+        name[i] = what[i];
+    name[i] = 0;
+    strcat(name, ", top left");
+    Want(name, S / 4, S / 4, r0, g0, b0);
+    name[i] = 0;
+    strcat(name, ", top right");
+    Want(name, S * 3 / 4, S / 4, r1, g1, b1);
+}
+
+static void TexCases(void)
+{
+    static const UBYTE quads[2 * 2 * 3] = { 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255 };
+    UBYTE strip[8 * 3];
+    GLfloat p[4];
+    GLfloat a;
+    int k;
+
+    glDisable(GL_LIGHTING);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, (void *) quads);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    Ortho();
+
+    /* T1. object linear: s = x / S, t = y / S */
+    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    V4(p, 1.0f / S, 0, 0, 0);
+    glTexGenfv(GL_S, GL_OBJECT_PLANE, p);
+    V4(p, 0, 1.0f / S, 0, 0);
+    glTexGenfv(GL_T, GL_OBJECT_PLANE, p);
+    glEnable(GL_TEXTURE_GEN_S);
+    glEnable(GL_TEXTURE_GEN_T);
+    Begin(); TexQuad(0, (GLfloat) S); Show();
+    Quarters("texgen object linear", 1, 0, 0, 0, 1, 0);
+
+    /* T2. eye linear: the planes in eye space, the quad moved by the
+     * modelview -- the same quarters (object linear would shift by half) */
+    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
+    V4(p, 1.0f / S, 0, 0, 0);
+    glTexGenfv(GL_S, GL_EYE_PLANE, p);
+    V4(p, 0, 1.0f / S, 0, 0);
+    glTexGenfv(GL_T, GL_EYE_PLANE, p);
+    glTranslatef(S / 2.0f, 0.0f, 0.0f);
+    Begin(); TexQuad(-S / 2.0f, S / 2.0f); Show();
+    Quarters("texgen eye linear, quad moved", 1, 0, 0, 0, 1, 0);
+
+    /* T2b. the same move with object linear: s shifted by -0.5 (repeat) */
+    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    Begin(); TexQuad(-S / 2.0f, S / 2.0f); Show();
+    Quarters("texgen object linear, quad moved", 0, 1, 0, 1, 0, 0);
+    glLoadIdentity();
+    glDisable(GL_TEXTURE_GEN_S);
+    glDisable(GL_TEXTURE_GEN_T);
+
+    /* T3. no texgen: the coordinates as given ... */
+    Begin(); TexQuad(0, (GLfloat) S); Show();
+    Quarters("texture coordinates as given", 1, 0, 0, 0, 1, 0);
+    /* ... and through a texture matrix that halves s */
+    glMatrixMode(GL_TEXTURE);
+    glScalef(0.5f, 1.0f, 1.0f);
+    glMatrixMode(GL_MODELVIEW);
+    Begin(); TexQuad(0, (GLfloat) S); Show();
+    Quarters("texture matrix, s halved", 1, 0, 0, 1, 0, 0);
+    glMatrixMode(GL_TEXTURE);
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+
+    /* T4. a sphere map: an 8 x 1 strip, column k = (32 k, 255 - 32 k, 128);
+     * a small quad on the axis at z -5, its normal turned by a about y:
+     * s = sin(a) / 2 + 1/2 (GL's formula with the eye on the axis) */
+    for (k = 0; k < 8; k++)
+    {
+        strip[k * 3 + 0] = (UBYTE) (k * 32);
+        strip[k * 3 + 1] = (UBYTE) (255 - k * 32);
+        strip[k * 3 + 2] = 128;
+    }
+    glBindTexture(GL_TEXTURE_2D, 2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 8, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, (void *) strip);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glFrustum(-0.5, 0.5, -0.5, 0.5, 1.0, 20.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+    glEnable(GL_TEXTURE_GEN_S);
+    glEnable(GL_TEXTURE_GEN_T);
+    for (k = 0; k < 3; k++)
+    {
+        static const float deg[3] = { 10.0f, 45.0f, -45.0f };
+        static const int col[3] = { 4, 6, 1 };
+        static const char *const what[3] = { "sphere map, normal 10 degrees", "sphere map, normal 45 degrees",
+                                             "sphere map, normal -45 degrees" };
+
+        a = deg[k] * 3.14159265f / 180.0f;
+        Begin();
+        glBegin(GL_QUADS);
+        glNormal3f((GLfloat) sin(a), 0.0f, (GLfloat) cos(a));
+        glVertex3f(-0.1f, -0.1f, -5.0f);
+        glVertex3f(0.1f, -0.1f, -5.0f);
+        glVertex3f(0.1f, 0.1f, -5.0f);
+        glVertex3f(-0.1f, 0.1f, -5.0f);
+        glEnd();
+        Show();
+        Want(what[k], S / 2, S / 2, col[k] * 32 / 255.0f, (255 - col[k] * 32) / 255.0f, 128 / 255.0f);
+    }
+    glDisable(GL_TEXTURE_GEN_S);
+    glDisable(GL_TEXTURE_GEN_T);
+    glDisable(GL_TEXTURE_2D);
+    Ortho();
+}
+
 int main(void)
 {
     struct RDArgs *rd;
@@ -439,6 +578,7 @@ int main(void)
     }
     Printf("GLLight on a %ld-bit screen, frame %ld x %ld, tolerance %ld\n", depth, (LONG) S, (LONG) S, tol);
     Cases();
+    TexCases();
     mglDeleteContext();
     Printf("GLLight: %ld passed, %ld failed\n", passed, failed);
     rc = (failed != 0) ? RETURN_WARN : RETURN_OK;

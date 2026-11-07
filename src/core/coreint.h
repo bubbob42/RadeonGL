@@ -56,6 +56,15 @@ void  Light_Emit(struct Core *c);
  * needs them (hwstate.c's emit, with D_MATRIX). */
 void  Light_Matrices(struct Core *c);
 
+/* Texgen (texgen.c): GL's defaults; the registers as R2E_TclDefaults left
+ * them; the TCL's texgen state and matrices when D_TEXGEN asks (returns 1
+ * when the units the TCL computes changed: the vertex format follows). */
+void  Texgen_Defaults(struct Core *c);
+void  Texgen_Forget(struct Core *c);
+ULONG Texgen_Update(struct Core *c);
+/* c->vnorm from lighting and the sphere maps (texgen.c) */
+void  Core_UpdateVnorm(struct Core *c);
+
 /* RB3D_PLANEMASK for glColorMask's bits in a colour format (hwstate.c). */
 ULONG Core_PlaneMask(ULONG format, ULONG m);
 

@@ -1493,8 +1493,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
 
     /* lighting: the vertices carry normals, which the stream's packers and
      * the upload cache do not know -- the immediate way (light.c) */
-    if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP
-        || (c->enables & EN_LIGHTING))
+    if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP || c->vnorm)
         return 0;
     first = (ULONG) c->lock_first;
     lcount = (ULONG) c->lock_count;

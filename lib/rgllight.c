@@ -1,6 +1,6 @@
 /*
- * rgllight.c -- the lighting hooks (2026-11-07, src/core/light.c does the
- * work).
+ * rgllight.c -- the lighting and texgen hooks (2026-11-07,
+ * src/core/light.c and texgen.c do the work).
  *
  * A file of their own, linked after everything else (Makefile RGL_OBJS):
  * MEASURED 2026-11-07 on the A4000D, the same hooks at the end of rgl.c
@@ -106,4 +106,24 @@ void Hook_GLNormalPointer(GLcontext context, GLenum type, GLsizei stride, const 
     if ((c = Rgl_Core()) == NULL)
         return;
     Core_NormalPointer(c, type, stride, pointer);
+}
+
+void Hook_GLTexGeni(GLcontext context, GLenum coord, GLenum mode, GLenum map)
+{
+    struct Core *c;
+
+    (void) context;
+    if ((c = Rgl_Core()) == NULL)
+        return;
+    Core_TexGeni(c, coord, mode, map);
+}
+
+void Hook_GLTexGenfv(GLcontext context, GLenum coord, GLenum pname, const GLfloat *params)
+{
+    struct Core *c;
+
+    (void) context;
+    if ((c = Rgl_Core()) == NULL)
+        return;
+    Core_TexGenfv(c, coord, pname, params, 4);
 }

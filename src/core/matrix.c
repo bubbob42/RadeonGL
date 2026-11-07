@@ -159,7 +159,10 @@ struct CoreMat *Core_TopMatrix(struct Core *c, ULONG mode)
 static void Changed(struct Core *c)
 {
     if (c->matrix_mode == GL_TEXTURE)
+    {
+        c->dirty |= D_TEXGEN;       /* the TCL applies it (texgen.c) */
         return;
+    }
     c->dirty |= D_MATRIX;
     Core_TopMatrix(c, c->matrix_mode)->ver = ++c->mat_ver;
 }
@@ -294,6 +297,8 @@ void Core_PopMatrix(struct Core *c)
      * sent again (MEASURED: 32 uploads a frame, half of them repeats) */
     if (c->matrix_mode != GL_TEXTURE)
         c->dirty |= D_MATRIX;
+    else
+        c->dirty |= D_TEXGEN;
 }
 
 void Core_Translatef(struct Core *c, float x, float y, float z)

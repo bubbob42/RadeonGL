@@ -617,6 +617,79 @@ static void test_lighting(void)
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 }
 
+/* Texgen and texture matrices (texgen.c): the registers, the planes'
+ * matrix, COMP_SEL, normals for a sphere map, and back to pass-through. */
+static void test_texgen(void)
+{
+    struct R2ChkState st;
+    static const float splane[4] = { 0.5f, 0.0f, 0.0f, 0.25f };
+    static const float tplane[4] = { 0.0f, 2.0f, 0.0f, 0.0f };
+    UBYTE rgb[4 * 4 * 3];
+    ULONG hash[4];
+    ULONG i;
+
+    Fresh(1);
+    memset(rgb, 0x80, sizeof(rgb));
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 3, 4, 4, 0, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_TexGeni(&core, GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    Core_TexGeni(&core, GL_T, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
+    Core_TexGenfv(&core, GL_S, GL_OBJECT_PLANE, splane, 4);
+    Core_TexGenfv(&core, GL_T, GL_OBJECT_PLANE, tplane, 4);
+    Core_Enable(&core, GL_TEXTURE_GEN_S, 1);
+    Core_Enable(&core, GL_TEXTURE_GEN_T, 1);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(Core_IsEnabled(&core, GL_TEXTURE_GEN_S), 1);
+    Draw1();
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_2), 0x00fffffcUL);     /* unit 0: R, Q passed */
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_0), 0x101UL);          /* computed, through the matrix */
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_1), 0x00543218UL);     /* unit 0: the object position */
+    CHECK(LastReg(R_SE_TCL_OUTPUT_VTX_COMP_SEL) & R_OUTPUT_TEX_0);
+    CHECK(!(LastReg(R_SE_VTX_FMT_0) & R_VTX_N0));                 /* linear: no normals */
+    (void) DrawStates(hash, 4);
+    /* the matrix's rows are the planes: row 0 = S, row 1 = T */
+    CHECK(NearF(vecmem[0x8c * 4 + 0], 0.5f) && NearF(vecmem[0x8c * 4 + 3], 0.25f));
+    CHECK(NearF(vecmem[0x8c * 4 + 5], 2.0f) && NearF(vecmem[0x8c * 4 + 4], 0.0f));
+    CHECK(NearF(vecmem[0x8c * 4 + 10], 1.0f) && NearF(vecmem[0x8c * 4 + 15], 1.0f));
+
+    /* a sphere map: normals in the vertices, the local viewer, the sphere input */
+    Core_TexGeni(&core, GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+    Core_TexGeni(&core, GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+    Draw1();
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_1), 0x0054321dUL);
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_0), 0x1UL);            /* no matrix */
+    CHECK(LastReg(R_SE_VTX_FMT_0) & R_VTX_N0);
+    CHECK(!(LastReg(R_SE_TCL_OUTPUT_VTX_COMP_SEL) & R_OUTPUT_COLOR_0));    /* nothing lit */
+    CHECK(LastReg(R_SE_TCL_LIGHT_MODEL_CTL_0) & (1UL << 2));        /* LOCAL_VIEWER */
+
+    /* off: pass-through again, and a texture matrix alone */
+    Core_Enable(&core, GL_TEXTURE_GEN_S, 0);
+    Core_Enable(&core, GL_TEXTURE_GEN_T, 0);
+    Core_MatrixMode(&core, GL_TEXTURE);
+    Core_Scalef(&core, 0.5f, 1.0f, 1.0f);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Draw1();
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_1), 0x00543210UL);
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_0), 0x101UL);
+    CHECK(!(LastReg(R_SE_VTX_FMT_0) & R_VTX_N0));
+    (void) DrawStates(hash, 4);
+    CHECK(NearF(vecmem[0x8c * 4 + 0], 0.5f) && NearF(vecmem[0x8c * 4 + 5], 1.0f));
+    Core_MatrixMode(&core, GL_TEXTURE);
+    Core_LoadIdentity(&core);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Draw1();
+    CHECK_HEX(LastReg(R_SE_TCL_TEX_PROC_CTL_0), 0UL);
+    CHECK(!(LastReg(R_SE_TCL_OUTPUT_VTX_COMP_SEL) & R_OUTPUT_TEX_MASK));
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    i = 0;
+    (void) i;
+}
+
 /* --- Textures ------------------------------------------------------------------- */
 
 /* texel k of a level, as the GPU reads it */
@@ -3640,6 +3713,7 @@ int main(void)
     test_splits();
     test_triangle();
     test_lighting();
+    test_texgen();
     test_textures();
     test_state();
     test_state_max();
