@@ -108,8 +108,8 @@ void Core_Enable(struct Core *c, ULONG cap, ULONG on)
         return;
     c->enables ^= bit;
     c->dirty |= Affects(bit);
-    if (bit == EN_LIGHTING)
-        Core_UpdateVnorm(c);        /* vertices with normals from the next glBegin (vertex.c) */
+    if (bit & (EN_LIGHTING | EN_FOG))
+        Core_UpdateVnorm(c);        /* normals, and what lighting and fog add (Core_Extras) */
 }
 
 ULONG Core_IsEnabled(struct Core *c, ULONG cap)

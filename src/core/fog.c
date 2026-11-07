@@ -68,6 +68,7 @@ void Core_Fogfv(struct Core *c, ULONG pname, const float *v, ULONG n)
             }
             c->fog_mode = mode;
             c->fog_tcl = (mode == GL_LINEAR) ? (3UL << 8) : (mode == GL_EXP2) ? (2UL << 8) : (1UL << 8);
+            Core_Extras(c);
             c->dirty |= D_SECNTL;   /* the TCL's fog mode */
             break;
         case GL_FOG_DENSITY:
@@ -120,6 +121,7 @@ void Core_LineWidth(struct Core *c, float w)
         w = 64.0f;                  /* U6.4 */
     c->line_width = w;
     c->wide_line = (w > 1.0f) ? 1UL : 0UL;
+    Core_Extras(c);
     c->dirty |= D_FOG | D_SECNTL;
 }
 

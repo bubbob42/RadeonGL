@@ -282,6 +282,17 @@ struct Core
                              * vlimit is vbase for them, so every glVertex lands in
                              * Emit's slow branch (MEASURED 2026-11-07: checks on the
                              * shared path cost GLQuake ~1%) */
+    /* What lighting, fog, texgen and wide lines add to registers the hot
+     * paths build, worked out when that state changes (light.c
+     * Core_Extras), so the hot paths OR them in without a test */
+    ULONG x_vdw;            /* dwords a vertex grows by: 3 with a normal */
+    ULONG x_fmt0;           /* SE_VTX_FMT_0: the normal */
+    ULONG x_out0;           /* SE_TCL_OUTPUT_VTX_FMT_0: the specular colour (fog) */
+    ULONG x_compsel;        /* COMP_SEL: lit colour, fog colour, computed texture coordinates */
+    ULONG x_pp;             /* PP_CNTL: FOG_ENABLE */
+    ULONG x_ucp;            /* UCP_VERT_BLEND_CTL: the TCL's fog mode */
+    ULONG x_se;             /* SE_CNTL: WIDELINE_ENABLE */
+    ULONG x_eye;            /* the TCL needs the modelview (lighting, fog, eye texgen) */
     ULONG vtx_dw;           /* dwords a vertex */
     ULONG *vbase;           /* first vertex of the open packet */
     ULONG *vptr;            /* where the next vertex goes */

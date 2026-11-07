@@ -186,9 +186,7 @@ void Core_Begin(struct Core *c, ULONG mode)
     }
     units = Core_UnitsOn(c);
     c->units_on = units;
-    c->vtx_dw = 4 + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);
-    if (c->vnorm)
-        c->vtx_dw += 3;             /* lighting: the normal (light.c) */
+    c->vtx_dw = 4 + c->x_vdw + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);   /* x_vdw: a normal */
     c->prim = mode;
     c->hwprim = Vtx_HwPrim(mode);
     if (CORE_SCISSOR_EMPTY(c))

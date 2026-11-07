@@ -698,6 +698,41 @@ static void NormalMatrix(float *out, const float *m)
     }
 }
 
+void Core_Extras(struct Core *c)
+{
+    c->x_vdw = c->vnorm ? 3UL : 0UL;
+    c->x_fmt0 = c->vnorm ? R_VTX_N0 : 0;
+    c->x_compsel = c->tcl_tex << 16;
+    if (c->enables & EN_LIGHTING)
+        c->x_compsel |= R_OUTPUT_COLOR_0;
+    c->x_out0 = 0;
+    c->x_pp = 0;
+    c->x_ucp = 0;
+    if (c->enables & EN_FOG)
+    {
+        c->x_compsel |= R_OUTPUT_COLOR_1;           /* the fog factor (fog.c) */
+        c->x_out0 = R_VTX_FP_RGBA << (R_VTX_COLOR_0_SHIFT + 2);
+        c->x_pp = 0x00400000UL;                     /* FOG_ENABLE */
+        c->x_ucp = c->fog_tcl;
+    }
+    c->x_se = c->wide_line ? (1UL << 20) : 0;       /* WIDELINE_ENABLE */
+    c->x_eye = ((c->enables & (EN_LIGHTING | EN_FOG)) || c->tg_eyepos) ? 1UL : 0UL;
+}
+
+ULONG Hw_Rare(struct Core *c, ULONG d)
+{
+    if (d & D_LIGHT)
+        Light_Emit(c);
+    if ((d & D_TEXGEN) && Texgen_Update(c))
+    {
+        Core_Extras(c);
+        d |= D_VTXFMT;              /* COMP_SEL names the units the TCL computes */
+    }
+    if (d & D_FOG)
+        Fog_Emit(c);
+    return d;
+}
+
 void Light_Matrices(struct Core *c)
 {
     float n[16];

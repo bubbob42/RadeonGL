@@ -69,6 +69,11 @@ void  Fog_Forget(struct Core *c);
 void  Fog_Emit(struct Core *c);
 /* c->vnorm from lighting and the sphere maps (texgen.c) */
 void  Core_UpdateVnorm(struct Core *c);
+/* The x_ fields from lighting, fog, texgen, line width (light.c) */
+void  Core_Extras(struct Core *c);
+/* Validate's rare part: lighting, texgen, fog (light.c); d back, with
+ * D_VTXFMT when the units the TCL computes changed */
+ULONG Hw_Rare(struct Core *c, ULONG d);
 
 /* RB3D_PLANEMASK for glColorMask's bits in a colour format (hwstate.c). */
 ULONG Core_PlaneMask(ULONG format, ULONG m);

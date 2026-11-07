@@ -110,12 +110,13 @@ void Core_UpdateVnorm(struct Core *c)
         c->vnorm = v;
         c->dirty |= D_VTXFMT;
     }
+    Core_Extras(c);
 }
 
 static void Changed(struct Core *c)
 {
     Needs(c);
-    Core_UpdateVnorm(c);
+    Core_UpdateVnorm(c);            /* and Core_Extras: x_eye follows tg_eyepos */
     c->dirty |= D_TEXGEN | D_VTXFMT | D_MATRIX | D_LIGHT;
 }
 

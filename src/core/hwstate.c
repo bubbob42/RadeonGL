@@ -121,8 +121,7 @@ static ULONG SeCntl(struct Core *c)
     }
     if (c->enables & (EN_POLY_OFFSET | EN_ZOFFSET))
         v |= R_ZBIAS_ENABLE_TRI;
-    if (c->wide_line)
-        v |= 1UL << 20;             /* WIDELINE_ENABLE (fog.c) */
+    v |= c->x_se;                   /* WIDELINE_ENABLE (light.c Core_Extras) */
     return v;
 }
 
@@ -130,9 +129,7 @@ static ULONG UcpCtl(struct Core *c)
 {
     ULONG v;
 
-    v = R_UCP_IN_CLIP_SPACE;
-    if (c->enables & EN_FOG)
-        v |= c->fog_tcl;            /* the TCL's fog mode (fog.c) */
+    v = R_UCP_IN_CLIP_SPACE | c->x_ucp;     /* the TCL's fog mode (Core_Extras) */
     if (c->front_face == GL_CCW)
         v |= R_CULL_FRONT_IS_CCW;
     if (c->enables & EN_CULL_FACE)
@@ -343,9 +340,7 @@ static ULONG PpCntl(struct Core *c, ULONG units)
             v |= (R_TEX_0_ENABLE << u) | (R_TEX_BLEND_0_ENABLE << u);
     if (c->enables & EN_ALPHA_TEST)
         v |= R_ALPHA_TEST_ENABLE;
-    if (c->enables & EN_FOG)
-        v |= 0x00400000UL;          /* FOG_ENABLE (fog.c) */
-    return v;
+    return v | c->x_pp;             /* FOG_ENABLE (Core_Extras) */
 }
 
 void Hw_VertexFormat(struct Core *c, ULONG units)
@@ -364,17 +359,11 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
      * update_texturematrix); MEASURED on the A4000D (Tri, 2026-11-02):
      * OUTPUT_COLOR_0 with lighting off draws uninitialised material
      * colours. */
-    compsel = R_OUTPUT_XYZW | (c->tcl_tex << 16);   /* texgen, texture matrices (texgen.c) */
-    /* lighting (light.c): a normal in every vertex, the colour lit by
-     * the TCL -- a sphere map needs the normal but lights nothing */
-    if (c->enables & EN_LIGHTING)
-        compsel |= R_OUTPUT_COLOR_0;
-    /* fog (fog.c): the TCL's factor in the specular colour's alpha */
-    if (c->enables & EN_FOG)
-        compsel |= R_OUTPUT_COLOR_1;
-    R2E_VertexFormat(c->cs, R_VTX_Z0 | (c->vnorm ? R_VTX_N0 : 0) | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
-                     fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT)
-                     | ((c->enables & EN_FOG) ? (R_VTX_FP_RGBA << (R_VTX_COLOR_0_SHIFT + 2)) : 0),
+    /* lighting, fog, texgen (light.c Core_Extras): the normal, the lit
+     * colour, the fog factor's colour, computed texture coordinates */
+    compsel = R_OUTPUT_XYZW | c->x_compsel;
+    R2E_VertexFormat(c->cs, R_VTX_Z0 | c->x_fmt0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
+                     fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT) | c->x_out0,
                      fmt1, compsel);
     c->hw_units = units;
     c->dirty &= ~D_VTXFMT;
@@ -541,14 +530,10 @@ static LONG ValidateOnce(struct Core *c)
         c->hw_mv_ver = c->mv[c->mv_top].ver;
         c->hw_proj_ver = c->proj[c->proj_top].ver;
     }
-    if (d & D_MATRIX)
-        Light_Matrices(c);          /* lighting on: MV and its inverse transpose */
-    if (d & D_LIGHT)
-        Light_Emit(c);
-    if ((d & D_TEXGEN) && Texgen_Update(c))
-        d |= D_VTXFMT;              /* COMP_SEL names the units the TCL computes */
-    if (d & D_FOG)
-        Fog_Emit(c);
+    if ((d & D_MATRIX) && c->x_eye)
+        Light_Matrices(c);          /* lighting, fog, eye texgen: MV and its inverse transpose */
+    if (d & (D_LIGHT | D_TEXGEN | D_FOG))
+        d = Hw_Rare(c, d);          /* light.c */
     /* a frame dropped while this was written (a flush in one of the
      * emitters): it went with the frame, and the rebase asked for all */
     c->dirty = (c->rebase_gen == gen) ? (d & D_VTXFMT) : D_ALL;
