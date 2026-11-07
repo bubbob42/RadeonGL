@@ -251,9 +251,23 @@ Größe:
       Picasso96Mode für die Radeon an: GLQuake verwendet 320 x 240 oder
       640 x 480, wenn nichts anderes verlangt wird, Test 640 x 480.
     * Der größte Bildschirm ist 2048 x 2048.
+    * Ein Programm, das die Modi auflistet (GLQuakes Video Options),
+      bekommt jeden Modus der Radeon-Karte und kann im Betrieb in eine
+      andere Größe wechseln. Passt eine nicht in den Kartenspeicher,
+      erfährt das Programm den Grund.
+    * Mit vertikaler Synchronisation (GLQuake: von Haus aus an) kommt
+      jedes Bild auf den Bildschirm, während der Strahl außerhalb ist:
+      kein Zerreißen beim Drehen.
 
 Sie können zur Workbench und zurück wechseln, während ein Programm
-zeichnet: Die Workbench und die anderen Programme laufen weiter.
+zeichnet: Die Workbench und die anderen Programme laufen weiter. Solange
+der GL-Bildschirm hinter einem anderen liegt, zeichnet RadeonGL nichts;
+das Programm läuft weiter.
+
+Über DVI zeigten Modi mit einem Pixeltakt über etwa 110 MHz (1680 x 1050
+und größer bei 60 Hz) auf dem Testrechner Punkte oder setzten aus,
+während die Radeon zeichnete. Timings mit reduzierter Austastung im
+Einsteller Picasso96Mode senken den Takt.
 @endnode
 
 @node Settings "Einstellungen"
@@ -342,16 +356,20 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
 @{b}Geschwindigkeit@{ub}
 
 GLQuake for R200 68k, die RadeonGL-Ausgabe von GLQuake für die
-minigl.library (1.0, ein eigenes Archiv): seine Timedemos (alle Bilder,
+minigl.library (1.2, ein eigenes Archiv): seine Timedemos (alle Bilder,
 ohne Ton) auf dem Testrechner (A4000D, 68060 bei 50 MHz auf einer
 CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6),
-RadeonGL 0.7 mit ausgeschalteter Prüfung (RadeonGLCheck=0, wie es das
-Startskript von GLQuake setzt), Bilder pro Sekunde:
+RadeonGL 0.8 mit ausgeschalteter Prüfung (RadeonGLCheck=0, wie es das
+Startfenster von GLQuake setzt) und ohne vertikale Synchronisation,
+Bilder pro Sekunde:
 
     Demo   320 x 240   640 x 480   1280 x 720
-    demo1       29,4        28,7         28,0
-    demo2       25,1           -         21,1
-    demo3       25,6           -         24,0
+    demo1       33,5        32,5         32,9
+    demo2       30,6           -         26,0
+    demo3       28,9           -         27,5
+
+Die vertikale Synchronisation (in GLQuake von Haus aus an) lässt jedes
+Bild auf den Strahl warten: etwa 2% beim Spielen bei 800 x 600.
 
 Dasselbe mit der Aminet-Quelle, für den 68060 übersetzt, auf RadeonGL
 0.6: demo1 24,4 / 23,7 / 23,3, demo2 21,7 / - / 17,9, demo3 21,4 / - /
@@ -471,7 +489,7 @@ Für gar kein Protokoll:
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL setzt 100 der 205 Funktionen der minigl.library 29.1 um: alles,
+RadeonGL setzt 102 der 205 Funktionen der minigl.library 29.1 um: alles,
 was GLQuake verwendet, und mehr. Ein Programm, das eine der anderen
 aufruft, bekommt dafür nur den Fehler GL_INVALID_OPERATION; die
 @{" Protokolldatei " link Log} nennt solche Aufrufe.
@@ -593,6 +611,25 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.8 (7.11.2026)
+    * jeder Bildschirmmodus der Karte: Picasso96s eigene Liste endet nach
+      256 Modi, und 1680 x 1050 bis 1920 x 1440 fehlten
+    * Programme wechseln den Bildschirmmodus im Betrieb
+      (mglResizeContext), öffnen einen Kontext in einem gewählten Modus
+      (mglCreateContextFromID) und erfahren, warum ein Modus abgelehnt
+      wurde (GL_RGL_resize_error)
+    * vertikale Synchronisation (mglEnableSync): kein Zerreißen
+    * keine Spalten eines alten Bildes mehr bei 800 x 600, 1680 x 1050 und
+      anderen Breiten, die kein Vielfaches von 64 sind (der Tiefenpuffer
+      in ganzen Kacheln)
+    * ein GL-Bildschirm hinter einem anderen wird nicht gezeichnet
+    * der Upload-Cache arbeitet weiter, wenn er voll ist: GLQuake demo1
+      +3%
+    * RadeonGLMove16 (MOVE16-Bursts, Vorgabe aus) und
+      RadeonGLDisplayPriority
+    * das Install-Piktogramm ist das Installer-Piktogramm von AmigaOS 3.2
+      von Martin "Mason" Merz
 
 0.7 (6.11.2026)
     * der Mauszeiger verschwindet auf dem GL-Bildschirm, wenn ein Programm

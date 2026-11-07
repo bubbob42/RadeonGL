@@ -2,7 +2,8 @@
 ; as DEV:Release/GLQuakeR200 by RadeonGL-GLQuake's tools/make_release.sh
 ; --stage), unattended at NOVICE, twice:
 ;   A: a fresh Quake drawer holding a decoy GLQuake (not this edition): it
-;      must be kept as GLQuake.old; GLQuake, GLQuake040, PlayQuake(.info),
+;      must be kept as GLQuake.old; GLQuake040 (only the build for this
+;      processor, since 1.2), QuakeLauncher(.info), PlayQuake(.info),
 ;      GLQuakeR200.ReadMe(.info) installed; no id1: the closing page says so.
 ;   B: again: this edition's GLQuake is there now: nothing renamed, no
 ;      GLQuake.old1, the .old is still the decoy.

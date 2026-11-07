@@ -50,7 +50,9 @@ FEATURES
     MODULATE, REPLACE, DECAL (RGB), ADD
   * Blending, alpha test, depth test, polygon offset, culling, scissor,
     colour mask, flat and smooth shading, point size
-  * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048
+  * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048, in
+    every mode of the card, switched while the program runs; vertical
+    sync
   * Every command list checked before the Radeon runs it (can be turned
     off for speed); one Picasso96 lock a frame
   * Installer, manuals in English and German, a card test, a card report
@@ -59,7 +61,7 @@ FEATURES
 
 NOT IMPLEMENTED YET
 
-100 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
+102 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
 and more. A missing one sets GL_INVALID_OPERATION; the log names it.
 
   * Lighting and materials, fog, display lists, texture coordinate
@@ -77,15 +79,15 @@ and more. A missing one sets GL_INVALID_OPERATION; the log names it.
 GLQUAKE BENCHMARKS
 
 GLQuake for R200 68k (game/shoot/GLQuakeR200, the RadeonGL edition of
-GLQuake for minigl.library, 1.0), its timedemos on the test machine
+GLQuake for minigl.library, 1.2), its timedemos on the test machine
 (A4000D, 68060 at 50 MHz on a CyberStorm MK II, Mediator, Radeon 9200,
-AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.7, command check off
-(RadeonGLCheck=0), frames a second:
+AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.8, command check off
+(RadeonGLCheck=0), vertical sync off, frames a second:
 
     Demo   320 x 240   640 x 480   1280 x 720
-    demo1       29.4        28.7         28.0
-    demo2       25.1           -         21.1
-    demo3       25.6           -         24.0
+    demo1       33.5        32.5         32.9
+    demo2       30.6           -         26.0
+    demo3       28.9           -         27.5
 
 The Aminet source built for the 68060, on RadeonGL 0.6: demo1 24.4 /
 23.7 / 23.3, demo2 21.7 / - / 17.9, demo3 21.4 / - / 19.9. With the
@@ -137,6 +139,10 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.8 (7.11.2026)
+  - every screen mode, live mode switches, vertical sync, no stale
+    columns at widths not a multiple of 64
 
 0.7 (6.11.2026)
   - static arrays and index lists (own extension), 2 MB upload cache,

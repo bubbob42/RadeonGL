@@ -235,9 +235,21 @@ of its own on the Radeon, in the size it asks for:
       preferences, for the Radeon board: GLQuake uses 320 x 240 or
       640 x 480 unless told otherwise, Test 640 x 480.
     * The largest screen is 2048 x 2048.
+    * A program that lists the modes (GLQuake's Video Options) gets every
+      mode of the Radeon board, and can switch to another size while it
+      runs. If one does not fit in the card's memory, the program is told
+      why.
+    * With vertical sync on (GLQuake: on by default) each picture goes to
+      the screen while the beam is outside it: no tearing when turning.
 
 You can switch to the Workbench and back while a program draws: the
-Workbench and the other programs keep running.
+Workbench and the other programs keep running. While the GL screen is
+behind another one, RadeonGL draws nothing; the program goes on.
+
+Over DVI, modes with a pixel clock above about 110 MHz (1680 x 1050 and
+larger at 60 Hz) showed dots or dropped out on the test machine while the
+Radeon drew. Reduced-blanking timings in the Picasso96Mode preferences
+lower the clock.
 @endnode
 
 @node Settings "Settings"
@@ -320,16 +332,19 @@ that is not set means the default.
 @{b}Speed@{ub}
 
 GLQuake for R200 68k, the RadeonGL edition of GLQuake for
-minigl.library (1.0, a separate archive): its timedemos (all frames, no
+minigl.library (1.2, a separate archive): its timedemos (all frames, no
 sound) on the test machine (A4000D, 68060 at 50 MHz on a CyberStorm MK
-II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.7
-with the command check off (RadeonGLCheck=0, as GLQuake's start script
-sets it), frames a second:
+II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.8
+with the command check off (RadeonGLCheck=0, as GLQuake's start window
+sets it) and vertical sync off, frames a second:
 
     Demo   320 x 240   640 x 480   1280 x 720
-    demo1       29.4        28.7         28.0
-    demo2       25.1           -         21.1
-    demo3       25.6           -         24.0
+    demo1       33.5        32.5         32.9
+    demo2       30.6           -         26.0
+    demo3       28.9           -         27.5
+
+Vertical sync (on in GLQuake by default) makes a frame wait for the
+beam: about 2% in play at 800 x 600.
 
 The same with the Aminet source built for the 68060, on RadeonGL 0.6:
 demo1 24.4 / 23.7 / 23.3, demo2 21.7 / - / 17.9, demo3 21.4 / - / 19.9.
@@ -441,7 +456,7 @@ To have no log at all:
 
 @{b}Not implemented yet@{ub}
 
-RadeonGL implements 100 of the 205 functions of minigl.library 29.1:
+RadeonGL implements 102 of the 205 functions of minigl.library 29.1:
 everything GLQuake uses, and more. A program calling one of the others
 gets nothing for it but the error GL_INVALID_OPERATION; the
 @{" log file " link Log} names such calls.
@@ -559,6 +574,24 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.8 (7.11.2026)
+    * every screen mode of the card: Picasso96's own list stops at 256
+      modes, and 1680 x 1050 to 1920 x 1440 were missing
+    * programs switch the screen mode while they run
+      (mglResizeContext), open a context in a chosen mode
+      (mglCreateContextFromID), and hear why a mode was refused
+      (GL_RGL_resize_error)
+    * vertical sync (mglEnableSync): no tearing
+    * no more columns of an old picture at 800 x 600, 1680 x 1050 and
+      other widths that are not a multiple of 64 (the depth buffer in
+      whole tiles)
+    * a GL screen behind another screen is not drawn
+    * the upload cache keeps working once full: GLQuake demo1 +3%
+    * RadeonGLMove16 (MOVE16 bursts, off by default) and
+      RadeonGLDisplayPriority
+    * the Install icon is AmigaOS 3.2's installer icon by Martin "Mason"
+      Merz
 
 0.7 (6.11.2026)
     * the mouse pointer is hidden on the GL screen when a program asks

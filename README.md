@@ -50,7 +50,10 @@ needs.
   depth mask, polygon offset and `mglSetZOffset`, back-face culling,
   scissor, colour mask, flat and smooth shading, point size.
 - **MiniGL 29.1 contexts:** a Picasso96 screen of its own, 16 or 32 bit, up
-  to 2048 x 2048, double buffered, with MiniGL's lock modes.
+  to 2048 x 2048, double buffered, with MiniGL's lock modes; every mode of the
+  card (`mglGetSupportedScreenModes`), a context in a chosen mode, the size
+  switched while the program runs (`mglResizeContext`), vertical sync
+  (`mglEnableSync`).
 - **Safety:** every command list is checked before the Radeon runs it
   (`RadeonGLCheck=0` turns it off for speed).
 - **The package:** an Installer, manuals in English and German, a card test,
@@ -58,7 +61,7 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL implements 100 of the 205 functions of `minigl.library` 29.1:
+RadeonGL implements 102 of the 205 functions of `minigl.library` 29.1:
 everything GLQuake uses, and more. A missing function draws nothing and
 sets GL_INVALID_OPERATION; the library's log names every such call.
 
@@ -82,23 +85,25 @@ sets GL_INVALID_OPERATION; the library's log names every such call.
 ## GLQuake benchmarks
 
 [GLQuake for R200 68k](https://github.com/bubbob42/RadeonGL-GLQuake), the
-RadeonGL edition of GLQuake for `minigl.library` (1.0, a separate project
-and archive, [release](https://github.com/bubbob42/RadeonGL-GLQuake/releases/tag/v1.0)): its timedemos (all
+RadeonGL edition of GLQuake for `minigl.library` (1.2, a separate project
+and archive, [release](https://github.com/bubbob42/RadeonGL-GLQuake/releases/tag/v1.2)): its timedemos (all
 frames, no sound) on the test machine, an A4000D with a 68060 at 50 MHz on
 a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6,
-RadeonGL 0.7 with its command check off (`RadeonGLCheck=0`, as GLQuake's
-start script sets it). Frames a second:
+RadeonGL 0.8 with its command check off (`RadeonGLCheck=0`, as GLQuake's
+start window sets it) and vertical sync off. Frames a second:
 
 | Demo | 320 x 240 | 640 x 480 | 1280 x 720 |
 |---|---:|---:|---:|
-| demo1 | 29.4 | 28.7 | 28.0 |
-| demo2 | 25.1 | | 21.1 |
-| demo3 | 25.6 | | 24.0 |
+| demo1 | 33.5 | 32.5 | 32.9 |
+| demo2 | 30.6 | | 26.0 |
+| demo3 | 28.9 | | 27.5 |
 
 - The same timedemos with the Aminet source (built for the 68060) on
   RadeonGL 0.6: demo1 24.4 / 23.7 / 23.3, demo2 21.7 / - / 17.9,
-  demo3 21.4 / - / 19.9 -- the edition and 0.7 are 16 to 21% faster. The
-  Aminet binary itself is a 68020 build and slower still on a 68060.
+  demo3 21.4 / - / 19.9 -- the edition 1.2 and 0.8 are 35 to 45% faster.
+  The Aminet binary itself is a 68020 build and slower still on a 68060.
+- Vertical sync (on in GLQuake by default) makes a frame wait for the
+  beam: about 2% in play at 800 x 600.
 - **With the command check on** (RadeonGL as installed) every command
   list is checked first: in 0.4 that took demo1 at 320 x 240 from 24.4
   to 19.1 fps.
