@@ -2,6 +2,8 @@
  * core.c -- life cycle and errors of the GL core; see core.h.
  */
 
+#include <stddef.h>
+
 #include "core.h"
 #include "coreint.h"
 #include "r200reg.h"
@@ -122,9 +124,10 @@ void Core_Free(struct Core *c)
         c->env.free(c->env.env, c->tex, CORE_MAX_TEX * sizeof(struct CoreTex *));
         c->tex = NULL;
     }
-    if (c->ushadow != NULL)
+    if (c->ushadow_mem != NULL)
     {
-        c->env.free(c->env.env, c->ushadow, c->ucache_size);
+        c->env.free(c->env.env, c->ushadow_mem, c->ucache_size + 16);
+        c->ushadow_mem = NULL;
         c->ushadow = NULL;
     }
     c->ucache_on = 0;
@@ -163,8 +166,16 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
             c->ucache_on = 1;
         else
         {
+            /* 16-byte aligned, as the video-RAM region (32): the copy at
+             * the flush can then send whole lines as MOVE16 bursts (card.c,
+             * RadeonGLMove16) */
             if (c->ushadow == NULL)
-                c->ushadow = (ULONG *) c->env.alloc(c->env.env, c->ucache_size);
+            {
+                c->ushadow_mem = c->env.alloc(c->env.env, c->ucache_size + 16);
+                if (c->ushadow_mem != NULL)
+                    c->ushadow = (ULONG *) ((UBYTE *) c->ushadow_mem
+                                 + ((16UL - ((ULONG) ((size_t) (const void *) c->ushadow_mem & 15))) & 15UL));
+            }
             if (c->ushadow != NULL)
             {
                 c->ucache_on = 1;

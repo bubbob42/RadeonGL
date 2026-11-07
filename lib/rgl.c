@@ -325,6 +325,16 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
     }
     else
         Put(f, "overlap: off (RadeonGLOverlap=0)\n");
+    if (k->m16_failed != 0)
+        Put(f, k->m16_failed == 1 ? "move16: OFF -- its self-test read back a different line (RadeonGLMove16 ignored)\n"
+                                  : "move16: OFF -- no room in the heap for its self-test\n");
+    if (k->move16 != 0)
+    {
+        Put(f, k->move16 == 1 ? "move16: on (the source pushed out of the data cache first); dwords as lines: "
+                              : "move16: on (no cache push); dwords as lines: ");
+        PutU(f, k->m16_lines);
+        Put(f, ", as longwords: "); PutU(f, k->m16_plain); Put(f, "\n");
+    }
     if (Card_ScreensLeft != 0)
     {
         Put(f, "GL screens left open by a window on them (since the library loaded): ");
@@ -787,6 +797,14 @@ static void *CreateContext(int w, int h, ULONG modeid)
     if (r->real)
         r->rad.overlap = (GetVar((STRPTR) "RadeonGLOverlap", (STRPTR) flag, sizeof(flag), 0) > 0
                           && flag[0] == '0') ? 0UL : 1UL;
+    /* 2026-11-07, RadeonGLMove16=1 (with a data-cache push) or 2 (without):
+     * the flush's copies into video RAM as MOVE16 line bursts -- a 68060
+     * only, off unless set; a HARDWARE RISK until Move16Bench has shown the
+     * bus takes bursts (card.h) */
+    if (r->real && (SysBase->AttnFlags & AFF_68060)
+        && GetVar((STRPTR) "RadeonGLMove16", (STRPTR) flag, sizeof(flag), 0) > 0
+        && (flag[0] == '1' || flag[0] == '2'))
+        r->rad.move16 = (ULONG) (flag[0] - '0');
     if (r->real)
         Card_Target(&r->rad, &t);
     else

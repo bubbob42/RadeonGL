@@ -499,6 +499,104 @@ static void Drop(struct Card *k)
     k->dropped++;
 }
 
+/* --- copies into video RAM -------------------------------------------------------------- */
+
+/* 2026-11-07: MOVE16 (docs/library-asm-research.md, src/probe/move16bench.c).
+ * The 060 build with GCC only: the 68030 build has no MOVE16, SAS/C no
+ * inline assembler, and both keep the longword loop. */
+#if defined(__GNUC__) && defined(__mc68060__)
+#define CARD_MOVE16 1
+
+/* lines 16-byte lines from src to dst, both 16-byte aligned, lines > 0 */
+static void Move16Lines(volatile ULONG *dst, const ULONG *src, ULONG lines)
+{
+    __asm__ __volatile__ (
+        "1:\tmove16 %0@+,%1@+\n\t"
+        "subql #1,%2\n\t"
+        "bnes 1b"
+        : "+a" (src), "+a" (dst), "+d" (lines)
+        :
+        : "memory", "cc");
+}
+#endif
+
+#ifdef CARD_MOVE16
+/* The fallback for a bus that takes MOVE16 but garbles it (2026-11-07: which
+ * accelerators burst is barely documented -- the CyberStorm MK I and the
+ * A4000T's SCSI do, the BFG9060 does not): once, at the first flush with
+ * move16 on and inside its lock, one line into a 16-byte block of the heap
+ * of its own, read back. A different line turns move16 off for the
+ * context. A bus that HANGS on a burst cannot be caught here: that is why
+ * move16 is off unless RadeonGLMove16 is set. TRUE when the line came back. */
+static BOOL Move16SelfTest(struct Card *k)
+{
+    ULONG buf[8];
+    ULONG *src;
+    volatile ULONG *dst;
+    ULONG off;
+    ULONG i;
+    BOOL ok;
+
+    off = Heap_Alloc(k->core, 16, 16);
+    if (off == 0xffffffffUL)
+    {
+        k->m16_failed = 2;
+        return FALSE;
+    }
+    src = (ULONG *) (((ULONG) buf + 15UL) & ~15UL);
+    for (i = 0; i < 4; i++)
+        src[i] = 0x52474c30UL + i * 0x01010101UL;
+    CacheClearE(src, 16, CACRF_ClearD);
+    dst = (volatile ULONG *) (HeapCpu(k) + off);
+    Move16Lines(dst, src, 1);
+    ok = TRUE;
+    for (i = 0; i < 4; i++)
+        if (dst[i] != src[i])
+            ok = FALSE;
+    if (!ok)
+        k->m16_failed = 1;
+    return ok;
+}
+#endif
+
+/* n dwords from fast RAM into video RAM (inside the lock): longword stores;
+ * with RadeonGLMove16 the whole 16-byte lines between as MOVE16 bursts,
+ * when source and destination share their place in a line (the upload
+ * cache's mirror and the staged stream do, their bases aligned; the ring
+ * position is anywhere) */
+static void ToVram(struct Card *k, volatile ULONG *dst, const ULONG *src, ULONG n)
+{
+#ifdef CARD_MOVE16
+    ULONG lines;
+
+    if (k->move16 != 0 && n >= 8 && (((ULONG) dst ^ (ULONG) src) & 15UL) == 0)
+    {
+        while (((ULONG) dst & 15UL) != 0)
+        {
+            *dst++ = *src++;
+            n--;
+            k->m16_plain++;
+        }
+        lines = n >> 2;
+        if (k->move16 == 1)
+            CacheClearE((APTR) src, lines * 16, CACRF_ClearD);
+        Move16Lines(dst, src, lines);
+        dst += lines * 4;
+        src += lines * 4;
+        n &= 3;
+        k->m16_lines += lines * 4;
+    }
+    k->m16_plain += n;
+#else
+    (void) k;
+#endif
+    while (n != 0)
+    {
+        *dst++ = *src++;
+        n--;
+    }
+}
+
 /* The commands into the ring, in chunks that end at packet boundaries (the
  * ring's wrap filler must never land inside a packet), and never between
  * a DRAW_INDX_2 and its INDX_BUFFER: a kick's NOP padding would land
@@ -511,7 +609,6 @@ static LONG CopyCommands(struct Card *k, ULONG n)
     ULONG len;
     ULONG *p;
     const ULONG *src;
-    ULONG j;
     ULONG last;
 
     i = 0;
@@ -544,8 +641,7 @@ static LONG CopyCommands(struct Card *k, ULONG n)
         /* the source in a local: through k the compiler reloaded it for
          * every dword (MEASURED in the A4000D's profile) */
         src = k->cmd + i;
-        for (j = 0; j < c; j++)
-            p[j] = src[j];
+        ToVram(k, p, src, c);
         k->ring.cs.ptr = p + c;
         i += c;
     }
@@ -560,7 +656,6 @@ static void CopyUCache(struct Card *k)
     volatile ULONG *dst;
     const ULONG *src;
     ULONG r;
-    ULONG i;
     ULONG off;
     ULONG len;
 
@@ -571,8 +666,7 @@ static void CopyUCache(struct Card *k)
         len = c->udirty_all ? c->ucache_size : c->udirty_len[r];
         dst = (volatile ULONG *) (HeapCpu(k) + c->ucache_off + off);
         src = c->ushadow + off / 4;
-        for (i = len / 4; i > 0; i--)
-            *dst++ = *src++;
+        ToVram(k, dst, src, len / 4);
     }
     Core_UCacheCopied(c);
 }
@@ -856,6 +950,15 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     }
     k->ring.kick = 2048;
 
+#ifdef CARD_MOVE16
+    if (k->move16 != 0 && !k->m16_checked)
+    {
+        k->m16_checked = 1;
+        if (!Move16SelfTest(k))
+            k->move16 = 0;      /* the fallback: longword stores (card.h) */
+    }
+#endif
+
     WHERE(6, k->core->stream_pos);
     /* 6. the stream's new part into video RAM, then the commands */
     if (k->core->stream_gen != k->gen)
@@ -869,8 +972,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
          * between) they were reloaded for every dword */
         dst = (volatile ULONG *) (HeapCpu(k) + k->core->stream_off + k->copied);
         src = k->staging + k->copied / 4;
-        for (i = (k->core->stream_pos - k->copied) / 4; i > 0; i--)
-            *dst++ = *src++;
+        ToVram(k, dst, src, (k->core->stream_pos - k->copied) / 4);
         k->copied = k->core->stream_pos;
     }
     /* the upload cache's new entries, from its mirror */
@@ -1491,8 +1593,11 @@ ULONG Card_Open(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modeid, ULO
     size = k->heap_size;
 
     /* buffers in fast RAM */
-    k->cmd = (ULONG *) AllocVec(CARD_CMD_DW * 4, MEMF_ANY);
-    k->staging = (ULONG *) AllocVec(CORE_STREAM_BYTES, MEMF_ANY | MEMF_CLEAR);
+    /* 16-byte aligned (MOVE16 lines; AllocVec gives 4 past 8) */
+    k->cmd_mem = AllocVec(CARD_CMD_DW * 4 + 16, MEMF_ANY);
+    k->staging_mem = AllocVec(CORE_STREAM_BYTES + 16, MEMF_ANY | MEMF_CLEAR);
+    k->cmd = (k->cmd_mem != NULL) ? (ULONG *) (((ULONG) k->cmd_mem + 15UL) & ~15UL) : NULL;
+    k->staging = (k->staging_mem != NULL) ? (ULONG *) (((ULONG) k->staging_mem + 15UL) & ~15UL) : NULL;
     if (k->cmd == NULL || k->staging == NULL)
     {
         Why(why, whylen, "no fast RAM for the command buffer");
@@ -1587,10 +1692,12 @@ void Card_Close(struct Card *k)
             Card_ScreensLeft++;
         k->scr = NULL;
     }
-    if (k->cmd != NULL)
-        FreeVec(k->cmd);
-    if (k->staging != NULL)
-        FreeVec(k->staging);
+    if (k->cmd_mem != NULL)
+        FreeVec(k->cmd_mem);
+    if (k->staging_mem != NULL)
+        FreeVec(k->staging_mem);
+    k->cmd_mem = NULL;
+    k->staging_mem = NULL;
     k->cmd = NULL;
     k->staging = NULL;
     if (k->treq != NULL)

@@ -31,6 +31,7 @@ void Log_Close(void);
 void Log_Printf(CONST_STRPTR fmt, ...);
 
 /* A line of dashes with a title, for the sections of a report. */
+void Log_Flush(void);         /* console + log file out of the DOS buffers */
 void Log_Section(CONST_STRPTR title);
 
 /* TRUE: hold the console's copy from now on (nests); FALSE: one level

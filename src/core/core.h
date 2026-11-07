@@ -317,7 +317,8 @@ struct Core
      * (Core_UCacheCopied). */
     ULONG ucache_off, ucache_size, ucache_pos, ucache_on;
     ULONG ustaged;
-    ULONG *ushadow;                 /* CORE_UCACHE_BYTES of fast RAM, staged only */
+    ULONG *ushadow;                 /* CORE_UCACHE_BYTES of fast RAM, staged only; 16-byte aligned */
+    APTR ushadow_mem;               /* as env.alloc gave it (16 bytes more), for env.free */
     ULONG udirty_off[CORE_UDIRTY], udirty_len[CORE_UDIRTY];  /* bytes in the region */
     ULONG udirty_n, udirty_all;
     struct CoreUEntry uq[CORE_UQ];

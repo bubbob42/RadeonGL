@@ -308,6 +308,17 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Bild fertig, wÃ¤hrend der Prozessor das nÃ¤chste aufbaut: GLQuake demo1
     bei 1280 x 720 stieg auf dem Testrechner von 19,9 auf 23,5 Bilder/s.
     Aus ist zum Vergleichen da, oder falls Bilder fehlerhaft werden.
+
+@{b}RadeonGLMove16@{ub}  (Vorgabe: aus)
+    Nur mit 68060. 1 oder 2 kopiert die Daten jedes Bildes in 16-Byte-
+    Bursts (MOVE16) in den Speicher der Karte: 1 leert vorher den
+    Datencache darüber, 2 nicht (beim 68060 genügt das). Nur für
+    Turbokarten und Brücken, die Bursts weiterreichen: auf dem
+    Testrechner (68060, Mediator) kommen sie als Einzelzugriffe an und
+    bringen nichts. ACHTUNG: auf einer Karte, die keine Bursts kann
+    (etwa der BFG9060), kann der Rechner hängen bleiben. RadeonGL
+    probiert zuerst eine Zeile und bleibt aus, wenn sie falsch
+    zurückkommt; einen Hänger kann es nicht abfangen.
 @endnode
 
 @node Speed "Geschwindigkeit"

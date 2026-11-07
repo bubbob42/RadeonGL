@@ -95,6 +95,22 @@ void Log_Printf(CONST_STRPTR fmt, ...)
     }
 }
 
+/* Everything written so far out of the DOS buffers -- the console and the
+ * log file -- before a step that might hang the machine (Move16Bench), so
+ * the log on disk ends at the step that hung. Not while held. */
+void Log_Flush(void)
+{
+    BPTR out;
+
+    if (log_Depth != 0)
+        return;
+    out = Output();
+    if (out)
+        Flush(out);
+    if (log_File)
+        Flush(log_File);
+}
+
 void Log_Section(CONST_STRPTR title)
 {
     Log_Printf("\n--- %s ---\n", title);

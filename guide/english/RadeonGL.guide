@@ -289,6 +289,16 @@ that is not set means the default.
     the processor builds the next: GLQuake demo1 at 1280 x 720 went from
     19.9 to 23.5 fps on the test machine. Off is for comparing, or if
     pictures go wrong.
+
+@{b}RadeonGLMove16@{ub}  (default: off)
+    A 68060 only. 1 or 2 copies each frame's data into the card's memory
+    in 16-byte bursts (MOVE16): 1 empties the data cache over it first,
+    2 does not (enough on a 68060). Only for an accelerator and a bridge
+    that pass bursts on: on the test machine (68060, Mediator) they
+    arrive as single cycles and gain nothing. WARNING: on a board that
+    cannot burst (the BFG9060, for one) the machine may hang. RadeonGL
+    tries one line first and stays off if it comes back wrong; a hang it
+    cannot catch.
 @endnode
 
 @node Speed "Speed"

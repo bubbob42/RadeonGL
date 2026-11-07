@@ -110,8 +110,9 @@ struct Card
 
     struct Core *core;
     struct R2Cs cs;             /* the core writes here: the command buffer */
-    ULONG *cmd;
-    ULONG *staging;             /* the locked-array stream, CORE_STREAM_BYTES */
+    ULONG *cmd;                 /* 16-byte aligned in cmd_mem */
+    ULONG *staging;             /* the locked-array stream, CORE_STREAM_BYTES, 16-byte aligned */
+    APTR cmd_mem, staging_mem;  /* as AllocVec gave them (for FreeVec) */
     ULONG copied;               /* stream bytes already in video RAM */
     ULONG gen;                  /* the core's stream_gen they belong to */
     ULONG in_flush;
@@ -129,6 +130,16 @@ struct Card
     ULONG pend_seq;             /* its fence */
     ULONG drop_next;            /* a settle reset the engine: the commands built are stale */
     ULONG ov_frames, ov_waits;  /* for the log: frames left running; settles that waited */
+
+    /* 2026-11-07, RadeonGLMove16 (68060, the GCC build only; off by
+     * default): the copies into video RAM at the flush send their whole
+     * 16-byte lines as MOVE16 bursts -- 1 with a data-cache push of the
+     * source first, 2 without. A HARDWARE RISK until Move16Bench has shown
+     * the bus takes bursts (docs/library-asm-research.md). */
+    ULONG move16;
+    ULONG m16_lines, m16_plain; /* for the log: dwords sent as lines, as longwords */
+    ULONG m16_checked;          /* the self-test ran (the first flush with move16 on) */
+    ULONG m16_failed;           /* 1: it read back a different line, 2: no room for it -- move16 off */
 
     ULONG check;                /* run the packet checker before the CP */
     struct R2ChkCfg cfg;

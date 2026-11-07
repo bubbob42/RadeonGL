@@ -698,6 +698,22 @@ build/probe/%.o: src/probe/%.c $(PROBE_HDRS)
 	@mkdir -p build/probe
 	$(GCC_CC) $(PROBE_CFLAGS) -c $< -o $@
 
+# Move16Bench (2026-11-07): MOVE16 into the Radeon's video RAM -- a
+# HARDWARE RISK (a bus that neither bursts nor breaks the burst up hangs;
+# docs/library-asm-research.md). 68060 code, GCC only, and on purpose NOT
+# in `probes`: built by `gmake move16bench`, run only with someone at the
+# machine.
+build/probe/move16bench.o: src/probe/move16bench.c $(PROBE_HDRS)
+	@mkdir -p build/probe
+	$(GCC_CC) $(filter-out -m68020,$(PROBE_CFLAGS)) -m68060 -c $< -o $@
+
+dist/Probe/C/Move16Bench: build/probe/move16bench.o $(PROBE_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
+.PHONY: move16bench
+move16bench: dist/Probe/C/Move16Bench
+
 dist/Probe/C/R200Info: build/probe/r200info.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
