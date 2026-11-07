@@ -42,7 +42,9 @@
 #define CORE_P_DEPTH      8
 #define CORE_T_DEPTH      8
 #define CORE_IMMD_VERTS   256     /* vertices reserved per glBegin; more are split */
-#define CORE_STATE_MAX    512     /* dwords the whole state takes at most (MEASURED 182: test_state_max) */
+#define CORE_STATE_MAX    1024    /* dwords the whole state takes at most (MEASURED 182 unlit,
+                                   * about 560 with eight lights: test_state_max) */
+#define CORE_LIGHTS       8       /* GL_LIGHT0..7, the R200's TCL lights */
 #define CORE_DRAW_DW      64      /* an array draw's packets after the state */
 #define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
 #define CORE_UCACHE_BYTES (2048UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
@@ -158,7 +160,8 @@ struct CoreArray
 #define D_ZBIAS     0x00010000UL
 #define D_POINTSIZE 0x00020000UL
 #define D_VAP       0x00040000UL    /* SE_VAP_CNTL + SE_VTE_CNTL: back to TCL after a clear */
-#define D_ALL       0x0007ffffUL
+#define D_LIGHT     0x00080000UL    /* TCL lighting: controls, lights, materials (light.c) */
+#define D_ALL       0x000fffffUL
 
 /* Enables (struct Core.enables) */
 #define EN_ALPHA_TEST   0x0001UL
@@ -183,6 +186,24 @@ struct CoreArray
 #define EN_TEXGEN_T     0x40000UL
 #define EN_SMOOTH       0x80000UL   /* point, line, polygon smoothing */
 #define EN_LIGHT0       0x100000UL  /* lights 0..7: bits 20..27 */
+
+/* A light, as GL keeps it: position and spot direction in eye
+ * coordinates (glLightfv transforms them by the modelview of its call). */
+struct CoreLight
+{
+    float ambient[4], diffuse[4], specular[4];
+    float pos[4];
+    float dir[3];
+    float spot_exp, spot_cut;
+    float att[3];           /* constant, linear, quadratic */
+};
+
+/* A material (front and back). */
+struct CoreMaterial
+{
+    float emission[4], ambient[4], diffuse[4], specular[4];
+    float shininess;
+};
 
 struct CoreMat
 {
@@ -254,6 +275,11 @@ struct Core
     ULONG hwprim;           /* R_VF_PRIM_* */
     ULONG units_on;         /* bit n: the vertex carries texture set n */
     ULONG vfast;            /* glVertex may write straight into the packet (vtxfast.h) */
+    ULONG vnorm;            /* lighting on: vertices carry a normal (light.c; Core_Enable
+                             * keeps it). Lit vertices never take the unlit hot path:
+                             * vlimit is vbase for them, so every glVertex lands in
+                             * Emit's slow branch (MEASURED 2026-11-07: checks on the
+                             * shared path cost GLQuake ~1%) */
     ULONG vtx_dw;           /* dwords a vertex */
     ULONG *vbase;           /* first vertex of the open packet */
     ULONG *vptr;            /* where the next vertex goes */
@@ -347,7 +373,26 @@ struct Core
     ULONG stat_uc_hits, stat_uc_misses, stat_uc_saved, stat_uc_written;
     ULONG stat_uc_smiss_v, stat_uc_smiss_i;  /* misses while the static hints were on */
     ULONG stat_stream_bytes;    /* written into the stream (vertices + indices): bus bytes */
+
+    /* Lighting (light.c, 2026-11-07): the TCL lights in eye space. At the
+     * end of the struct, so that the hot fields above keep their places
+     * (lighting is rare; GLQuake never lights). */
+    struct CoreArray na;            /* glNormalPointer */
+    ULONG *vlimit_lit;              /* a lit draw's real vlimit (vertex.c) */
+    ULONG light_dirty;              /* bit n: light n; LD_MATERIAL, LD_MODEL */
+    ULONG hw_light[6];              /* LIGHT_MODEL_CTL_0/1, PER_LIGHT_CTL_0..3 as last emitted */
+    ULONG hw_mvl_ver;               /* modelview whose MV and inverse transpose the TCL has (~0: none) */
+    ULONG lm_local;                 /* GL_LIGHT_MODEL_LOCAL_VIEWER */
+    ULONG lm_twoside;               /* GL_LIGHT_MODEL_TWO_SIDE */
+    ULONG cm_face, cm_mode;         /* glColorMaterial */
+    float lm_ambient[4];            /* GL_LIGHT_MODEL_AMBIENT */
+    struct CoreLight light[CORE_LIGHTS];
+    struct CoreMaterial mtl[2];     /* front, back */
+    ULONG lit_first[12];            /* first[] of a lit vertex (up to 11 dwords) */
 };
+
+/* The primitive's first vertex, wherever its size puts it (vertex.c) */
+#define CORE_FIRST(c) ((c)->vnorm ? (c)->lit_first : (c)->first)
 
 #define CORE_NO_PRIM 0xffffffffUL
 
@@ -459,6 +504,7 @@ struct CoreMat *Core_TopMatrix(struct Core *c, ULONG mode);
 void Mat_Mul(float *out, const float *a, const float *b);    /* out = a x b, column-major */
 float Core_Sin(float deg);    /* degrees, float, no libm */
 float Core_Cos(float deg);
+float Core_Sqrt(float v);      /* FSQRT where there is one, 0 for v <= 0 */
 
 /* --- Immediate mode (vertex.c) ------------------------------------------------- */
 
@@ -486,10 +532,22 @@ void Core_EnableClientState(struct Core *c, ULONG array, ULONG on);
 void Core_VertexPointer(struct Core *c, LONG size, ULONG type, LONG stride, const void *p);
 void Core_ColorPointer(struct Core *c, LONG size, ULONG type, LONG stride, const void *p);
 void Core_TexCoordPointer(struct Core *c, LONG size, ULONG type, LONG stride, const void *p);
+void Core_NormalPointer(struct Core *c, ULONG type, LONG stride, const void *p);
 void Core_LockArrays(struct Core *c, LONG first, LONG count);
 void Core_UnlockArrays(struct Core *c);
 void Core_DrawArrays(struct Core *c, ULONG mode, LONG first, LONG count);
 void Core_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, const void *idx);
+
+/* --- Lighting (light.c) --------------------------------------------------------- */
+
+/* GL 1.1 lighting, drawn by the R200's TCL in eye space (Mesa's r200
+ * driver: r200_state.c). n: how many values v holds (1 for the f calls). */
+void Core_Lightfv(struct Core *c, ULONG light, ULONG pname, const float *v, ULONG n);
+void Core_LightModelfv(struct Core *c, ULONG pname, const float *v, ULONG n);
+void Core_Materialfv(struct Core *c, ULONG face, ULONG pname, const float *v, ULONG n);
+void Core_ColorMaterial(struct Core *c, ULONG face, ULONG mode);
+void Core_GetLightfv(struct Core *c, ULONG light, ULONG pname, float *v);
+void Core_GetMaterialfv(struct Core *c, ULONG face, ULONG pname, float *v);
 
 /* --- Textures (texture.c) ------------------------------------------------------- */
 

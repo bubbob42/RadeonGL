@@ -460,6 +460,163 @@ static void test_triangle(void)
     CHECK_INT(core.stat_prims, 1);
 }
 
+/* --- Lighting (light.c, 2026-11-07) ---------------------------------------------- */
+
+static ULONG DrawStates(ULONG *hash, ULONG max);
+static ULONG LastReg(ULONG reg);
+static void Draw1(void);
+static ULONG vecmem[256 * 4];
+static ULONG scalmem[256];
+
+static int NearF(ULONG bits, float want)
+{
+    float f;
+
+    f = F(bits);
+    return f > want - 0.0005f && f < want + 0.0005f;
+}
+
+/* The TCL's light state as the stream leaves it: the light and its eye
+ * position, the normal matrix of a rotated and scaled modelview, the
+ * material, glColorMaterial's sources, normals in every vertex (immediate
+ * and arrays), locked arrays the immediate way, and lighting off again. */
+static void test_lighting(void)
+{
+    struct R2ChkState st;
+    static const float lpos[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+    static const float ldif[4] = { 0.5f, 0.25f, 1.0f, 1.0f };
+    static const float mdif[4] = { 0.1f, 0.2f, 0.3f, 0.4f };
+    static const float norms[9] = { 0, 0, 1, 0, 1, 0, 1, 0, 0 };
+    static const float pos[9] = { -1, -1, -5, 1, -1, -5, 0, 1, -5 };
+    ULONG hash[4];
+    ULONG n;
+    ULONG i;
+    ULONG h;
+    ULONG found;
+    ULONG draws0;
+
+    Fresh(1);
+    Core_Viewport(&core, 0, 0, W_, H_);
+    Core_MatrixMode(&core, GL_PROJECTION);
+    Core_LoadIdentity(&core);
+    Core_Frustum(&core, -1, 1, -1, 1, 1, 100);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Core_LoadIdentity(&core);
+    Core_Rotatef(&core, 90.0f, 0.0f, 1.0f, 0.0f);
+    Core_Lightfv(&core, GL_LIGHT0, GL_POSITION, lpos, 4);   /* eye: (1, 0, 0, 0) */
+    Core_Lightfv(&core, GL_LIGHT0, GL_DIFFUSE, ldif, 4);
+    Core_Scalef(&core, 2.0f, 2.0f, 2.0f);
+    Core_Materialfv(&core, GL_FRONT, GL_DIFFUSE, mdif, 4);
+    Core_Enable(&core, GL_LIGHTING, 1);
+    Core_Enable(&core, GL_LIGHT0, 1);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    Core_Begin(&core, GL_TRIANGLES);
+    Core_Color4ub(&core, 0x11, 0x22, 0x33, 0x44);
+    Core_Normal3f(&core, 0.0f, 0.0f, 1.0f);
+    Core_Vertex3f(&core, -1.0f, -1.0f, -5.0f);
+    Core_Vertex3f(&core, 1.0f, -1.0f, -5.0f);
+    Core_Vertex3f(&core, 0.0f, 1.0f, -5.0f);
+    Core_End(&core);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* the vertex: position, normal, colour */
+    n = (ULONG) (cs.ptr - stream);
+    found = 0;
+    for (i = 0; i < n; i += (R2_PKT_TYPE(h) == 2) ? 1 : 2 + R2_PKT_COUNT(h))
+    {
+        h = V(i);
+        if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_IMMD_2)
+            found = i;
+    }
+    CHECK_HEX(V(found), R2_PKT3(R2_OP_3D_DRAW_IMMD_2, 21));     /* 3 x 7 dwords */
+    CHECK_HEX(V(found + 4), R2Cs_FloatBits(-5.0f));
+    CHECK_HEX(V(found + 7), R2Cs_FloatBits(1.0f));              /* nz */
+    CHECK_HEX(V(found + 8), 0x44332211UL);
+    CHECK(LastReg(R_SE_VTX_FMT_0) & R_VTX_N0);
+    CHECK(LastReg(R_SE_TCL_OUTPUT_VTX_COMP_SEL) & R_OUTPUT_COLOR_0);
+    CHECK(LastReg(R_SE_TCL_LIGHT_MODEL_CTL_0) & R_LIGHTING_ENABLE);
+    CHECK_HEX(LastReg(R_SE_TCL_PER_LIGHT_CTL_0), 7UL);         /* light 0: on, ambient, specular */
+    CHECK_HEX(LastReg(R_SE_TCL_LIGHT_MODEL_CTL_0 + 4), 0xffff1111UL);
+
+    /* the TCL memory: light 0's diffuse, its direction, the half vector */
+    (void) DrawStates(hash, 4);
+    CHECK(NearF(vecmem[0x30 * 4 + 0], 0.5f) && NearF(vecmem[0x30 * 4 + 1], 0.25f));
+    CHECK(NearF(vecmem[0x40 * 4 + 0], 1.0f) && NearF(vecmem[0x40 * 4 + 2], 0.0f)
+          && NearF(vecmem[0x40 * 4 + 3], 0.0f));
+    CHECK(NearF(vecmem[0x48 * 4 + 0], 0.70711f) && NearF(vecmem[0x48 * 4 + 2], 0.70711f));
+    /* the front material's diffuse, the back's untouched */
+    CHECK(NearF(vecmem[0xb2 * 4 + 0], 0.1f) && NearF(vecmem[0xb2 * 4 + 3], 0.4f));
+    CHECK(NearF(vecmem[0xb6 * 4 + 0], 0.8f));
+    /* the normal matrix: rows as Mesa uploads them, the inverse
+     * column-major -- (R S)^-1 = R^T / 2, R_y(90) maps z to x and x to -z,
+     * so its columns are (0, 0, 0.5), (0, 0.5, 0), (-0.5, 0, 0) */
+    CHECK(NearF(vecmem[0x84 * 4 + 0], 0.0f) && NearF(vecmem[0x84 * 4 + 2], 0.5f));
+    CHECK(NearF(vecmem[0x84 * 4 + 8], -0.5f) && NearF(vecmem[0x84 * 4 + 10], 0.0f));
+    CHECK(NearF(vecmem[0x84 * 4 + 5], 0.5f));
+    /* the modelview itself, row 0: (0, 0, 2, 0) */
+    CHECK(NearF(vecmem[0x80 * 4 + 2], 2.0f) && NearF(vecmem[0x80 * 4 + 0], 0.0f));
+    /* scalars: range cutoff big, 1 / constant attenuation 1 */
+    CHECK(F(scalmem[0x28]) > 1e30f);
+    CHECK(NearF(scalmem[0x30], 1.0f));
+
+    /* glColorMaterial(GL_FRONT, GL_DIFFUSE): the front diffuse from the vertex */
+    Core_ColorMaterial(&core, GL_FRONT, GL_DIFFUSE);
+    Core_Enable(&core, GL_COLOR_MATERIAL, 1);
+    Draw1();
+    CHECK_HEX(LastReg(R_SE_TCL_LIGHT_MODEL_CTL_0 + 4), 0xffff1211UL);
+
+    /* normals from an array, and a locked draw goes the immediate way */
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
+    Core_NormalPointer(&core, GL_FLOAT, 0, norms);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientState(&core, GL_NORMAL_ARRAY, 1);
+    draws0 = core.stat_lock_draws;
+    Core_LockArrays(&core, 0, 3);
+    Core_DrawArrays(&core, GL_TRIANGLES, 0, 3);
+    Core_UnlockArrays(&core);
+    CHECK_INT(core.stat_lock_draws, draws0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    n = (ULONG) (cs.ptr - stream);
+    for (i = 0; i < n; i += (R2_PKT_TYPE(h) == 2) ? 1 : 2 + R2_PKT_COUNT(h))
+    {
+        h = V(i);
+        if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_IMMD_2)
+            found = i;
+    }
+    CHECK_HEX(V(found + 2 + 7 + 4), R2Cs_FloatBits(1.0f));     /* vertex 1's ny */
+    CHECK_HEX(V(found + 2 + 14 + 3), R2Cs_FloatBits(1.0f));    /* vertex 2's nx */
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* a lit fan longer than a packet: split, its first vertex (11 dwords
+     * with two texture sets would not fit first[]) carried */
+    i = core.stat_splits;
+    Core_Begin(&core, GL_TRIANGLE_FAN);
+    Core_Normal3f(&core, 0.0f, 0.0f, 1.0f);
+    for (n = 0; n < 600; n++)
+        Core_Vertex3f(&core, (float) (n % 7), (float) (n % 5), -5.0f);
+    Core_End(&core);
+    CHECK(core.stat_splits > i);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* lighting off: no normal, the colour passes */
+    Core_EnableClientState(&core, GL_NORMAL_ARRAY, 0);
+    Core_Enable(&core, GL_LIGHTING, 0);
+    Draw1();
+    CHECK(!(LastReg(R_SE_VTX_FMT_0) & R_VTX_N0));
+    CHECK(!(LastReg(R_SE_TCL_OUTPUT_VTX_COMP_SEL) & R_OUTPUT_COLOR_0));
+    CHECK(!(LastReg(R_SE_TCL_LIGHT_MODEL_CTL_0) & R_LIGHTING_ENABLE));
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* GL's errors */
+    Core_Lightfv(&core, GL_LIGHT0 + 8, GL_DIFFUSE, ldif, 4);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    Core_Lightfv(&core, GL_LIGHT0, GL_DIFFUSE, ldif, 1);      /* glLightf with a vector */
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    Core_Materialfv(&core, GL_FRONT, GL_SHININESS, ldif + 3, 1);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
 /* --- Textures ------------------------------------------------------------------- */
 
 /* texel k of a level, as the GPU reads it */
@@ -689,7 +846,13 @@ static void test_state_max(void)
     Core_Enable(&core, MGL_Z_OFFSET, 1);
     Core_ColorMask(&core, 1, 1, 0, 1);
     Core_PointSize(&core, 3.0f);
+    /* 2026-11-07: lighting, every light on */
+    Core_Enable(&core, GL_LIGHTING, 1);
+    Core_Enable(&core, GL_COLOR_MATERIAL, 1);
+    for (i = 0; i < CORE_LIGHTS; i++)
+        Core_Enable(&core, GL_LIGHT0 + i, 1);
     core.dirty = D_ALL;
+    core.vnorm = 1;
     at = cs.ptr;
     Core_Validate(&core);
     Hw_VertexFormat(&core, 3);
@@ -906,8 +1069,6 @@ static void test_bind_shadow(void)
  * memory (the MVP lives there), and the draw packet. Returns the draws
  * seen. */
 static ULONG regfile[0x4000 / 4];
-static ULONG vecmem[256 * 4];
-static ULONG scalmem[256];
 
 static ULONG DrawStates(ULONG *hash, ULONG max)
 {
@@ -3478,6 +3639,7 @@ int main(void)
     Env(&e);
     test_splits();
     test_triangle();
+    test_lighting();
     test_textures();
     test_state();
     test_state_max();

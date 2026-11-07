@@ -466,6 +466,10 @@ To have no log at all:
 
     * One program at a time: on a screen of its own, in a window or into
       a bitmap (see @{" The screen " link Screen}).
+    * Lighting (glLight, glMaterial, glLightModel, glColorMaterial, normals
+      from glNormal and glNormalPointer) is done by the Radeon: eight
+      lights, directional, local and spot, with attenuation. While it is
+      on, compiled vertex arrays are drawn the slower immediate way.
     * Textures live in up to 16 MB of the card's memory, and RadeonGL
       does not yet swap them out: a program that needs more gets white
       textures for the rest.
@@ -476,14 +480,11 @@ To have no log at all:
 
 @{b}Not implemented yet@{ub}
 
-RadeonGL implements 104 of the 205 functions of minigl.library 29.1:
+RadeonGL implements 114 of the 205 functions of minigl.library 29.1:
 everything GLQuake uses, and more. A program calling one of the others
 gets nothing for it but the error GL_INVALID_OPERATION; the
 @{" log file " link Log} names such calls.
 
-    * Lighting and materials (glLight, glMaterial, glLightModel,
-      glColorMaterial): not there (GL_INVALID_OPERATION). Normals are
-      taken but not used.
     * Fog (glFog).
     * Display lists (glNewList, glCallList and the rest).
     * Texture coordinate generation (glTexGen), glTexCoord4f, the texture
@@ -495,15 +496,15 @@ gets nothing for it but the error GL_INVALID_OPERATION; the
       glCopyTexSubImage2D, glPixelStorei, glDrawBuffer, glReadBuffer).
     * The double-precision calls (glLoadMatrixd, glMultMatrixd,
       glRotated, glScaled, glTranslated, glGetDoublev).
-    * glArrayElement, glInterleavedArrays, glMultiDrawArrays,
-      glNormalPointer, edge flags and colour-index mode.
+    * glArrayElement, glInterleavedArrays, glMultiDrawArrays, edge flags
+      and colour-index mode.
     * glBlendEquation, glBlendFuncSeparate, glLineWidth, glColorTable,
       glTexEnvfv, texture priorities and residency.
     * GLU and GLUT (gluPerspective, gluLookAt, gluBuild2DMipmaps, the
       quadrics; the GLUT window and shape functions).
     * MiniGL's own main loop and its callbacks (mglMainLoop, mglIdleFunc,
-      mglKeyFunc, mglMouseFunc), contexts on a window or a bitmap,
-      mglLockBack, mglTexMemStat, mglWriteShotPPM.
+      mglKeyFunc, mglMouseFunc), mglLockBack, mglTexMemStat,
+      mglWriteShotPPM.
 @endnode
 
 @node Inside "How it works"

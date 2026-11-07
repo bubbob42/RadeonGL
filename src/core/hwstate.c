@@ -188,6 +188,9 @@ void Hw_Forget(struct Core *c)
     c->hw_ppcntl = 0xffffffffUL;
     c->hw_mv_ver = 0xffffffffUL;
     c->hw_proj_ver = 0xffffffffUL;
+    c->hw_mvl_ver = 0xffffffffUL;
+    for (i = 0; i < 6; i++)
+        c->hw_light[i] = 0xffffffffUL;
 }
 
 static LONG EmitTexture(struct Core *c, ULONG u)
@@ -344,6 +347,7 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
     ULONG fmt1;
     ULONG compsel;
 
+    /* lighting switched sets D_VTXFMT (state.c), so units decide alone */
     if (units == c->hw_units && !(c->dirty & D_VTXFMT))
         return;
     fmt1 = ((units & 1) ? 2UL : 0) | ((units & 2) ? 2UL << 3 : 0);
@@ -355,8 +359,12 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
      * OUTPUT_COLOR_0 with lighting off draws uninitialised material
      * colours. */
     compsel = R_OUTPUT_XYZW;
-    R2E_VertexFormat(c->cs, R_VTX_Z0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT), fmt1,
-                     R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT), fmt1,
+    /* lighting (light.c): a normal in every vertex, the colour lit by
+     * the TCL */
+    if (c->vnorm)
+        compsel |= R_OUTPUT_COLOR_0;
+    R2E_VertexFormat(c->cs, R_VTX_Z0 | (c->vnorm ? R_VTX_N0 : 0) | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
+                     fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT), fmt1,
                      compsel);
     c->hw_units = units;
     c->dirty &= ~D_VTXFMT;
@@ -434,6 +442,7 @@ static LONG ValidateOnce(struct Core *c)
         R2E_RasterDefaults(cs);
         d = D_ALL;                  /* the defaults overwrote every block */
         Hw_Forget(c);
+        Light_Reset(c);             /* the lighting controls as the defaults left them */
     }
     units = Core_UnitsOn(c);
     if (d & D_VAP)
@@ -520,6 +529,10 @@ static LONG ValidateOnce(struct Core *c)
         c->hw_mv_ver = c->mv[c->mv_top].ver;
         c->hw_proj_ver = c->proj[c->proj_top].ver;
     }
+    if (d & D_MATRIX)
+        Light_Matrices(c);          /* lighting on: MV and its inverse transpose */
+    if (d & D_LIGHT)
+        Light_Emit(c);
     /* a frame dropped while this was written (a flush in one of the
      * emitters): it went with the frame, and the rebase asked for all */
     c->dirty = (c->rebase_gen == gen) ? (d & D_VTXFMT) : D_ALL;

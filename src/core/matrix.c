@@ -78,6 +78,11 @@ static float Sqrt(float v)
     return x;
 }
 
+float Core_Sqrt(float v)
+{
+    return Sqrt(v);
+}
+
 /* An affine matrix: the bottom row exactly 0 0 0 1, read as bits (a -0.0f
  * takes the general way, which is merely slower). */
 static ULONG Affine(const float *m)

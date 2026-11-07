@@ -1680,3 +1680,10 @@ void Hook_GLFinish(GLcontext context)
     if (rgl->real ? Card_WaitIdle(&rgl->rad) == R2_OK : R2Ring_Idle(&rgl->ring) == R2_OK)
         Core_GpuIdle(C);
 }
+
+/* The lighting hooks' way to the context (lib/rgllight.c): NULL when there
+ * is none */
+struct Core *Rgl_Core(void)
+{
+    return (rgl != NULL) ? &rgl->core : NULL;
+}

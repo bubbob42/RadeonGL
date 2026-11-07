@@ -61,8 +61,15 @@ static ULONG Affects(ULONG bit)
         case EN_SCISSOR:        return D_SCISSOR;
         case EN_POLY_OFFSET:    return D_SECNTL | D_ZBIAS;
         case EN_ZOFFSET:        return D_SECNTL | D_ZBIAS;
+        /* lighting: the TCL's controls, the normals in the vertices, the
+         * modelview and its inverse transpose */
+        case EN_LIGHTING:       return D_LIGHT | D_VTXFMT | D_MATRIX;
+        case EN_NORMALIZE:      return D_LIGHT;
+        case EN_COLOR_MATERIAL: return D_LIGHT;
     }
-    return 0;           /* fog and lighting: stored, not drawn yet */
+    if (bit >= EN_LIGHT0 && bit <= (EN_LIGHT0 << 7))
+        return D_LIGHT;         /* lights not drawn before: their vectors (light.c) */
+    return 0;           /* fog: stored, not drawn yet */
 }
 
 void Core_Enable(struct Core *c, ULONG cap, ULONG on)
@@ -93,6 +100,8 @@ void Core_Enable(struct Core *c, ULONG cap, ULONG on)
         return;
     c->enables ^= bit;
     c->dirty |= Affects(bit);
+    if (bit == EN_LIGHTING)
+        c->vnorm = on ? 1UL : 0UL;  /* vertices with normals from the next glBegin (vertex.c) */
 }
 
 ULONG Core_IsEnabled(struct Core *c, ULONG cap)

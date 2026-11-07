@@ -43,6 +43,7 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
         return GL_OUT_OF_MEMORY;
     }
     Tex_Defaults(c->tex[0], 0);
+    Light_Defaults(c);
     c->stream_off = Heap_Alloc(c, CORE_STREAM_BYTES, 32);
     c->stream_size = (c->stream_off != 0xffffffffUL) ? CORE_STREAM_BYTES : 0;
     c->stream_cpu = (c->stream_size != 0) ? heap_cpu + c->stream_off / 4 : NULL;
@@ -99,6 +100,8 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     c->va.type = GL_FLOAT;
     c->ca.size = 4;
     c->ca.type = GL_FLOAT;
+    c->na.size = 3;
+    c->na.type = GL_FLOAT;
     for (u = 0; u < CORE_UNITS; u++)
     {
         c->ta[u].size = 4;

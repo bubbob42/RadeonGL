@@ -46,6 +46,11 @@ needs.
   the card's memory (up to 16 MB), nearest, linear and mipmap filters,
   repeat and clamp, the environments MODULATE, REPLACE, DECAL (RGB) and
   ADD, `glTexSubImage2D` updates.
+- **Lighting on the Radeon's TCL:** `glLight`, `glMaterial`,
+  `glLightModel` (ambient, local viewer, two-sided), `glColorMaterial`,
+  `GL_NORMALIZE`; eight lights, directional, local and spot, with
+  attenuation; normals from `glNormal` and `glNormalPointer`. While lighting
+  is on, compiled vertex arrays go the immediate way.
 - **Fragments:** blending, alpha test, depth test with every function,
   depth mask, polygon offset and `mglSetZOffset`, back-face culling,
   scissor, colour mask, flat and smooth shading, point size.
@@ -67,12 +72,10 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL implements 104 of the 205 functions of `minigl.library` 29.1:
+RadeonGL implements 114 of the 205 functions of `minigl.library` 29.1:
 everything GLQuake uses, and more. A missing function draws nothing and
 sets GL_INVALID_OPERATION; the library's log names every such call.
 
-- Lighting and materials (`glLight`, `glMaterial`, `glLightModel`,
-  `glColorMaterial`): not there (they set GL_INVALID_OPERATION).
 - Fog, display lists, texture coordinate generation (`glTexGen`),
   `glTexCoord4f`.
 - The texture environment `GL_BLEND` (drawn as `GL_MODULATE`) and
@@ -82,7 +85,7 @@ sets GL_INVALID_OPERATION; the library's log names every such call.
 - `glReadPixels`, `glCopyTexImage2D`, `glCopyTexSubImage2D`,
   `glPixelStorei`, `glDrawBuffer`, `glReadBuffer`.
 - The double-precision calls, `glArrayElement`, `glInterleavedArrays`,
-  `glMultiDrawArrays`, `glNormalPointer`, edge flags, colour-index mode,
+  `glMultiDrawArrays`, edge flags, colour-index mode,
   `glBlendEquation`, `glBlendFuncSeparate`, `glLineWidth`, `glColorTable`.
 - GLU and GLUT; MiniGL's own main loop and callbacks; contexts on a 24-bit
   or 8-bit screen (the Radeon draws 15, 16 and 32 bit).

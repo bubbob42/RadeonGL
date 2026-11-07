@@ -656,7 +656,7 @@ glquake glquake-data clean-glquake:
 
 # The GL core's modules (src/core): defined here, before the probe rules
 # that list them as prerequisites (those expand when the Makefile is read).
-CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array
+CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light
 CORE_HDRS       := $(wildcard src/core/*.h)
 
 # --- Probes: the day-one tools for the real machine (docs/probes.md) --------
@@ -1047,7 +1047,7 @@ build/core-sasc/%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS) | $(VAMOSRC)
 # stub that records GL_INVALID_OPERATION and the slot name for the log.
 # -m68060 -m68881 together (without -m68881 GCC 6.5 falls back to soft float).
 RGL_LIB    := dist/Libs/RadeonGL/minigl.library
-RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c | sort -u | paste -sd, -}
+RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c lib/rgllight.c | sort -u | paste -sd, -}
 RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
               -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
               -fno-strict-aliasing -m68060 -m68881 -DRGL_CPU_040 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl \
@@ -1055,12 +1055,15 @@ RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declarat
 # RGL_DEFS=-DCARD_OVERLAP_STAT: a measurement build with the overlap estimate
 # in the log (lib/card.c); remove build/rgl first, the objects do not see it
 RGL_DEFS   ?=
+# rgllight.o goes last: code added in front of the core moved its hot
+# functions and cost GLQuake ~0.8% (lib/rgllight.c, MEASURED 2026-11-07)
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_MODULES))) \
-              $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES)))
+              $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES))) \
+              build/rgl/rgllight.o
 
-build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c Makefile
+build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c Makefile
 	@mkdir -p build/rgl
 	$(PYTHON) -I tools/gen_dispatch.py $(MGL_DISPATCH) build/rgl/rgl_dispatch \
 	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' \
@@ -1178,8 +1181,18 @@ $(GLWINDOW): glsmoke/glwindow.c
 	    -I$(MGL_SDK_INC) -I$(P96_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
+# GLLight: lighting on the card, each case checked against GL's equation
+# (glsmoke/gllight.c, 2026-11-07)
+GLLIGHT := dist/GLSmoke/GLLight
+
+$(GLLIGHT): glsmoke/gllight.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -I$(P96_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLBENCH) $(GLMODES) $(GLWINDOW) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLBENCH) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke

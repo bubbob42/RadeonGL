@@ -95,6 +95,31 @@ void Core_TexCoordPointer(struct Core *c, LONG size, ULONG type, LONG stride, co
     SetArray(c, &c->ta[c->client_unit], size, type, stride, p, 1);
 }
 
+/* glNormalPointer: three components of GL_BYTE, GL_SHORT, GL_INT, GL_FLOAT
+ * or GL_DOUBLE (lighting, light.c) */
+void Core_NormalPointer(struct Core *c, ULONG type, LONG stride, const void *p)
+{
+    if (type != GL_BYTE && type != GL_SHORT && type != GL_INT && type != GL_FLOAT && type != GL_DOUBLE)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    SetArray(c, &c->na, 3, type, stride, p, 3);
+}
+
+/* A normal array's component k, the signed integer types mapped to
+ * [-1, 1] as GL does */
+static float NormComp(const UBYTE *p, ULONG type, ULONG k)
+{
+    switch (type)
+    {
+        case GL_BYTE:   return (float) ((const BYTE *) p)[k] * (1.0f / 127.0f);
+        case GL_SHORT:  return (float) ((const WORD *) p)[k] * (1.0f / 32767.0f);
+        case GL_INT:    return (float) ((const LONG *) p)[k] * (1.0f / 2147483647.0f);
+    }
+    return Comp(p, type, k);
+}
+
 void Core_EnableClientState(struct Core *c, ULONG array, ULONG on)
 {
     c->lk_valid = 0;
@@ -103,7 +128,7 @@ void Core_EnableClientState(struct Core *c, ULONG array, ULONG on)
         case GL_VERTEX_ARRAY:           c->va.enabled = on ? 1 : 0; return;
         case GL_COLOR_ARRAY:            c->ca.enabled = on ? 1 : 0; return;
         case GL_TEXTURE_COORD_ARRAY:    c->ta[c->client_unit].enabled = on ? 1 : 0; return;
-        case GL_NORMAL_ARRAY:           return;     /* stored with lighting, later */
+        case GL_NORMAL_ARRAY:           c->na.enabled = on ? 1 : 0; return;
     }
     Core_Error(c, GL_INVALID_ENUM);
 }
@@ -204,6 +229,28 @@ static void Fetch(struct Core *c, ULONG i, float *pos)
         pos[0] /= pos[3];       /* as glVertex4f does (vertex.c) */
         pos[1] /= pos[3];
         pos[2] /= pos[3];
+    }
+}
+
+/* Vertex i's normal into the current one (lit draws only: DrawArrays and
+ * DrawElements call it in a loop of their own, so the unlit loop stays as
+ * it was) */
+static void FetchNormal(struct Core *c, ULONG i)
+{
+    const UBYTE *p;
+
+    p = Elem(&c->na, i);
+    if (c->na.type == GL_FLOAT)
+    {
+        c->cur_normal[0] = ((const float *) (const void *) p)[0];
+        c->cur_normal[1] = ((const float *) (const void *) p)[1];
+        c->cur_normal[2] = ((const float *) (const void *) p)[2];
+    }
+    else
+    {
+        c->cur_normal[0] = NormComp(p, c->na.type, 0);
+        c->cur_normal[1] = NormComp(p, c->na.type, 1);
+        c->cur_normal[2] = NormComp(p, c->na.type, 2);
     }
 }
 
@@ -1444,7 +1491,10 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     ULONG bad;
     float pos[4];
 
-    if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP)
+    /* lighting: the vertices carry normals, which the stream's packers and
+     * the upload cache do not know -- the immediate way (light.c) */
+    if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP
+        || (c->enables & EN_LIGHTING))
         return 0;
     first = (ULONG) c->lock_first;
     lcount = (ULONG) c->lock_count;
@@ -1607,8 +1657,15 @@ void Core_DrawArrays(struct Core *c, ULONG mode, LONG first, LONG count)
     if (!c->va.enabled || count == 0 || CORE_SCISSOR_EMPTY(c))
         return;
     Core_Begin(c, mode);
-    for (i = 0; i < count; i++)
-        ArrayVertex(c, (ULONG) (first + i));
+    if (c->vnorm && c->na.enabled)
+        for (i = 0; i < count; i++)
+        {
+            FetchNormal(c, (ULONG) (first + i));
+            ArrayVertex(c, (ULONG) (first + i));
+        }
+    else
+        for (i = 0; i < count; i++)
+            ArrayVertex(c, (ULONG) (first + i));
     Core_End(c);
 }
 
@@ -1638,10 +1695,18 @@ void Core_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, const
     if (DrawLocked(c, mode, count, type, idx))
         return;
     Core_Begin(c, mode);
-    for (i = 0; i < count; i++)
-    {
-        k = Index(type, idx, i);
-        ArrayVertex(c, k);
-    }
+    if (c->vnorm && c->na.enabled)
+        for (i = 0; i < count; i++)
+        {
+            k = Index(type, idx, i);
+            FetchNormal(c, k);
+            ArrayVertex(c, k);
+        }
+    else
+        for (i = 0; i < count; i++)
+        {
+            k = Index(type, idx, i);
+            ArrayVertex(c, k);
+        }
     Core_End(c);
 }

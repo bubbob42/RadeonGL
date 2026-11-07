@@ -40,6 +40,22 @@ void  Tex_Defaults(struct CoreTex *t, ULONG name);
 /* An object for name (created on first use), or NULL out of memory. */
 struct CoreTex *Tex_Get(struct Core *c, ULONG name);
 
+/* light_dirty bits beside the lights' own (0..7) */
+#define LD_MATERIAL 0x100UL
+#define LD_MODEL    0x200UL
+#define LD_ALL      0x3ffUL
+
+/* GL's initial lighting state (light.c, from Core_Init). */
+void  Light_Defaults(struct Core *c);
+/* R2E_TclDefaults wrote the lighting controls: their shadow takes the
+ * defaults, and the lights, materials and model go out again (light.c). */
+void  Light_Reset(struct Core *c);
+/* The TCL lighting state that D_LIGHT asks for (hwstate.c's emit). */
+void  Light_Emit(struct Core *c);
+/* The modelview and its inverse transpose for the TCL, when lighting
+ * needs them (hwstate.c's emit, with D_MATRIX). */
+void  Light_Matrices(struct Core *c);
+
 /* RB3D_PLANEMASK for glColorMask's bits in a colour format (hwstate.c). */
 ULONG Core_PlaneMask(ULONG format, ULONG m);
 

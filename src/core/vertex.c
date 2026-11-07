@@ -6,6 +6,7 @@
  * loop). Each glVertex writes its packed vertex straight into that room:
  *
  *   x, y, z            floats (TCL transforms them: object space)
+ *   nx, ny, nz         floats, with lighting on only (light.c)
  *   colour             one dword, as the GPU reads it: a << 24 | b << 16 | g << 8 | r
  *   s0, t0             if unit 0 textures this draw
  *   s1, t1             if unit 1 does
@@ -69,6 +70,12 @@ static void Open(struct Core *c)
     c->vptr = p;
     c->vlimit = (p != NULL) ? p + c->vtx_dw * CORE_IMMD_VERTS : NULL;
     c->nverts = 0;
+    if (c->vnorm)
+    {
+        /* lit: every vertex to Emit's slow branch, which knows the limit */
+        c->vlimit_lit = c->vlimit;
+        c->vlimit = p;
+    }
 }
 
 static void Close(struct Core *c, ULONG n)
@@ -86,7 +93,7 @@ static void Close(struct Core *c, ULONG n)
 void Vtx_Split(struct Core *c)
 {
     ULONG carry[4];     /* vertex indices to carry, or ~0 for the first vertex */
-    ULONG save[4 * 8];
+    ULONG save[4 * 16];
     ULONG keep;
     ULONG ncarry;
     ULONG n;
@@ -139,7 +146,7 @@ void Vtx_Split(struct Core *c)
     /* the carried vertices are stream dwords already: copy them raw */
     for (i = 0; i < ncarry; i++)
     {
-        src = (carry[i] == 0xffffffffUL) ? c->first : c->vbase + carry[i] * vd;
+        src = (carry[i] == 0xffffffffUL) ? CORE_FIRST(c) : c->vbase + carry[i] * vd;
         for (k = 0; k < vd; k++)
             save[i * vd + k] = src[k];
     }
@@ -180,6 +187,8 @@ void Core_Begin(struct Core *c, ULONG mode)
     units = Core_UnitsOn(c);
     c->units_on = units;
     c->vtx_dw = 4 + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);
+    if (c->vnorm)
+        c->vtx_dw += 3;             /* lighting: the normal (light.c) */
     c->prim = mode;
     c->hwprim = Vtx_HwPrim(mode);
     if (CORE_SCISSOR_EMPTY(c))
@@ -215,7 +224,7 @@ void Core_End(struct Core *c)
     {
         /* close the loop: the first vertex once more (the spare room) */
         for (k = 0; k < c->vtx_dw; k++)
-            c->vbase[n * c->vtx_dw + k] = c->first[k];
+            c->vbase[n * c->vtx_dw + k] = CORE_FIRST(c)[k];
         n++;
     }
     Close(c, n);
@@ -224,6 +233,8 @@ void Core_End(struct Core *c)
     c->vptr = NULL;
     c->vfast = 0;
 }
+
+static void EmitLit(struct Core *c, ULONG *p, ULONG x, ULONG y, ULONG z);
 
 /* x, y, z: float bit patterns */
 static void Emit(struct Core *c, ULONG x, ULONG y, ULONG z)
@@ -237,6 +248,19 @@ static void Emit(struct Core *c, ULONG x, ULONG y, ULONG z)
         return;
     if (p >= c->vlimit)
     {
+        if (c->vnorm)
+        {
+            /* lighting: its own limit and vertex layout (Open) */
+            if (p >= c->vlimit_lit)
+            {
+                Vtx_Split(c);
+                p = c->vptr;
+                if (p == NULL)
+                    return;
+            }
+            EmitLit(c, p, x, y, z);
+            goto done;
+        }
         Vtx_Split(c);
         p = c->vptr;
         if (p == NULL)
@@ -284,9 +308,10 @@ static void Emit(struct Core *c, ULONG x, ULONG y, ULONG z)
         p[k] = b0;
         p[k + 1] = b1;
     }
+done:
     if (c->nverts == 0 && NeedsFirst(c->prim))
         for (k = 0; k < c->vtx_dw; k++)
-            c->first[k] = p[k];
+            CORE_FIRST(c)[k] = p[k];
     c->vptr = p + c->vtx_dw;
     c->nverts++;
 }
@@ -368,4 +393,39 @@ void Core_Normal3f(struct Core *c, float x, float y, float z)
     c->cur_normal[0] = x;
     c->cur_normal[1] = y;
     c->cur_normal[2] = z;
+}
+
+/* Emit's lit way (light.c): position, the current normal, colour, texture
+ * coordinates -- kept apart so that the unlit hot path below stays as it
+ * was (MEASURED 2026-11-07: one shared path cost GLQuake 0.6%) */
+static void EmitLit(struct Core *c, ULONG *p, ULONG x, ULONG y, ULONG z)
+{
+    ULONG b[11];
+    ULONG n;
+    ULONG k;
+
+    b[0] = x;
+    b[1] = y;
+    b[2] = z;
+    b[3] = R2_FBITS(c->cur_normal[0]);
+    b[4] = R2_FBITS(c->cur_normal[1]);
+    b[5] = R2_FBITS(c->cur_normal[2]);
+    b[6] = c->cur_color;
+    n = 7;
+    if (c->units_on & 1)
+    {
+        b[n++] = R2_FBITS(c->cur_st[0][0]);
+        b[n++] = R2_FBITS(c->cur_st[0][1]);
+    }
+    if (c->units_on & 2)
+    {
+        b[n++] = R2_FBITS(c->cur_st[1][0]);
+        b[n++] = R2_FBITS(c->cur_st[1][1]);
+    }
+    for (k = 0; k < n; k++)
+    {
+        if (c->cs->swap)
+            R2_SWAPI(b[k]);
+        p[k] = b[k];
+    }
 }

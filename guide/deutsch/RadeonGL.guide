@@ -499,6 +499,11 @@ Für gar kein Protokoll:
 
     * Immer nur ein Programm: auf einem eigenen Bildschirm, in einem
       Fenster oder in eine Bitmap (siehe @{" Der Bildschirm " link Screen}).
+    * Die Beleuchtung (glLight, glMaterial, glLightModel, glColorMaterial,
+      Normalen aus glNormal und glNormalPointer) übernimmt die Radeon:
+      acht Lichter, gerichtet, punktförmig und als Spot, mit Abschwächung.
+      Solange sie an ist, werden kompilierte Vertex-Arrays auf dem
+      langsameren direkten Weg gezeichnet.
     * Texturen liegen in bis zu 16 MB des Kartenspeichers, und RadeonGL
       lagert sie noch nicht aus: Ein Programm, das mehr braucht, bekommt
       für den Rest weiße Texturen.
@@ -511,14 +516,11 @@ Für gar kein Protokoll:
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL setzt 104 der 205 Funktionen der minigl.library 29.1 um: alles,
+RadeonGL setzt 114 der 205 Funktionen der minigl.library 29.1 um: alles,
 was GLQuake verwendet, und mehr. Ein Programm, das eine der anderen
 aufruft, bekommt dafür nur den Fehler GL_INVALID_OPERATION; die
 @{" Protokolldatei " link Log} nennt solche Aufrufe.
 
-    * Beleuchtung und Materialien (glLight, glMaterial, glLightModel,
-      glColorMaterial): fehlen (GL_INVALID_OPERATION). Normalen werden
-      angenommen, aber nicht verwendet.
     * Nebel (glFog).
     * Display-Listen (glNewList, glCallList und die übrigen).
     * Erzeugte Texturkoordinaten (glTexGen), glTexCoord4f, die
@@ -530,16 +532,15 @@ aufruft, bekommt dafür nur den Fehler GL_INVALID_OPERATION; die
       glCopyTexSubImage2D, glPixelStorei, glDrawBuffer, glReadBuffer).
     * Die Aufrufe mit doppelter Genauigkeit (glLoadMatrixd, glMultMatrixd,
       glRotated, glScaled, glTranslated, glGetDoublev).
-    * glArrayElement, glInterleavedArrays, glMultiDrawArrays,
-      glNormalPointer, Kantenmarken und der Farbindex-Modus.
+    * glArrayElement, glInterleavedArrays, glMultiDrawArrays, Kantenmarken
+      und der Farbindex-Modus.
     * glBlendEquation, glBlendFuncSeparate, glLineWidth, glColorTable,
       glTexEnvfv, Texturprioritäten.
     * GLU und GLUT (gluPerspective, gluLookAt, gluBuild2DMipmaps, die
       Quadriken; die Fenster- und Körperfunktionen von GLUT).
     * Die eigene Hauptschleife von MiniGL mit ihren Rückrufen
-      (mglMainLoop, mglIdleFunc, mglKeyFunc, mglMouseFunc), Kontexte in
-      einem Fenster oder einer Bitmap, mglLockBack, mglTexMemStat,
-      mglWriteShotPPM.
+      (mglMainLoop, mglIdleFunc, mglKeyFunc, mglMouseFunc), mglLockBack,
+      mglTexMemStat, mglWriteShotPPM.
 @endnode
 
 @node Inside "Wie es funktioniert"
