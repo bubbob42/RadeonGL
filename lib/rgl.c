@@ -600,6 +600,7 @@ static void FreeRgl(struct Rgl *r)
     PointerBack(r);
     if (r->card.rec != NULL)
         FreeVec(r->card.rec);
+    Rgldl_Free(r);
     Core_Free(&r->core);
     if (r->real)
         Card_Close(&r->rad);
@@ -1121,6 +1122,7 @@ void Back_ClientGone(struct Task *task)
         FreeRgl(r);
     }
     choose_window = 0;
+    Rglg_ClientGone(task);
     rgl_busy = 0;
 }
 

@@ -526,14 +526,9 @@ To have no log at all:
 
 @{b}Not implemented yet@{ub}
 
-RadeonGL answers 177 of the 205 functions of minigl.library 29.1:
-everything GLQuake uses, and more (a few of them accepted without
-effect, see below). A program calling one of the other 28 gets nothing
-for it but the error GL_INVALID_OPERATION; the
-@{" log file " link Log} names such calls.
+RadeonGL answers all 205 functions of minigl.library 29.1 (a few of
+them accepted without effect, see below). Not there yet:
 
-    * Display lists (glNewList, glCallList and the rest).
-    * GLUT (its window and shape functions).
     * Polygons drawn as lines or points (glPolygonMode), stencil and
       accumulation buffers, line and polygon stipple, logic operations,
       reading the depth buffer.
@@ -549,6 +544,22 @@ the context, and a GL_COLOR_INDEX upload is turned into colours through
 it when it is made, so a later palette does not change textures already
 there. A GL_RGBA palette is read as alpha, red, green, blue, MiniGL's
 order.
+
+Display lists keep the calls themselves, and glCallList makes them
+again: a list may bind textures, change matrices, materials and lights,
+switch states and call other lists (MiniGL 29.1 keeps only the vertices
+of glBegin/glEnd blocks). Made at once and not kept, as GL has it:
+queries, the list calls but glCallList, client array state and pixel
+storage; also, unlike GL but as in 29.1, glTexImage2D, glTexSubImage2D
+and the vertex array draws (glDrawArrays, glDrawElements,
+glArrayElement).
+
+GLUT, as in MiniGL 29.1: one window a program (glutCreateWindow, at
+glutInitWindowPosition) or a game-mode screen (glutGameModeString,
+glutEnterGameMode), the display, idle, keyboard and reshape callbacks,
+glutGet, and the solid cube, sphere, cone, torus and dodecahedron.
+Reshape follows when the window is sized; its close gadget ends
+glutMainLoop. A display list being made records the shapes.
 @endnode
 
 @node Inside "How it works"

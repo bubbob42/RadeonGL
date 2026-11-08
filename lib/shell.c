@@ -143,6 +143,25 @@ static const MGLDispatchTable *LibGetDispatchTable(void)
     return (t != NULL) ? t : &MiniGLDispatchTable;
 }
 
+/* The calling task's own table, NULL when it has the shared one: what
+ * rgldlist.c points at its recorders while a display list is made */
+MGLDispatchTable *Shell_TaskTable(void)
+{
+    struct Task *me;
+    MGLDispatchTable *t;
+    ULONG i;
+
+    me = FindTask(NULL);
+    t = NULL;
+    Forbid();
+    for (i = 0; i < OPENERS && opener[i] != me; i++)
+        ;
+    if (i < OPENERS)
+        t = table[i];
+    Permit();
+    return t;
+}
+
 static struct MiniGLBase *LibInit(
     register struct MiniGLBase *base __asm("d0"),
     register BPTR seglist __asm("a0"),

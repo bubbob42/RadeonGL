@@ -49,7 +49,7 @@ static struct Core *Ctx(GLcontext context)
 
 /* The calling task's newest context, for calls without a context argument
  * (GLU's): the one the SDK made current last */
-static struct Core *TaskCore(void)
+struct Core *Rglc_TaskCore(void)
 {
     struct Rgl *r;
     struct Task *me;
@@ -66,12 +66,21 @@ static struct Core *TaskCore(void)
 
 void Rglc_GetFloatv(struct Core *c, ULONG pname, float *out)
 {
+    LONG v;
+
+    if (Rgldl_Get((struct Rgl *) c, pname, &v))
+    {
+        out[0] = (float) v;
+        return;
+    }
     Sync(c);
     Core_GetFloatvX(c, pname, out);
 }
 
 void Rglc_GetIntegerv(struct Core *c, ULONG pname, LONG *out)
 {
+    if (Rgldl_Get((struct Rgl *) c, pname, out))
+        return;
     Sync(c);
     Core_GetIntegervX(c, pname, out);
 }
@@ -266,7 +275,7 @@ void Hook_GLUPerspective(GLfloat fovy, GLfloat aspect, GLfloat znear, GLfloat zf
 {
     struct Core *c;
 
-    if ((c = TaskCore()) == NULL)
+    if ((c = Rglc_TaskCore()) == NULL)
         return;
     Core_Perspective(c, fovy, aspect, znear, zfar);
 }
@@ -277,7 +286,7 @@ void Hook_GLULookAt(GLfloat ex, GLfloat ey, GLfloat ez, GLfloat cx, GLfloat cy, 
     struct Core *c;
     float eye[3], centre[3], up[3];
 
-    if ((c = TaskCore()) == NULL)
+    if ((c = Rglc_TaskCore()) == NULL)
         return;
     eye[0] = ex;
     eye[1] = ey;
@@ -509,7 +518,8 @@ void Hook_MGLMainLoop(GLcontext context)
      * mouse is reported absolute), the VERIFY classes and REFRESHWINDOW */
     if (!ModifyIDCMP(win, (win->IDCMPFlags & ~(IDCMP_DELTAMOVE | IDCMP_REFRESHWINDOW | IDCMP_SIZEVERIFY
                                                 | IDCMP_REQVERIFY | IDCMP_MENUVERIFY))
-                          | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_MOUSEMOVE | IDCMP_MOUSEBUTTONS))
+                          | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_MOUSEMOVE | IDCMP_MOUSEBUTTONS
+                          | (r->ml_close ? (IDCMP_CLOSEWINDOW | IDCMP_NEWSIZE) : 0)))
         return;
     r->ml_running = 1;
     while (r->ml_running)
@@ -527,6 +537,10 @@ void Hook_MGLMainLoop(GLcontext context)
                 case IDCMP_VANILLAKEY:
                     if (r->ml_key != NULL)
                         r->ml_key((char) code);
+                    break;
+                case IDCMP_CLOSEWINDOW:     /* GLUT's window (rglglut.c): the loop ends */
+                    if (r->ml_close)
+                        r->ml_running = 0;
                     break;
                 case IDCMP_RAWKEY:          /* presses only: the handler has no up/down */
                     sp = (code & 0x80) ? -1 : Special(code);
@@ -560,13 +574,8 @@ void Hook_MGLMainLoop(GLcontext context)
 }
 
 /* --- GLU quadrics -------------------------------------------------------------------------- */
-/* The object GLU's calls share (opaque to programs); the drawing is the
- * calling task's context's (the GLU calls have no context argument). */
-struct GLUquadricObj_t
-{
-    struct CoreQuadric q;
-    MGLUfuncptr error;          /* GLU_ERROR's callback, or NULL */
-};
+/* The object GLU's calls share is struct GLUquadricObj_t (rglint.h); the
+ * drawing is the calling task's context's (GLU calls have no context). */
 
 #define GLU_ERROR_CB      100103
 #define GLU_INVALID_ENUM_ 100900
@@ -645,7 +654,7 @@ void Hook_GLUCylinder(GLUquadricObj *q, GLdouble base, GLdouble top, GLdouble he
 {
     struct Core *c;
 
-    if (q == NULL || (c = TaskCore()) == NULL)
+    if (q == NULL || (c = Rglc_TaskCore()) == NULL)
         return;
     Core_Cylinder(c, &q->q, (float) base, (float) top, (float) height, slices, stacks);
 }
@@ -654,7 +663,7 @@ void Hook_GLUSphere(GLUquadricObj *q, GLdouble radius, GLint slices, GLint stack
 {
     struct Core *c;
 
-    if (q == NULL || (c = TaskCore()) == NULL)
+    if (q == NULL || (c = Rglc_TaskCore()) == NULL)
         return;
     Core_Sphere(c, &q->q, (float) radius, slices, stacks);
 }
@@ -663,7 +672,7 @@ void Hook_GLUDisk(GLUquadricObj *q, GLdouble inner, GLdouble outer, GLint slices
 {
     struct Core *c;
 
-    if (q == NULL || (c = TaskCore()) == NULL)
+    if (q == NULL || (c = Rglc_TaskCore()) == NULL)
         return;
     Core_Disk(c, &q->q, (float) inner, (float) outer, slices, loops);
 }

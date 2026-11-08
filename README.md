@@ -97,13 +97,9 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL answers 177 of the 205 functions of `minigl.library` 29.1:
-everything GLQuake uses, and more (a few accepted without effect). The
-other 28 draw nothing and set GL_INVALID_OPERATION; the library's log
-names every such call.
+RadeonGL answers all 205 functions of `minigl.library` 29.1 (a few
+accepted without effect). Not there yet:
 
-- Display lists.
-- GLUT.
 - Polygons drawn as lines or points (`glPolygonMode`), stencil and
   accumulation buffers, line and polygon stipple, logic operations,
   reading the depth buffer.
@@ -117,6 +113,13 @@ names every such call.
 - Paletted textures as in MiniGL 29.1: one palette a context, applied when
   a `GL_COLOR_INDEX` image is uploaded; a `GL_RGBA` palette is read as
   A, R, G, B (MiniGL's order).
+- Display lists keep the calls themselves (textures, matrices, materials,
+  states, nested lists; 29.1 keeps only glBegin/glEnd vertices). Not kept,
+  as in 29.1: `glTexImage2D`/`glTexSubImage2D` and vertex array draws run
+  at once.
+- GLUT as in 29.1: one window a program or a game-mode screen, the
+  callbacks, `glutGet`, the five solid shapes; resizing calls reshape,
+  the close gadget ends `glutMainLoop`.
 
 ## GLQuake benchmarks
 

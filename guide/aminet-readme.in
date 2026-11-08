@@ -73,10 +73,8 @@ FEATURES
 
 NOT IMPLEMENTED YET
 
-177 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
-and more. A missing one sets GL_INVALID_OPERATION; the log names it.
+All 205 functions of minigl.library 29.1 are there. Not yet:
 
-  * Display lists, GLUT
   * Polygons as lines or points, stencil and accumulation buffers,
     stipple, logic operations, reading the depth buffer
   * Generic 32-bit textures are stored with 16 bits (GL_RGBA8 and

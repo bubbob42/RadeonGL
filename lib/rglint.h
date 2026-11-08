@@ -13,6 +13,8 @@
 #include "nullcard.h"
 #include "rgl_dispatch.h"
 
+struct RglDL;                   /* rgldlist.c */
+
 struct Rgl
 {
     struct Core core;           /* first: a context's pointer is its core's */
@@ -49,6 +51,8 @@ struct Rgl
     MouseHandlerFn ml_mouse;
     SpecialHandlerFn ml_special;
     ULONG ml_running;
+    ULONG ml_close;             /* the close gadget ends the loop (GLUT, rglglut.c) */
+    struct RglDL *dl;           /* display lists (rgldlist.c), made at the first list call */
 };
 
 /* rgl.c: every context, newest first (W3) */
@@ -56,6 +60,20 @@ extern struct Rgl *rgl_list;
 
 /* rglcompat.c (linked last): glGet with the context's buffering known */
 extern const char Rglc_Extensions[];    /* GL_EXTENSIONS (rglcompat.c) */
+/* shell.c: the calling task's own dispatch table, NULL on the shared one */
+MGLDispatchTable *Shell_TaskTable(void);
+/* rgldlist.c: a context's lists freed; glGet's list names */
+void Rgldl_Free(struct Rgl *r);
+/* rglglut.c: a task's GLUT state, when the task leaves */
+void Rglg_ClientGone(struct Task *task);
+/* rglcompat.c: the GLU quadric object (opaque to programs); its settings first */
+struct GLUquadricObj_t
+{
+    struct CoreQuadric q;
+    MGLUfuncptr error;          /* GLU_ERROR's callback, or NULL */
+};
+struct Core *Rglc_TaskCore(void);       /* the calling task's newest context */
+BOOL Rgldl_Get(struct Rgl *r, ULONG pname, LONG *out);
 void Rglc_GetFloatv(struct Core *c, ULONG pname, float *out);
 void Rglc_GetIntegerv(struct Core *c, ULONG pname, LONG *out);
 

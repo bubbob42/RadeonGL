@@ -564,14 +564,9 @@ Für gar kein Protokoll:
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL beantwortet 177 der 205 Funktionen der minigl.library 29.1:
-alles, was GLQuake verwendet, und mehr (einige davon ohne Wirkung, siehe
-unten). Ein Programm, das eine der übrigen 28 aufruft, bekommt dafür nur
-den Fehler GL_INVALID_OPERATION; die @{" Protokolldatei " link Log}
-nennt solche Aufrufe.
+RadeonGL beantwortet alle 205 Funktionen der minigl.library 29.1
+(einige davon ohne Wirkung, siehe unten). Noch nicht da:
 
-    * Display-Listen (glNewList, glCallList und die übrigen).
-    * GLUT (die Fenster- und Körperfunktionen).
     * Polygone als Linien oder Punkte (glPolygonMode), Stencil- und
       Akkumulationspuffer, Linien- und Flächenmuster, logische
       Verknüpfungen, den Tiefenpuffer lesen.
@@ -587,6 +582,25 @@ Palette für den Kontext, und ein GL_COLOR_INDEX-Upload wird beim Hochladen
 über sie in Farben umgesetzt; eine spätere Palette ändert vorhandene
 Texturen also nicht. Eine GL_RGBA-Palette wird als Alpha, Rot, Grün, Blau
 gelesen, in MiniGLs Reihenfolge.
+
+Display-Listen bewahren die Aufrufe selbst auf, und glCallList macht sie
+noch einmal: Eine Liste darf Texturen binden, Matrizen, Materialien und
+Lichter ändern, Zustände schalten und andere Listen aufrufen (MiniGL
+29.1 bewahrt nur die Ecken von glBegin/glEnd-Blöcken auf). Sofort
+ausgeführt und nicht aufbewahrt, wie GL es vorsieht: Abfragen, die
+Listenaufrufe außer glCallList, der Zustand der Client-Arrays und die
+Pixel-Ablage; außerdem, anders als GL, aber wie 29.1, glTexImage2D,
+glTexSubImage2D und das Zeichnen aus Vertex-Arrays (glDrawArrays,
+glDrawElements, glArrayElement).
+
+GLUT, wie in MiniGL 29.1: ein Fenster je Programm (glutCreateWindow, an
+glutInitWindowPosition) oder ein Bildschirm im Spielmodus
+(glutGameModeString, glutEnterGameMode), die Rückrufe für Anzeige,
+Leerlauf, Tastatur und Größenänderung, glutGet und die Körper Würfel,
+Kugel, Kegel, Torus und Dodekaeder. Wird das Fenster in der Größe
+verändert, folgt der Rückruf dafür; sein Schließsymbol beendet
+glutMainLoop. Eine Display-Liste, die gerade entsteht, nimmt die Körper
+auf.
 @endnode
 
 @node Inside "Wie es funktioniert"

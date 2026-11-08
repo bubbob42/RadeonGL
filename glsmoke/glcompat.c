@@ -549,6 +549,141 @@ static void PaletteCases(void)
     glDisable(GL_SHARED_TEXTURE_PALETTE_EXT);
 }
 
+/* --- display lists ----------------------------------------------------------------------- */
+
+#ifndef GL_MAX_LIST_NESTING
+#define GL_MAX_LIST_NESTING 0x0B31      /* not in MiniGL's gl.h */
+#endif
+
+/* a quad x0..x1 over the whole height */
+static void Band(float x0, float x1)
+{
+    glBegin(GL_QUADS);
+    glVertex3f(x0, 0.0f, 0.0f);
+    glVertex3f(x1, 0.0f, 0.0f);
+    glVertex3f(x1, (GLfloat) S, 0.0f);
+    glVertex3f(x0, (GLfloat) S, 0.0f);
+    glEnd();
+}
+
+static void ListCases(void)
+{
+    static const GLubyte redtex[4 * 3] = { 255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0 };
+    static const GLubyte whitetex[4 * 3] = { 255, 255, 255, 255, 255, 255, 255, 255, 255,
+                                            255, 255, 255 };
+    GLuint base;
+    GLint iv[1];
+
+    Ortho();
+    glDisable(GL_TEXTURE_2D);
+    base = glGenLists(6);
+    WantInt("glGenLists(6): a name", (LONG) (base != 0), 1);
+    WantInt("glIsList: a name glGenLists gave", (LONG) glIsList(base + 5), 1);
+
+    /* L1. compiled, not drawn; drawn by glCallList */
+    Begin();
+    glNewList(base, GL_COMPILE);
+    iv[0] = -1;
+    glGetIntegerv(GL_LIST_INDEX, iv);       /* a query: runs at once, not recorded */
+    glColor3f(1.0f, 0.0f, 0.0f);
+    Band(0.0f, (GLfloat) S);
+    glEndList();
+    WantInt("glGetIntegerv GL_LIST_INDEX while compiling", iv[0], (LONG) base);
+    Show();
+    Want("GL_COMPILE: nothing drawn yet", S / 2, S / 2, 0, 0, 0);
+    glCallList(base);
+    Show();
+    Want("glCallList: the recorded red quad", S / 2, S / 2, 1, 0, 0);
+
+    /* L2. a matrix in the list: replayed (and left changed, as GL says) */
+    glNewList(base + 1, GL_COMPILE);
+    glPushMatrix();
+    glTranslatef(S / 2.0f, 0.0f, 0.0f);
+    glColor3f(0.0f, 1.0f, 0.0f);
+    Band(0.0f, S / 2.0f);
+    glPopMatrix();
+    glEndList();
+    Begin();
+    glCallList(base + 1);
+    Show();
+    Want("list with glTranslatef: left half empty", S / 4, S / 2, 0, 0, 0);
+    Want("list with glTranslatef: green on the right", S * 3 / 4, S / 2, 0, 1, 0);
+
+    /* L3. nested: base + 2 calls base + 1, then draws blue on the left */
+    glNewList(base + 2, GL_COMPILE);
+    glCallList(base + 1);
+    glColor3f(0.0f, 0.0f, 1.0f);
+    Band(0.0f, S / 2.0f);
+    glEndList();
+    Begin();
+    glCallList(base + 2);
+    Show();
+    Want("nested lists: blue on the left", S / 4, S / 2, 0, 0, 1);
+    Want("nested lists: green on the right (the inner list)", S * 3 / 4, S / 2, 0, 1, 0);
+
+    /* L4. a list that sets no colour takes the colour current at the call */
+    glNewList(base + 3, GL_COMPILE);
+    Band(0.0f, (GLfloat) S);
+    glEndList();
+    glColor3f(1.0f, 1.0f, 0.0f);
+    Begin();
+    glCallList(base + 3);
+    Show();
+    Want("list without glColor: the colour at the call (yellow)", S / 2, S / 2, 1, 1, 0);
+
+    /* L5. GL_COMPILE_AND_EXECUTE draws while it records */
+    Begin();
+    glNewList(base + 4, GL_COMPILE_AND_EXECUTE);
+    glColor3f(1.0f, 0.0f, 1.0f);
+    Band(0.0f, (GLfloat) S);
+    glEndList();
+    Show();
+    Want("GL_COMPILE_AND_EXECUTE: drawn at once", S / 2, S / 2, 1, 0, 1);
+
+    /* L6. glBindTexture in the list: the list's texture, whatever is bound */
+    glBindTexture(GL_TEXTURE_2D, 20);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, (void *) redtex);
+    Nearest();
+    glBindTexture(GL_TEXTURE_2D, 21);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, (void *) whitetex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    Nearest();
+    glNewList(base + 5, GL_COMPILE);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 20);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    TexQuad();
+    glDisable(GL_TEXTURE_2D);
+    glEndList();
+    glBindTexture(GL_TEXTURE_2D, 21);       /* white bound at the call */
+    glColor3f(1.0f, 1.0f, 1.0f);
+    Begin();
+    glCallList(base + 5);
+    Show();
+    Want("glBindTexture in the list: the red texture", S / 2, S / 2, 1, 0, 0);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+    /* deleting, errors, queries */
+    glDeleteLists(base, 1);
+    WantInt("glDeleteLists: glIsList false", (LONG) glIsList(base), 0);
+    Begin();
+    glCallList(base);
+    Show();
+    Want("glCallList of a deleted list: nothing", S / 2, S / 2, 0, 0, 0);
+    WantInt("no error so far", (LONG) glGetError(), 0);
+    glEndList();
+    WantInt("glEndList without glNewList: GL_INVALID_OPERATION", (LONG) glGetError(),
+            GL_INVALID_OPERATION);
+    glNewList(0, GL_COMPILE);
+    WantInt("glNewList(0): GL_INVALID_VALUE", (LONG) glGetError(), GL_INVALID_VALUE);
+    iv[0] = 0;
+    glGetIntegerv(GL_MAX_LIST_NESTING, iv);
+    WantInt("glGetIntegerv GL_MAX_LIST_NESTING", iv[0], 64);
+    glDeleteLists(base + 1, 5);
+    WantInt("all lists deleted: no error", (LONG) glGetError(), 0);
+}
+
 /* --- reading back, queries ------------------------------------------------------------- */
 
 static void QueryCases(void)
@@ -725,6 +860,7 @@ int main(void)
     CopyCases();
     BlendCases();
     PaletteCases();
+    ListCases();
     QueryCases();
     mglDeleteContext();
     LoopCase();
