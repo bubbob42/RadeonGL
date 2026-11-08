@@ -718,6 +718,12 @@ dist/Probe/C/R200Info: build/probe/r200info.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# RadeonStat (2026-11-08): a line a second -- GPU busy, CP lag, P96's free
+# card memory, the front screen's pixel clock; read-only
+dist/Probe/C/RadeonStat: build/probe/radeonstat.o $(PROBE_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 dist/Probe/C/BusBench: build/probe/busbench.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
@@ -817,6 +823,10 @@ dist/Probe/C/R200Info_sasc: build/probe-sasc/r200info.o $(PROBE_SC_OBJS) | $(VAM
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/RadeonStat_sasc: build/probe-sasc/radeonstat.o $(PROBE_SC_OBJS) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 dist/Probe/C/BusBench_sasc: build/probe-sasc/busbench.o $(PROBE_SC_OBJS) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -868,7 +878,7 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
         dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
         dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc dist/Probe/C/BmFit_sasc \
         dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc \
-        dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc
+        dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc dist/Probe/C/RadeonStat dist/Probe/C/RadeonStat_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
