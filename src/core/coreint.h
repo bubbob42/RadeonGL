@@ -28,6 +28,16 @@ void  Vtx_Split(struct Core *c);
 /* The upload cache forgets everything (array.c). */
 void  UCache_Clear(struct Core *c);
 
+/* One step of the upload cache's two hashes (array.c, arraylit.c) */
+#define UROL(v, n) (((v) << (n)) | ((v) >> (32 - (n))))
+#define UMIX(a, b, x) ((a) = UROL(((a) ^ (x)) * 16777619UL, 16), (b) = UROL((b), 5) + (x))
+
+/* The rare layouts of locked arrays, linked after everything hot
+ * (arraylit.c): lit vertices into the stream, and their key under
+ * GL_RGL_STATIC_ARRAYS_HINT. */
+void  Core_PackLit(struct Core *c, ULONG *p, ULONG first, ULONG n, ULONG vd, ULONG units);
+ULONG Core_StaticKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, ULONG *h);
+
 /* The longest prefix of n vertices that is a whole primitive of mode. */
 ULONG Vtx_Whole(ULONG mode, ULONG n);
 

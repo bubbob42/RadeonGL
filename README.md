@@ -33,7 +33,7 @@ needs.
   frame. `GL_DONT_CARE` switches it off again, `GL_FASTEST` forgets every
   such array (before the program frees or refills one). It covers arrays
   of positions plus two texture units without a colour array (GLQuake's
-  world). `glHint(GL_RGL_STATIC_INDICES_HINT, GL_NICEST)` (`0x52474C02`)
+  world), GLQuake's models, and every lit layout (with normals). `glHint(GL_RGL_STATIC_INDICES_HINT, GL_NICEST)` (`0x52474C02`)
   does the same for 16-bit index lists: keyed by address, count and lock,
   never read again -- for lists built once (GLQuake draws whole chunks of
   its world from them, and lets the card cull what is hidden). Both share
@@ -50,8 +50,8 @@ needs.
 - **Lighting on the Radeon's TCL:** `glLight`, `glMaterial`,
   `glLightModel` (ambient, local viewer, two-sided), `glColorMaterial`,
   `GL_NORMALIZE`; eight lights, directional, local and spot, with
-  attenuation; normals from `glNormal` and `glNormalPointer`. While lighting
-  is on, compiled vertex arrays go the immediate way.
+  attenuation; normals from `glNormal` and `glNormalPointer`. Lit compiled
+  vertex arrays take the fast path too, with their normals in the stream.
 - **Texture coordinates from the TCL:** `glTexGen` with `GL_OBJECT_LINEAR`,
   `GL_EYE_LINEAR` and `GL_SPHERE_MAP` (S and T, per unit), and texture
   matrices (`glMatrixMode(GL_TEXTURE)`).

@@ -31,6 +31,9 @@
 #include <math.h>
 
 #define TEMPLATE "DEPTH/K/N,VERBOSE/S"
+#ifndef GL_RGL_STATIC_ARRAYS_HINT
+#define GL_RGL_STATIC_ARRAYS_HINT 0x52474c01UL   /* RadeonGL: arrays never change */
+#endif
 #define S 128                   /* the frame: S x S */
 
 const char ver[] = "$VER: GLLight 0.1 (07.11.2026)";
@@ -190,6 +193,9 @@ static void Cases(void)
 {
     static GLfloat normals[12] = { 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1 };
     static GLfloat corners[12] = { 0, 0, 0, S, 0, 0, S, S, 0, 0, S, 0 };
+    static GLfloat tilted[12] = { 0, 0.8660254f, 0.5f, 0, 0.8660254f, 0.5f,
+                                  0, 0.8660254f, 0.5f, 0, 0.8660254f, 0.5f };
+    static GLushort quad_idx[6] = { 0, 1, 2, 0, 2, 3 };
     GLfloat v[4];
     float h;
 
@@ -245,6 +251,30 @@ static void Cases(void)
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_VERTEX_ARRAY);
     Want("normal array (glDrawArrays)", S / 2, S / 2, 0.6f, 0.4f, 0.2f);
+
+    /* 6b. the same from locked arrays, glDrawElements: the normals tilted
+     * by 60 degrees (N.L = 0.5), so a stream that lost them would light
+     * with the current normal (0,0,1) and give the full diffuse; then twice
+     * more under GL_RGL_STATIC_ARRAYS_HINT (the second from the cache) */
+    glVertexPointer(3, GL_FLOAT, 0, corners);
+    glNormalPointer(GL_FLOAT, 0, tilted);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_NORMAL_ARRAY);
+    glLockArrays(0, 4);
+    Begin(); glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, (GLvoid *) quad_idx); Show();
+    glUnlockArrays();
+    Want("locked normal array (glDrawElements)", S / 2, S / 2, 0.3f, 0.2f, 0.1f);
+    glHint(GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    glLockArrays(0, 4);
+    Begin(); glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, (GLvoid *) quad_idx); Show();
+    glUnlockArrays();
+    glLockArrays(0, 4);
+    Begin(); glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, (GLvoid *) quad_idx); Show();
+    glUnlockArrays();
+    glHint(GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    Want("locked normal array, static hint, cached", S / 2, S / 2, 0.3f, 0.2f, 0.1f);
 
     /* 7. specular, light at 60 degrees, shininess 10:
      * H = normalize(L + (0,0,1)) = (0, 0.5, 0.866), N.H^10 = 0.2375 */

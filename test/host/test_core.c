@@ -617,6 +617,74 @@ static void test_lighting(void)
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 }
 
+/* Lit draws from locked arrays (2026-11-08): the stream's vertices carry
+ * the normal after the position, and under GL_RGL_STATIC_ARRAYS_HINT a lit
+ * mesh is kept in the upload cache (any layout keyed by address). */
+static void test_lit_locked(void)
+{
+    struct R2ChkState st;
+    static const float pos[12] = { -1, -1, -5, 1, -1, -5, 1, 1, -5, -1, 1, -5 };
+    static const float nrm[12] = { 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1 };
+    static const UWORD idx[6] = { 0, 1, 2, 0, 2, 3 };
+    ULONG draws0, hits0, ups0;
+    ULONG n, i, h, found, gpu;
+
+    Fresh(1);
+    Core_Viewport(&core, 0, 0, W_, H_);
+    Core_MatrixMode(&core, GL_PROJECTION);
+    Core_LoadIdentity(&core);
+    Core_Frustum(&core, -1, 1, -1, 1, 1, 100);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Core_LoadIdentity(&core);
+    Core_Enable(&core, GL_LIGHTING, 1);
+    Core_Enable(&core, GL_LIGHT0, 1);
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
+    Core_NormalPointer(&core, GL_FLOAT, 0, nrm);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientState(&core, GL_NORMAL_ARRAY, 1);
+    draws0 = core.stat_lock_draws;
+    Core_LockArrays(&core, 0, 4);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(core.stat_lock_draws, draws0 + 1);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    /* LOAD_VBPNTR: 7 dwords a vertex (x y z, nx ny nz, colour) */
+    n = (ULONG) (cs.ptr - stream);
+    found = 0;
+    for (i = 0; i < n; i += (R2_PKT_TYPE(h) == 2) ? 1 : 2 + R2_PKT_COUNT(h))
+    {
+        h = V(i);
+        if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_3D_LOAD_VBPNTR)
+            found = i;
+    }
+    CHECK(found != 0);
+    CHECK_INT(V(found + 2) & 0x7fUL, 7);                /* comps */
+    gpu = V(found + 3);
+    CHECK_HEX(HeapV(gpu + 1 * 28 + 16), R2Cs_FloatBits(1.0f));     /* vertex 1's ny */
+    CHECK_HEX(HeapV(gpu + 2 * 28 + 12), R2Cs_FloatBits(1.0f));     /* vertex 2's nx */
+    CHECK(LastReg(R_SE_VTX_FMT_0) & R_VTX_N0);
+
+    /* the static hint: the second draw of the same mesh hits the cache */
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    Core_GpuIdle(&core);
+    Core_LockArrays(&core, 0, 4);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    Core_GpuIdle(&core);
+    hits0 = core.stat_uc_hits;
+    ups0 = core.stat_uc_written;
+    Core_LockArrays(&core, 0, 4);
+    Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+    CHECK(core.stat_uc_hits >= hits0 + 2);              /* vertices and indices */
+    CHECK_INT(core.stat_uc_written, ups0);              /* nothing written again */
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    check_from = 0;
+    CHECK_INT(Checked(&st), R2CE_OK);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+}
+
 /* Texgen and texture matrices (texgen.c): the registers, the planes'
  * matrix, COMP_SEL, normals for a sphere map, and back to pass-through. */
 static void test_texgen(void)
@@ -3750,6 +3818,7 @@ int main(void)
     test_triangle();
     test_lighting();
     test_texgen();
+    test_lit_locked();
     test_tex32();
     test_textures();
     test_state();

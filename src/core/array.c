@@ -20,40 +20,7 @@
 #include "core.h"
 #include "coreint.h"
 #include "r200reg.h"
-
-static ULONG TypeSize(ULONG type)
-{
-    switch (type)
-    {
-        case GL_UNSIGNED_BYTE:
-        case GL_BYTE:
-        case MGL_UBYTE_ARGB:    /* MiniGL's packed colour layouts, a byte each */
-        case MGL_UBYTE_BGRA:    return 1;
-        case GL_SHORT:
-        case GL_UNSIGNED_SHORT: return 2;
-        case GL_INT:
-        case GL_UNSIGNED_INT:
-        case GL_FLOAT:          return 4;
-        case GL_DOUBLE:         return 8;
-    }
-    return 0;
-}
-
-static float Comp(const UBYTE *p, ULONG type, ULONG k)
-{
-    switch (type)
-    {
-        case GL_FLOAT:          return ((const float *) p)[k];
-        case GL_DOUBLE:         return (float) ((const double *) p)[k];
-        case GL_SHORT:          return (float) ((const WORD *) p)[k];
-        case GL_INT:            return (float) ((const LONG *) p)[k];
-        case GL_UNSIGNED_BYTE:  return (float) p[k];
-        case GL_BYTE:           return (float) ((const BYTE *) p)[k];
-        case GL_UNSIGNED_SHORT: return (float) ((const UWORD *) p)[k];
-        case GL_UNSIGNED_INT:   return (float) ((const ULONG *) p)[k];
-    }
-    return 0.0f;
-}
+#include "arrayfetch.h"
 
 static void SetArray(struct Core *c, struct CoreArray *a, LONG size, ULONG type,
                      LONG stride, const void *p, LONG minsize)
@@ -107,19 +74,6 @@ void Core_NormalPointer(struct Core *c, ULONG type, LONG stride, const void *p)
     SetArray(c, &c->na, 3, type, stride, p, 3);
 }
 
-/* A normal array's component k, the signed integer types mapped to
- * [-1, 1] as GL does */
-static float NormComp(const UBYTE *p, ULONG type, ULONG k)
-{
-    switch (type)
-    {
-        case GL_BYTE:   return (float) ((const BYTE *) p)[k] * (1.0f / 127.0f);
-        case GL_SHORT:  return (float) ((const WORD *) p)[k] * (1.0f / 32767.0f);
-        case GL_INT:    return (float) ((const LONG *) p)[k] * (1.0f / 2147483647.0f);
-    }
-    return Comp(p, type, k);
-}
-
 void Core_EnableClientState(struct Core *c, ULONG array, ULONG on)
 {
     c->lk_valid = 0;
@@ -169,91 +123,6 @@ static ULONG Index(ULONG type, const void *idx, LONG i)
     return ((const ULONG *) idx)[i];
 }
 
-static const UBYTE *Elem(const struct CoreArray *a, ULONG i)
-{
-    ULONG stride;
-
-    stride = a->stride ? a->stride : a->size * TypeSize(a->type);
-    return a->ptr + i * stride;
-}
-
-/* The current attributes from the arrays; the position into pos[4]. */
-/* Vertex i's colour and texture coordinates into the current ones. */
-static void FetchAttribs(struct Core *c, ULONG i)
-{
-    const UBYTE *p;
-    ULONG u;
-
-    if (c->ca.enabled)
-    {
-        p = Elem(&c->ca, i);
-        /* GLQuake's alias models use MGL_UBYTE_ARGB: A, R, G, B in memory */
-        if (c->ca.type == MGL_UBYTE_ARGB)
-            Core_Color4ub(c, p[1], p[2], p[3], p[0]);
-        else if (c->ca.type == MGL_UBYTE_BGRA)
-            Core_Color4ub(c, p[2], p[1], p[0], p[3]);
-        else if (c->ca.type == GL_UNSIGNED_BYTE)
-            Core_Color4ub(c, p[0], p[1], p[2], c->ca.size == 4 ? p[3] : 255);
-        else
-            Core_Color4f(c, Comp(p, c->ca.type, 0), Comp(p, c->ca.type, 1),
-                         Comp(p, c->ca.type, 2), c->ca.size == 4 ? Comp(p, c->ca.type, 3) : 1.0f);
-    }
-    for (u = 0; u < CORE_UNITS; u++)
-    {
-        if (!c->ta[u].enabled)
-            continue;
-        p = Elem(&c->ta[u], i);
-        if (c->ta[u].type == GL_FLOAT && c->ta[u].size >= 2)
-            CORE_TEXCOORD_BITS(c, u, ((const ULONG *) (const void *) p)[0],
-                               ((const ULONG *) (const void *) p)[1]);
-        else
-        {
-            c->cur_st[u][0] = Comp(p, c->ta[u].type, 0);
-            c->cur_st[u][1] = c->ta[u].size >= 2 ? Comp(p, c->ta[u].type, 1) : 0.0f;
-        }
-    }
-}
-
-static void Fetch(struct Core *c, ULONG i, float *pos)
-{
-    const UBYTE *p;
-
-    FetchAttribs(c, i);
-    p = Elem(&c->va, i);
-    pos[0] = Comp(p, c->va.type, 0);
-    pos[1] = Comp(p, c->va.type, 1);
-    pos[2] = c->va.size >= 3 ? Comp(p, c->va.type, 2) : 0.0f;
-    pos[3] = c->va.size == 4 ? Comp(p, c->va.type, 3) : 1.0f;
-    if (pos[3] != 1.0f && pos[3] != 0.0f)
-    {
-        pos[0] /= pos[3];       /* as glVertex4f does (vertex.c) */
-        pos[1] /= pos[3];
-        pos[2] /= pos[3];
-    }
-}
-
-/* Vertex i's normal into the current one (lit draws only: DrawArrays and
- * DrawElements call it in a loop of their own, so the unlit loop stays as
- * it was) */
-static void FetchNormal(struct Core *c, ULONG i)
-{
-    const UBYTE *p;
-
-    p = Elem(&c->na, i);
-    if (c->na.type == GL_FLOAT)
-    {
-        c->cur_normal[0] = ((const float *) (const void *) p)[0];
-        c->cur_normal[1] = ((const float *) (const void *) p)[1];
-        c->cur_normal[2] = ((const float *) (const void *) p)[2];
-    }
-    else
-    {
-        c->cur_normal[0] = NormComp(p, c->na.type, 0);
-        c->cur_normal[1] = NormComp(p, c->na.type, 1);
-        c->cur_normal[2] = NormComp(p, c->na.type, 2);
-    }
-}
-
 /* The current attributes from the arrays, then the vertex. */
 static void ArrayVertex(struct Core *c, ULONG i)
 {
@@ -292,7 +161,8 @@ static ULONG StreamAlloc(struct Core *c, ULONG bytes)
     return off;
 }
 
-/* One packed vertex (as vertex.c writes it into the ring) at p. */
+/* One packed vertex (as vertex.c writes it into the ring) at p (lit
+ * vertices: Core_PackLit, arraylit.c). */
 static void Pack(struct Core *c, ULONG *p, ULONG units, const float *pos)
 {
     ULONG b[8];
@@ -588,10 +458,12 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
 {
     ULONG u;
 
-    if (!c->lk_valid || c->lk_units != units)
+    if (!c->lk_valid || c->lk_units != (units | (c->vnorm << 8)))
         return 0;
     if (!c->ca.enabled && c->lk_color != c->cur_color)
         return 0;
+    if (c->vnorm && !c->na.enabled)
+        return 0;                   /* lit, the current normal for all: packed anew */
     for (u = 0; u < CORE_UNITS; u++)
         if ((units & (1UL << u)) && !c->ta[u].enabled
             && (c->lk_st[u][0] != c->cur_st[u][0] || c->lk_st[u][1] != c->cur_st[u][1]))
@@ -626,8 +498,6 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
  * after the multiply: without it bit 31 of x reached bit 31 of a only, and
  * two sign flips 64 dwords apart cancelled in every lane (MEASURED: a full
  * key collision in one trial of five; audit 2026-11-03). */
-#define UROL(v, n) (((v) << (n)) | ((v) >> (32 - (n))))
-#define UMIX(a, b, x) ((a) = UROL(((a) ^ (x)) * 16777619UL, 16), (b) = UROL((b), 5) + (x))
 
 /* n dwords from p into h[0], h[1]. Four lanes -- UMIX's two for the even
  * dwords, two more for the odd ones -- so that two multiplications are in
@@ -838,6 +708,9 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
     ULONG col;
     ULONG k;
 
+    /* lit (normals): never one of GLQuake's layouts */
+    if (c->vnorm)
+        return c->static_arrays ? Core_StaticKey(c, first, lcount, units, h) : 0;
     if (c->no_fast || !c->cs->swap || c->va.type != GL_FLOAT || c->va.size != 3)
         return 0;
     t0 = &c->ta[0];
@@ -1413,7 +1286,9 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
         if (voff != 0xffffffffUL)
         {
             p = UWhere(c, heap, voff, vpos);
-            if (!PackFast(c, p, first, lcount, units))
+            if (c->vnorm)
+                Core_PackLit(c, p, first, lcount, vd, units);
+            else if (!PackFast(c, p, first, lcount, units))
                 for (k = 0; k < lcount; k++)
                 {
                     Fetch(c, first + k, pos);
@@ -1443,7 +1318,7 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
     {
         c->lk_gpu = vgpu;
         c->lk_valid = 1;
-        c->lk_units = units;
+        c->lk_units = units | (c->vnorm << 8);
         c->lk_color = c->cur_color;
         for (k = 0; k < CORE_UNITS; k++)
         {
@@ -1491,9 +1366,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     ULONG bad;
     float pos[4];
 
-    /* lighting: the vertices carry normals, which the stream's packers and
-     * the upload cache do not know -- the immediate way (light.c) */
-    if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP || c->vnorm)
+    if (c->lock_count <= 0 || c->stream_size == 0 || mode == GL_LINE_LOOP)
         return 0;
     first = (ULONG) c->lock_first;
     lcount = (ULONG) c->lock_count;
@@ -1519,7 +1392,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
                 return 0;
         }
     units = Core_UnitsOn(c);
-    vd = 4 + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);
+    vd = 4 + c->x_vdw + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);    /* x_vdw: a normal */
     vbytes = (lcount * vd * 4 + 31) & ~31UL;
     ibytes = (((n + 1) / 2) * 4 + 31) & ~31UL;
     if (vbytes + ibytes > c->stream_size)
@@ -1553,7 +1426,9 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
     {
         off = StreamAlloc(c, vbytes);
         p = base + (off - c->stream_off) / 4;
-        if (!PackFast(c, p, first, lcount, units))
+        if (c->vnorm)
+            Core_PackLit(c, p, first, lcount, vd, units);
+        else if (!PackFast(c, p, first, lcount, units))
             for (k = 0; k < lcount; k++)
             {
                 Fetch(c, first + k, pos);
@@ -1561,7 +1436,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
             }
         c->lk_gpu = c->heap.gpu + off;
         c->lk_valid = 1;
-        c->lk_units = units;
+        c->lk_units = units | (c->vnorm << 8);
         c->lk_color = c->cur_color;
         for (k = 0; k < CORE_UNITS; k++)
         {

@@ -506,8 +506,8 @@ Für gar kein Protokoll:
     * Die Beleuchtung (glLight, glMaterial, glLightModel, glColorMaterial,
       Normalen aus glNormal und glNormalPointer) übernimmt die Radeon:
       acht Lichter, gerichtet, punktförmig und als Spot, mit Abschwächung.
-      Solange sie an ist, werden kompilierte Vertex-Arrays auf dem
-      langsameren direkten Weg gezeichnet.
+      Auch beleuchtete kompilierte Vertex-Arrays nehmen den schnellen Weg,
+      samt ihren Normalen.
     * Texturkoordinaten kann die Radeon erzeugen (glTexGen: objekt- und
       augenlinear, Kugelkarte; S und T), und Texturmatrizen wirken. Nebel
       (glFog) und breite Linien (glLineWidth) ebenso.
