@@ -1415,7 +1415,8 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info $(DEMO_BIN
 	$(SETPOS) $(REL_FILES)/Demos/Glow.info --center-x 160 8
 	$(SETPOS) $(REL_FILES)/Demos/Landscape.info --center-x 260 8
 	$(SETPOS) $(REL_FILES)/Demos/Showcase.info --center-x 360 8
-	$(SETPOS) $(REL_FILES)/Demos.info --window 180 90 420 80 $(REL_DRAWER_WIN)
+	$(SETPOS) $(REL_FILES)/Demos/Trio.info --center-x 460 8
+	$(SETPOS) $(REL_FILES)/Demos.info --window 180 90 520 80 $(REL_DRAWER_WIN)
 	$(SETPOS) $(RELDRAWER)/Files/RadeonGL.info --no-pos --window 140 50 440 165 $(REL_DRAWER_WIN)
 	$(SETPOS) $(REL_FILES)/Licences/RadeonGL.txt.info --center-x 70 8
 	$(SETPOS) $(REL_FILES)/Licences/MiniGL.txt.info --center-x 190 8

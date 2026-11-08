@@ -18,7 +18,7 @@ when they end.
 
 ## Arguments (all four)
 
-    <Name> FRAMES/N,WIDTH/N,HEIGHT/N,DEPTH/N,SCENESECS/N,SCENEFRAMES/N
+    <Name> FRAMES/N,WIDTH/N,HEIGHT/N,DEPTH/N,SCENESECS/N,SCENEFRAMES/N,WINDOW/S,LEFT/N,TOP/N
 
 | Argument | Meaning | Default |
 |---|---|---|
@@ -27,6 +27,8 @@ when they end.
 | `DEPTH` | 16 or 32 bits | 16 |
 | `SCENESECS` | Showcase only: seconds per scene | 12 |
 | `SCENEFRAMES` | Showcase only: frames per scene, used instead of `SCENESECS` | not set |
+| `WINDOW` | a window on the default public screen instead of a screen of its own (`mglChooseWindowMode(GL_TRUE)`); `WIDTH` x `HEIGHT` is then its inner size, and `DEPTH` the screen's | off |
+| `LEFT`, `TOP` | with `WINDOW`: the window's place, given to `mglCreateContext` as `offx`, `offy` | 30, 30 |
 
 - **Keys:** Esc ends a program; in Showcase the space bar skips to the next
   scene.
@@ -106,11 +108,41 @@ Exercises: all of the above in one context. Each scene gives back its
 textures (`glDeleteTextures`) and its states before the next one makes its
 own.
 
+### Trio
+
+English:
+Spinner, Glow and Landscape at the same time, each a program of its own in
+a window of its own on the Workbench. Each window opens where its
+program's `mglCreateContext` asked for it. Ctrl-C ends all three, Esc in
+a window ends that one.
+
+Deutsch:
+Spinner, Glow und Landscape gleichzeitig, jedes ein eigenes Programm in
+einem eigenen Fenster auf der Workbench. Jedes Fenster öffnet sich dort,
+wo der `mglCreateContext` seines Programms es verlangt hat. Ctrl-C beendet
+alle drei, Esc in einem Fenster nur dieses.
+
+    Trio SECONDS/N,LEFT/N,TOP/N,WIDTH/N,HEIGHT/N,GAP/N,STEP/N
+
+Trio (`trio.c`) needs no `minigl.library` itself. It starts the three
+from its own drawer as asynchronous shells (`SystemTags`, `SYS_Asynch`)
+named "Trio: <Name>", with `WINDOW LEFT x TOP y WIDTH w HEIGHT h`: side by
+side from `LEFT`, `TOP` (40, 40), `WIDTH` x `HEIGHT` (320 x 240), `GAP`
+(30) pixels apart, each `STEP` (60) pixels lower. Their output goes to
+Trio's console. Ctrl-C, or `SECONDS`, sends each shell a Ctrl-C; Trio
+ends when all three have (or after ten more seconds).
+
+Exercises: several programs at once (RadeonGL 0.9: a dispatch table per
+task, a context each, the Radeon taken flush by flush), and RadeonGL's
+reading of `mglCreateContext(offx, offy, w, h)` in window mode as the
+window's place (MiniGLV3D opens its window at 30,30 and takes them as the
+viewport's corner). Each window's title names its program and that place.
+
 ## In the package (a suggestion)
 
     Demos/                 a drawer with an icon
-      Spinner Glow Landscape Showcase      demos/scripts/*, icons/run.info
-      C/                   no icon: the four programs from dist/Demos/
+      Spinner Glow Landscape Showcase Trio   demos/scripts/*, icons/run.info
+      C/                   no icon: the five programs from dist/Demos/
 
 Each launcher sets `Stack 32000`, runs `C/<Name>` from its own drawer (IconX
 makes that the current directory), and leaves the frame rate in its window.

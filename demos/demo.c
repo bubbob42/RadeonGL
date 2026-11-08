@@ -1,12 +1,17 @@
 /*
  * demo.c -- the frame loop of the RadeonGL demonstrators (demo.h).
  *
- *   <Name> FRAMES/N,WIDTH/N,HEIGHT/N,DEPTH/N,SCENESECS/N,SCENEFRAMES/N
+ *   <Name> FRAMES/N,WIDTH/N,HEIGHT/N,DEPTH/N,SCENESECS/N,SCENEFRAMES/N,
+ *          WINDOW/S,LEFT/N,TOP/N
  *
  * FRAMES: frames to draw, 0 (the default) until Esc or Ctrl-C. WIDTH x
  * HEIGHT (640 x 480) at DEPTH 16 or 32 bits (16). With more than one
  * scene (Showcase): the next one after SCENESECS seconds (12), or after
  * SCENEFRAMES frames when that is given; the space bar skips ahead.
+ * WINDOW: in a window on the Workbench instead of a screen of its own,
+ * WIDTH x HEIGHT (320 x 240) inside, at LEFT, TOP (30, 30): RadeonGL takes
+ * mglCreateContext's offx and offy as the window's place
+ * (mglChooseWindowMode). Trio (trio.c) starts three programs that way.
  * Started from Workbench: the defaults.
  *
  * At the end: frames, seconds, frames a second, and the first GL error.
@@ -32,7 +37,7 @@
 
 #include "demo.h"
 
-#define TEMPLATE "FRAMES/N,WIDTH/N,HEIGHT/N,DEPTH/N,SCENESECS/N,SCENEFRAMES/N"
+#define TEMPLATE "FRAMES/N,WIDTH/N,HEIGHT/N,DEPTH/N,SCENESECS/N,SCENEFRAMES/N,WINDOW/S,LEFT/N,TOP/N"
 
 struct Args
 {
@@ -42,6 +47,9 @@ struct Args
     LONG *depth;
     LONG *scenesecs;
     LONG *sceneframes;
+    LONG window;
+    LONG *left;
+    LONG *top;
 };
 
 struct IntuitionBase *IntuitionBase = NULL;
@@ -172,6 +180,55 @@ void Demo_Say(const char *fmt, LONG a, LONG b, LONG c, LONG d)
         Printf((CONST_STRPTR) fmt, a, b, c, d);
 }
 
+/* --- the window's title -------------------------------------------------------- */
+
+/* "<Name> at <left>,<top>": the program's name from its $VER, and the
+ * place mglCreateContext was given (it stays while the window is open) */
+static char win_title[64];
+
+static void TitleAdd(ULONG *n, const char *s)
+{
+    while (*s != '\0' && *n < sizeof(win_title) - 1)
+        win_title[(*n)++] = *s++;
+    win_title[*n] = '\0';
+}
+
+static void TitleNum(ULONG *n, LONG v)
+{
+    char d[12];
+    ULONG k;
+    ULONG u;
+
+    k = 0;
+    u = (v < 0) ? (ULONG) -v : (ULONG) v;
+    do
+    {
+        d[k++] = (char) ('0' + u % 10);
+        u /= 10;
+    } while (u != 0 && k < sizeof(d) - 1);
+    if (v < 0)
+        d[k++] = '-';
+    while (k > 0 && *n < sizeof(win_title) - 1)
+        win_title[(*n)++] = d[--k];
+    win_title[*n] = '\0';
+}
+
+static const char *Title(LONG left, LONG top)
+{
+    const char *v;
+    ULONG n;
+
+    n = 0;
+    for (v = demo_ver + 6; *v != '\0' && *v != ' ' && n < 24; v++)
+        win_title[n++] = *v;
+    win_title[n] = '\0';
+    TitleAdd(&n, " at ");
+    TitleNum(&n, left);
+    TitleAdd(&n, ",");
+    TitleNum(&n, top);
+    return win_title;
+}
+
 /* --- the clock --------------------------------------------------------------- */
 
 static BOOL ClockOpen(void)
@@ -272,6 +329,8 @@ int main(int argc, char **argv)
     LONG depth;
     LONG scenesecs;
     LONG sceneframes;
+    LONG left;
+    LONG top;
     LONG f;
     LONG sf;
     LONG tenths;
@@ -291,6 +350,9 @@ int main(int argc, char **argv)
     args.depth = NULL;
     args.scenesecs = NULL;
     args.sceneframes = NULL;
+    args.window = 0;
+    args.left = NULL;
+    args.top = NULL;
     if (argc != 0)
     {
         rda = ReadArgs((CONST_STRPTR) TEMPLATE, (LONG *) &args, NULL);
@@ -301,8 +363,12 @@ int main(int argc, char **argv)
         }
     }
     frames = (args.frames && *args.frames > 0) ? *args.frames : 0;
-    w = (args.width && *args.width >= 64 && *args.width <= 2048) ? *args.width : 640;
-    h = (args.height && *args.height >= 64 && *args.height <= 2048) ? *args.height : 480;
+    w = (args.width && *args.width >= 64 && *args.width <= 2048) ? *args.width
+      : args.window ? 320 : 640;
+    h = (args.height && *args.height >= 64 && *args.height <= 2048) ? *args.height
+      : args.window ? 240 : 480;
+    left = (args.left && *args.left > 0) ? *args.left : 30;
+    top = (args.top && *args.top > 0) ? *args.top : 30;
     depth = (args.depth && *args.depth == 32) ? 32 : 16;
     scenesecs = (args.scenesecs && *args.scenesecs > 0) ? *args.scenesecs : 12;
     sceneframes = (args.sceneframes && *args.sceneframes > 0) ? *args.sceneframes : 0;
@@ -316,7 +382,12 @@ int main(int argc, char **argv)
     f = 0;
     secs = 0.0f;
     err = 0;
-    Demo_Say("%s: %ld x %ld x %ld\n", (LONG) (demo_ver + 6), w, h, depth);
+    if (args.window)
+        Demo_Say("%s: a %ld x %ld window at %ld,", (LONG) (demo_ver + 6), w, h, left);
+    if (args.window)
+        Demo_Say("%ld\n", top, 0, 0, 0);
+    else
+        Demo_Say("%s: %ld x %ld x %ld\n", (LONG) (demo_ver + 6), w, h, depth);
 
     IntuitionBase = (struct IntuitionBase *) OpenLibrary((CONST_STRPTR) "intuition.library", 39);
     if (IntuitionBase == NULL || !ClockOpen())
@@ -330,16 +401,35 @@ int main(int argc, char **argv)
         goto out;
     }
     opened = TRUE;
-    mglChoosePixelDepth((int) depth);
-    if (!mglCreateContext(0, 0, (int) w, (int) h))
+    if (args.window)
     {
-        Demo_Say("%s: no context (see the library's log, RadeonGLLog)\n", (LONG) (demo_ver + 6),
-                 0, 0, 0);
-        goto out;
+        /* a window of the library's on the default public screen, at
+         * offx, offy (RadeonGL; MiniGLV3D opens it at 30,30 and takes them
+         * as the viewport's corner) */
+        mglChooseWindowMode(GL_TRUE);
+        if (!mglCreateContext((int) left, (int) top, (int) w, (int) h))
+        {
+            Demo_Say("%s: no window context: it needs a 15-, 16- or 32-bit screen on the "
+                     "Radeon (see the library's log, RadeonGLLog)\n", (LONG) (demo_ver + 6), 0, 0, 0);
+            goto out;
+        }
+    }
+    else
+    {
+        mglChoosePixelDepth((int) depth);
+        if (!mglCreateContext(0, 0, (int) w, (int) h))
+        {
+            Demo_Say("%s: no context (see the library's log, RadeonGLLog)\n",
+                     (LONG) (demo_ver + 6), 0, 0, 0);
+            goto out;
+        }
     }
     Demo_Say("GL_RENDERER: %s\n", (LONG) glGetString(GL_RENDERER), 0, 0, 0);
-    /* the keys of the library's window (it opens it with no IDCMP) */
+    /* the keys of the library's window (it opens it with no IDCMP); a
+     * window of its own says which program draws in it */
     win = (struct Window *) mglGetWindowHandle();
+    if (win != NULL && args.window)
+        SetWindowTitles(win, (CONST_STRPTR) Title(left, top), (CONST_STRPTR) ~0);
     if (win != NULL && !ModifyIDCMP(win, IDCMP_VANILLAKEY))
         win = NULL;
     glViewport(0, 0, (GLsizei) w, (GLsizei) h);

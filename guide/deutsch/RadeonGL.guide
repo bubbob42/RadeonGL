@@ -177,8 +177,9 @@ bei.
 @{b}Die Demos@{ub}
 
 Die Schublade Demos enthält vier kleine Programme, die die Radeon bei der
-Arbeit zeigen. Doppelklicken Sie eines; Esc beendet es, und sein Fenster
-zeigt dann die Bildrate.
+Arbeit zeigen, und Trio, das drei davon gleichzeitig laufen lässt.
+Doppelklicken Sie eines; Esc beendet es, und sein Fenster zeigt dann die
+Bildrate.
 
 @{b}Spinner@{ub}
     Ein texturierter Ring dreht sich vor einem Farbverlauf um drei Achsen,
@@ -199,10 +200,28 @@ zeigt dann die Bildrate.
     Die drei nacheinander, je zwölf Sekunden. Die Leertaste springt zum
     nächsten.
 
+@{b}Trio@{ub}
+    Spinner, Glow und Landscape gleichzeitig, jedes ein eigenes Programm
+    in einem eigenen Fenster auf der Workbench: drei Programme, drei
+    Kontexte, eine Radeon, die sie abwechselnd bedient. Jedes Fenster
+    öffnet sich dort, wo der mglCreateContext seines Programms es
+    verlangt hat (offx und offy sind der Platz des Fensters). Ctrl-C im
+    Fenster von Trio beendet alle drei, Esc in einem davon nur dieses.
+    Die Workbench braucht dafür 15, 16 oder 32 Bit auf der Radeon.
+
 Aus der Shell nehmen sie FRAMES (0: bis Esc), WIDTH, HEIGHT und DEPTH
 (16 oder 32), zum Beispiel:
 
     Spinner FRAMES=600 WIDTH=320 HEIGHT=240
+
+Mit WINDOW zeichnen sie stattdessen in ein Fenster auf der Workbench,
+innen WIDTH x HEIGHT groß (320 x 240), seine Ecke bei LEFT und TOP:
+
+    Glow WINDOW LEFT=400 TOP=100
+
+Trio nimmt SECONDS (bis Ctrl-C), LEFT, TOP, WIDTH, HEIGHT, GAP (der
+Abstand zwischen den Fenstern) und STEP (um wie viel tiefer jedes
+beginnt).
 
 Auf dem Testrechner (640 x 480, 16 Bit, Befehlsprüfung aus): Spinner 60,
 Glow 36, Landscape 64 Bilder pro Sekunde.

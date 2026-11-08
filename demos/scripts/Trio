@@ -1,0 +1,7 @@
+FailAt 21
+Stack 8000
+Echo "Trio: Spinner, Glow and Landscape at once, each in a window of its"
+Echo "own on the Workbench -- three programs, three contexts, one Radeon."
+Echo "The Workbench needs 15, 16 or 32 bits on the Radeon."
+Echo ""
+C/Trio

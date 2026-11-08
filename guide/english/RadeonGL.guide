@@ -166,8 +166,9 @@ any bug report.
 
 @{b}The demos@{ub}
 
-The Demos drawer holds four small programs that show the Radeon at work.
-Double-click one; Esc ends it, and its window then shows the frame rate.
+The Demos drawer holds four small programs that show the Radeon at work,
+and Trio, which runs three of them at once. Double-click one; Esc ends it,
+and its window then shows the frame rate.
 
 @{b}Spinner@{ub}
     A textured ring turns about three axes in front of a colour gradient,
@@ -186,10 +187,27 @@ Double-click one; Esc ends it, and its window then shows the frame rate.
     The three in turn, twelve seconds each. The space bar skips to the
     next one.
 
+@{b}Trio@{ub}
+    Spinner, Glow and Landscape at the same time, each a program of its
+    own in a window of its own on the Workbench: three programs, three
+    contexts, one Radeon taking them in turn. Each window opens where its
+    program's mglCreateContext asked for it (offx and offy are the
+    window's place). Ctrl-C in Trio's window ends all three, Esc in one
+    of them ends that one. The Workbench needs 15, 16 or 32 bits on the
+    Radeon.
+
 From a Shell they take FRAMES (0: until Esc), WIDTH, HEIGHT and DEPTH
 (16 or 32), for example:
 
     Spinner FRAMES=600 WIDTH=320 HEIGHT=240
+
+With WINDOW they draw in a window on the Workbench instead, WIDTH x
+HEIGHT inside (320 x 240), its corner at LEFT and TOP:
+
+    Glow WINDOW LEFT=400 TOP=100
+
+Trio takes SECONDS (until Ctrl-C), LEFT, TOP, WIDTH, HEIGHT, GAP (the
+space between the windows) and STEP (how much lower each one starts).
 
 On the test machine (640 x 480, 16 bit, command check off): Spinner 60,
 Glow 36, Landscape 64 frames a second.

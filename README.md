@@ -91,7 +91,9 @@ needs.
 - **Safety:** every command list is checked before the Radeon runs it
   (`RadeonGLCheck=0` turns it off for speed).
 - **The package:** an Installer, manuals in English and German, a card test,
-  a card report for bug reports and four demos (`demos/`).
+  a card report for bug reports and four demos (`demos/`), and Trio, which
+  runs three of them at once, each a program of its own in a window of its
+  own on the Workbench, placed by `mglCreateContext`'s coordinates.
 
 ## Not implemented yet
 
@@ -188,7 +190,7 @@ fetched from Aminet:
 | Command | What |
 |---|---|
 | `gmake rgl-lib` | `dist/Libs/RadeonGL/minigl.library` |
-| `gmake demos` | `dist/Demos/`: Spinner, Glow, Landscape, Showcase |
+| `gmake demos` | `dist/Demos/`: Spinner, Glow, Landscape, Showcase, Trio |
 | `gmake glsmoke probes` | GLSmoke (the card test), R200Info and the other probes |
 | `gmake test` | the host tests (the core, the packet layer, the R200 simulator) |
 | `gmake autotest T=<name>` | one FS-UAE test from `test/auto` (the head of each test says what it checks) |
