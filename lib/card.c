@@ -2429,7 +2429,9 @@ static ULONG CardOpenOwnWindow(struct Card *k, LONG x, LONG y, ULONG w, ULONG h,
     t[7].ti_Tag = WA_DepthGadget;   t[7].ti_Data = TRUE;
     t[8].ti_Tag = WA_Activate;      t[8].ti_Data = TRUE;
     t[9].ti_Tag = WA_RMBTrap;       t[9].ti_Data = TRUE;
-    t[10].ti_Tag = WA_SimpleRefresh; t[10].ti_Data = TRUE;
+    /* smart refresh, as MiniGL's own window: a program that draws once and
+     * waits (a viewer) shows no damage when the window is uncovered */
+    t[10].ti_Tag = WA_SmartRefresh; t[10].ti_Data = TRUE;
     t[11].ti_Tag = WA_NoCareRefresh; t[11].ti_Data = TRUE;
     t[12].ti_Tag = WA_AutoAdjust;   t[12].ti_Data = TRUE;
     t[13].ti_Tag = TAG_DONE;        t[13].ti_Data = 0;
