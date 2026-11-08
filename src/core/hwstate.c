@@ -294,11 +294,16 @@ static LONG EmitCombiner(struct Core *c, ULONG units)
             switch (c->tex_env[s])
             {
                 case GL_REPLACE:
-                case GL_DECAL:      /* DECAL is REPLACE for RGB; RGBA decal not yet */
                     if (HasRgb(t->base))
                         cb = (texc << R_TXC_ARG_C_SHIFT) | R_TXC_OP_MADD;
-                    if (HasAlpha(t->base) && c->tex_env[s] == GL_REPLACE)
+                    if (HasAlpha(t->base))
                         ab = (texc << R_TXC_ARG_C_SHIFT) | R_TXC_OP_MADD;
+                    break;
+                case GL_DECAL:
+                case GL_BLEND:      /* compat.c, linked last: LERP, the TFACTOR */
+                    e = Core_CombExtra(c, s, texc, t->base, prevc, preva, out, &cb, &ab);
+                    if (e != R2_OK)
+                        return e;
                     break;
                 case GL_ADD:
                     if (HasRgb(t->base))
@@ -307,7 +312,7 @@ static LONG EmitCombiner(struct Core *c, ULONG units)
                     if (HasAlpha(t->base))
                         ab = (texc << R_TXC_ARG_A_SHIFT) | (preva << R_TXC_ARG_B_SHIFT) | R_TXC_OP_MADD;
                     break;
-                default:            /* GL_MODULATE; GL_BLEND not yet, drawn as MODULATE */
+                default:            /* GL_MODULATE */
                     if (HasRgb(t->base))
                         cb = (texc << R_TXC_ARG_A_SHIFT) | (prevc << R_TXC_ARG_B_SHIFT) | R_TXC_OP_MADD;
                     if (HasAlpha(t->base))

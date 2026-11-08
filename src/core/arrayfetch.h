@@ -51,11 +51,14 @@ static float Comp(const UBYTE *p, ULONG type, ULONG k)
  * [-1, 1] as GL does */
 static float NormComp(const UBYTE *p, ULONG type, ULONG k)
 {
+    float f;
+
+    /* through a float local: SAS/C computes the product as a double */
     switch (type)
     {
-        case GL_BYTE:   return (float) ((const BYTE *) p)[k] * (1.0f / 127.0f);
-        case GL_SHORT:  return (float) ((const WORD *) p)[k] * (1.0f / 32767.0f);
-        case GL_INT:    return (float) ((const LONG *) p)[k] * (1.0f / 2147483647.0f);
+        case GL_BYTE:   f = (float) ((const BYTE *) p)[k] * (1.0f / 127.0f); return f;
+        case GL_SHORT:  f = (float) ((const WORD *) p)[k] * (1.0f / 32767.0f); return f;
+        case GL_INT:    f = (float) ((const LONG *) p)[k] * (1.0f / 2147483647.0f); return f;
     }
     return Comp(p, type, k);
 }

@@ -89,7 +89,7 @@ const char Back_IdString[] =
 #include "rglint.h"
 
 GLcontext Rgl_CurrentContext = 0;
-static struct Rgl *rgl_list = NULL;     /* every context, newest first (W3) */
+struct Rgl *rgl_list = NULL;            /* every context, newest first (W3; rglcompat.c reads it) */
 static ULONG choose_depth = 16;     /* mglChoosePixelDepth */
 static ULONG choose_window = 0;     /* mglChooseWindowMode: MGLCreateContext opens a window */
 static ULONG unimpl_early[(DISPATCH_SLOTS + 31) / 32];
@@ -1439,11 +1439,11 @@ void Hook_MGLSetState(GLcontext context, GLenum cap, GLboolean state)
 {
     (void) context;
     GUARD;
-    Core_Enable(C, cap, state);
+    Core_EnableX(C, cap, state);
     NOTE("glEnable/glDisable", cap);
 }
 
-GLboolean Hook_GLIsEnabled(GLcontext context, GLenum cap) { (void) context; return rgl ? (GLboolean) Core_IsEnabled(C, cap) : GL_FALSE; }
+GLboolean Hook_GLIsEnabled(GLcontext context, GLenum cap) { (void) context; return rgl ? (GLboolean) Core_IsEnabledX(C, cap) : GL_FALSE; }
 void Hook_GLActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ActiveTexture(C, unit); NOTE("glActiveTextureARB", unit); }
 void Hook_GLClientActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ClientActiveTexture(C, unit); NOTE("glClientActiveTextureARB", unit); }
 
@@ -1476,8 +1476,8 @@ void Hook_GLLockArrays(GLcontext context, GLuint first, GLsizei count)
 }
 
 void Hook_GLUnlockArrays(GLcontext context) { (void) context; GUARD; Core_UnlockArrays(C); NOTE("glUnlockArrays", 0); }
-void Hook_GLEnableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 1); NOTE("glEnableClientState", cap); }
-void Hook_GLDisableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 0); NOTE("glDisableClientState", cap); }
+void Hook_GLEnableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientStateX(C, cap, 1); NOTE("glEnableClientState", cap); }
+void Hook_GLDisableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientStateX(C, cap, 0); NOTE("glDisableClientState", cap); }
 
 void Hook_GLVertexPointer(GLcontext context, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer)
 {
@@ -1593,7 +1593,7 @@ void Hook_GLTexImage2D(GLcontext context, GLenum target, GLint level, GLint inte
                        const GLvoid *pixels)
 {
     (void) context; GUARD;
-    Core_TexImage2D(C, target, level, internalformat, width, height, border, format, type, pixels);
+    Core_TexImage2DX(C, target, level, internalformat, width, height, border, format, type, pixels);
     NOTE("glTexImage2D", internalformat);
 }
 
@@ -1601,7 +1601,7 @@ void Hook_GLTexSubImage2D(GLcontext context, GLenum target, GLint level, GLint x
                           GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid *pixels)
 {
     (void) context; GUARD;
-    Core_TexSubImage2D(C, target, level, xoffset, yoffset, width, height, format, type, pixels);
+    Core_TexSubImage2DX(C, target, level, xoffset, yoffset, width, height, format, type, pixels);
     NOTE("glTexSubImage2D", format);
 }
 
@@ -1629,12 +1629,12 @@ void Hook_GLDeleteTextures(GLcontext context, GLsizei n, const GLuint *textures)
 }
 
 GLboolean Hook_GLIsTexture(GLcontext context, GLuint texture) { (void) context; return rgl ? (GLboolean) Core_IsTexture(C, texture) : GL_FALSE; }
-void Hook_GLGetFloatv(GLcontext context, GLenum pname, GLfloat *params) { (void) context; GUARD; Core_GetFloatv(C, pname, params); NOTE("glGetFloatv", pname); }
+void Hook_GLGetFloatv(GLcontext context, GLenum pname, GLfloat *params) { (void) context; GUARD; Rglc_GetFloatv(C, pname, params); NOTE("glGetFloatv", pname); }
 
 void Hook_GLGetIntegerv(GLcontext context, GLenum pname, GLint *params)
 {
     (void) context; GUARD;
-    Core_GetIntegerv(C, pname, (LONG *) params);
+    Rglc_GetIntegerv(C, pname, (LONG *) params);
     NOTE("glGetIntegerv", pname);
 }
 
@@ -1652,13 +1652,13 @@ void Hook_GLGetBooleanv(GLcontext context, GLenum pname, GLboolean *params)
     /* GL leaves params alone when pname is refused */
     e0 = rgl->core.error;
     rgl->core.error = GL_NO_ERROR;
-    Core_GetFloatv(C, pname, v);
+    Rglc_GetFloatv(C, pname, v);
     e1 = rgl->core.error;
     rgl->core.error = (e0 != GL_NO_ERROR) ? e0 : e1;
     NOTE("glGetBooleanv", pname);
     if (e1 != GL_NO_ERROR)
         return;
-    for (i = 0; i < Core_GetCount(pname); i++)
+    for (i = 0; i < Core_GetCountX(pname); i++)
         params[i] = (v[i] != 0.0f) ? GL_TRUE : GL_FALSE;
 }
 

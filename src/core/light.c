@@ -94,7 +94,8 @@ static void Normalize3(float *v)
 {
     float l;
 
-    l = Core_Sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    l = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];    /* a float local first: SAS/C */
+    l = Core_Sqrt(l);
     if (l > 0.0f)
     {
         l = 1.0f / l;
@@ -207,10 +208,7 @@ void Core_Lightfv(struct Core *c, ULONG light, ULONG pname, const float *v, ULON
             break;
         case GL_SPOT_DIRECTION:
             for (i = 0; i < 3; i++)
-                p[i] = m[i] * v[0] + m[i + 4] * v[1] + m[i + 8] * v[2];
-            l->dir[0] = p[0];
-            l->dir[1] = p[1];
-            l->dir[2] = p[2];
+                l->dir[i] = m[i] * v[0] + m[i + 4] * v[1] + m[i + 8] * v[2];
             break;
         case GL_SPOT_EXPONENT:
             if (v[0] < 0.0f || v[0] > 128.0f)
@@ -505,6 +503,7 @@ static void EmitLights(struct Core *c, LONG top)
     struct CoreLight *l;
     float p[4];
     float d[4];
+    float t;
     ULONG n;
     ULONG i;
     ULONG k;
@@ -559,9 +558,11 @@ static void EmitLights(struct Core *c, LONG top)
         Vec(&v[5][i * 4], p);
         /* scalars: DCD, DCM 0; the spot; specular threshold 0 */
         s[0x10 + i] = R2Cs_FloatBits(l->spot_exp);
-        s[0x18 + i] = R2Cs_FloatBits(l->spot_cut == 180.0f ? -1.0f : Core_Cos(l->spot_cut));
+        t = (l->spot_cut == 180.0f) ? -1.0f : Core_Cos(l->spot_cut);   /* float locals: SAS/C */
+        s[0x18 + i] = R2Cs_FloatBits(t);
         s[0x28 + i] = R2Cs_FloatBits(FLT_BIG);
-        s[0x30 + i] = R2Cs_FloatBits(l->att[0] == 0.0f ? FLT_BIG : 1.0f / l->att[0]);
+        t = (l->att[0] == 0.0f) ? FLT_BIG : 1.0f / l->att[0];
+        s[0x30 + i] = R2Cs_FloatBits(t);
     }
     for (k = 0; k < 6; k++)
         R2E_Vectors(cs, VS_LIGHT_AMBIENT + k * 8, n * 4, v[k]);
@@ -598,7 +599,10 @@ static void EmitModel(struct Core *c)
     Vec(v, c->lm_ambient);
     R2E_Vectors(c->cs, VS_GLOBAL_AMBIENT, 4, v);
     /* the eye vector in eye space, Mesa's (0, 0, -1), rescale factor 1 */
-    Set4(e, 0.0f, 0.0f, -1.0f, 1.0f);
+    e[0] = 0.0f;
+    e[1] = 0.0f;
+    e[2] = -1.0f;
+    e[3] = 1.0f;
     Vec(v, e);
     R2E_Vectors(c->cs, VS_EYE_VECTOR, 4, v);
 }

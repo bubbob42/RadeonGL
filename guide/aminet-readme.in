@@ -47,7 +47,7 @@ FEATURES
     stack
   * Two texture units; RGB565, ARGB4444, ARGB8888 (GL_RGB8, GL_RGBA8),
     I8, AI88 in up to 16 MB of card memory; nearest, linear and mipmap
-    filters; repeat and clamp; MODULATE, REPLACE, DECAL (RGB), ADD
+    filters; repeat and clamp; MODULATE, REPLACE, DECAL, BLEND, ADD
   * Lighting on the Radeon: eight lights, directional, local and spot,
     with attenuation, two-sided; materials, colour material, normal
     arrays
@@ -55,6 +55,10 @@ FEATURES
     map), texture matrices, fog, wide lines, glReadPixels
   * Blending, alpha test, depth test, polygon offset, culling, scissor,
     colour mask, flat and smooth shading, point size
+  * The rest of MiniGL 29.1's calls: GLU (gluPerspective, gluLookAt,
+    gluBuild2DMipmaps, spheres, cylinders, disks), glArrayElement,
+    interleaved arrays, double-precision calls, uploads and glReadPixels
+    in every GL 1.1 layout and type, MiniGL's own main loop
   * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048, in
     every mode of the card, switched while the program runs; vertical
     sync
@@ -69,19 +73,18 @@ FEATURES
 
 NOT IMPLEMENTED YET
 
-122 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
+162 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
 and more. A missing one sets GL_INVALID_OPERATION; the log names it.
 
-  * Display lists, glTexCoord4f
-  * GL_BLEND and RGBA GL_DECAL texture environments; generic 32-bit
-    textures are stored with 16 bits (GL_RGBA8 and GL_RGB8 keep 8)
-  * Stencil and accumulation buffers, stipple, logic operations
-  * Reading the depth buffer, glCopyTexImage2D, glDrawBuffer
-  * Double-precision calls, glArrayElement, interleaved arrays, colour
-    index, glBlendEquation, glColorTable
-  * GLU and GLUT; MiniGL's own main loop; contexts on 24- and 8-bit
-    screens
-  * Textures beyond 16 MB are not swapped out
+  * Display lists, GLUT
+  * Paletted textures (glColorTable), glCopyTexImage2D, glBlendEquation,
+    glBlendFuncSeparate
+  * Polygons as lines or points, stencil and accumulation buffers,
+    stipple, logic operations, reading the depth buffer
+  * Generic 32-bit textures are stored with 16 bits (GL_RGBA8 and
+    GL_RGB8 keep 8)
+  * Contexts on 24- and 8-bit screens; textures beyond 16 MB are not
+    swapped out
 
 
 GLQUAKE BENCHMARKS

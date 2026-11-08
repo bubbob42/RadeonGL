@@ -425,6 +425,20 @@ struct Core
     ULONG pack_align, unpack_align; /* glPixelStorei (lib/rglread.c) */
     ULONG hw_fog[3];                /* PP_FOG_COLOR, the vector's c and d as last emitted */
     ULONG hw_linew;                 /* SE_LINE_WIDTH as last emitted */
+
+    /* minigl.library 29.1's other calls (compat.c, 2026-11-08): state they
+     * keep. At the end too, for the same reason as lighting's. */
+    ULONG pack_row, pack_skip_px, pack_skip_rows, pack_swap, pack_lsb;
+    ULONG unpack_row, unpack_skip_px, unpack_skip_rows, unpack_swap, unpack_lsb;
+    float tex_env_color[CORE_UNITS][4];     /* GL_TEXTURE_ENV_COLOR, per unit */
+    ULONG tf_color[CORE_UNITS];             /* ... as PP_TFACTOR_n wants it: A R G B bytes */
+    ULONG draw_buffer, read_buffer;         /* glDrawBuffer, glReadBuffer */
+    ULONG single_buffer;                    /* a window or bitmap context (the library sets it) */
+    ULONG cur_edge;                         /* glEdgeFlag */
+    float cur_index;                        /* glIndex */
+    struct CoreArray ea, ia;                /* edge flag and colour index arrays: stored only */
+    ULONG poly_offset_line, poly_offset_point;  /* GL_POLYGON_OFFSET_LINE/POINT: stored */
+    ULONG array_xform;                      /* MGL_ARRAY_TRANSFORMATIONS: stored, as 29.1 does */
 };
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
@@ -636,6 +650,67 @@ void Core_GetFloatv(struct Core *c, ULONG pname, float *out);
 ULONG Core_GetCount(ULONG pname);    /* values a glGet of pname returns */
 void Core_GetIntegerv(struct Core *c, ULONG pname, LONG *out);
 const char *Core_GetString(struct Core *c, ULONG name);
+
+/* --- minigl.library 29.1's other calls (compat.c) ------------------------------------
+ * The library's hooks call the ...X wrappers instead of the plain calls
+ * above: they handle what was added for 29.1 and pass everything else on,
+ * so the hot objects stay as they are (code-layout note in compat.c). */
+
+void Compat_Defaults(struct Core *c);
+void Core_EnableX(struct Core *c, ULONG cap, ULONG on);
+ULONG Core_IsEnabledX(struct Core *c, ULONG cap);
+void Core_EnableClientStateX(struct Core *c, ULONG array, ULONG on);
+void Core_GetFloatvX(struct Core *c, ULONG pname, float *out);
+void Core_GetIntegervX(struct Core *c, ULONG pname, LONG *out);
+ULONG Core_GetCountX(ULONG pname);
+void Core_GetPointerv(struct Core *c, ULONG pname, void **out);
+void Core_PixelStore(struct Core *c, ULONG pname, LONG param);
+void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
+                      LONG w, LONG h, LONG border, ULONG format, ULONG type,
+                      const void *pixels);
+void Core_TexSubImage2DX(struct Core *c, ULONG target, LONG level, LONG x, LONG y,
+                         LONG w, LONG h, ULONG format, ULONG type, const void *pixels);
+void Core_TexEnvfv(struct Core *c, ULONG target, ULONG pname, const float *v);
+LONG Core_CombExtra(struct Core *c, ULONG s, ULONG texc, ULONG base, ULONG prevc,
+                    ULONG preva, ULONG out, ULONG *cb, ULONG *ab);   /* hwstate.c */
+void Core_ArrayElement(struct Core *c, LONG i);
+void Core_MultiDrawArrays(struct Core *c, ULONG mode, const LONG *first, const LONG *count,
+                          LONG primcount);
+void Core_TexCoord4f(struct Core *c, float s, float t, float r, float q);
+void Core_Perspective(struct Core *c, float fovy, float aspect, float zn, float zf);
+void Core_LookAt(struct Core *c, const float *eye, const float *centre, const float *up);
+void Core_DrawBuffer(struct Core *c, ULONG mode);
+void Core_ReadBuffer(struct Core *c, ULONG mode);
+void Core_EdgeFlag(struct Core *c, ULONG flag);
+void Core_EdgeFlagPointer(struct Core *c, LONG stride, const void *p);
+void Core_Index(struct Core *c, float index);
+void Core_IndexPointer(struct Core *c, ULONG type, LONG stride, const void *p);
+ULONG Core_AreTexturesResident(struct Core *c, LONG n, const ULONG *names);
+void Core_PrioritizeTextures(struct Core *c, LONG n, const ULONG *names);
+void Core_TexMemStat(struct Core *c, LONG *current, LONG *peak);
+void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const void *p);
+LONG Core_Build2DMipmaps(struct Core *c, ULONG target, LONG internal, LONG w, LONG h,
+                         ULONG format, ULONG type, const void *data);   /* 0 or a GLU error */
+
+/* A GLU quadric's settings (GLU's values: GLU_SMOOTH 100000 ...) */
+#define GLU_SMOOTH_Q    100000UL
+#define GLU_FLAT_Q      100001UL
+#define GLU_NONE_Q      100002UL
+#define GLU_POINT_Q     100010UL
+#define GLU_LINE_Q      100011UL
+#define GLU_FILL_Q      100012UL
+#define GLU_SILHOUETTE_Q 100013UL
+#define GLU_OUTSIDE_Q   100020UL
+#define GLU_INSIDE_Q    100021UL
+struct CoreQuadric
+{
+    ULONG normals, texture, style, orientation;
+};
+void Core_Sphere(struct Core *c, const struct CoreQuadric *q, float radius, LONG slices, LONG stacks);
+void Core_Cylinder(struct Core *c, const struct CoreQuadric *q, float base, float top, float height,
+                   LONG slices, LONG stacks);
+void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float outer, LONG slices,
+               LONG loops);
 
 /* --- Internals shared between the core's files ---------------------------------- */
 

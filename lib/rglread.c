@@ -146,13 +146,48 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
 
 struct ReadTo
 {
-    UBYTE *pixels;
+    UBYTE *pixels;              /* the request's first pixel, GL_PACK_SKIP_* applied */
     LONG x, y, x0;              /* the request's corner; the first column read */
-    ULONG stride;               /* bytes a row, GL_PACK_ALIGNMENT applied */
+    ULONG stride;               /* bytes a row (GL 1.1 4.3.2: the pack state) */
     ULONG cpp;                  /* bytes a pixel out */
     ULONG format;
+    ULONG type, tsize;          /* the component type and its bytes */
+    ULONG swap;                 /* GL_PACK_SWAP_BYTES */
     ULONG n;                    /* columns read */
 };
+
+/* One component (0..255) as type, GL 1.1 table 2.7's conversion */
+static void PutComp(UBYTE *p, ULONG v, ULONG type, ULONG swap)
+{
+    ULONG u;
+    float f;
+    UBYTE *fb;
+
+    switch (type)
+    {
+        case GL_UNSIGNED_BYTE:  p[0] = (UBYTE) v; return;
+        case GL_BYTE:           p[0] = (UBYTE) (v >> 1); return;
+        case GL_UNSIGNED_SHORT: u = v * 257UL; break;
+        case GL_SHORT:          u = (v * 257UL) >> 1; break;
+        case GL_UNSIGNED_INT:   u = v * 0x01010101UL; break;
+        case GL_INT:            u = (v * 0x01010101UL) >> 1; break;
+        default:                /* GL_FLOAT: its bytes, as the 68k keeps them */
+            f = (float) v / 255.0f;
+            fb = (UBYTE *) &f;
+            u = ((ULONG) fb[0] << 24) | ((ULONG) fb[1] << 16) | ((ULONG) fb[2] << 8) | fb[3];
+            break;
+    }
+    if (type == GL_UNSIGNED_SHORT || type == GL_SHORT)
+    {
+        p[swap ? 1 : 0] = (UBYTE) (u >> 8);
+        p[swap ? 0 : 1] = (UBYTE) u;
+        return;
+    }
+    p[swap ? 3 : 0] = (UBYTE) (u >> 24);
+    p[swap ? 2 : 1] = (UBYTE) (u >> 16);
+    p[swap ? 1 : 2] = (UBYTE) (u >> 8);
+    p[swap ? 0 : 3] = (UBYTE) u;
+}
 
 static void ToClient(APTR ud, LONG row, const ULONG *argb)
 {
@@ -160,107 +195,159 @@ static void ToClient(APTR ud, LONG row, const ULONG *argb)
     UBYTE *p;
     ULONG i;
     ULONG v;
+    ULONG c[4];
+    ULONG k;
+    ULONG n;
+    ULONG s;
 
     t = (struct ReadTo *) ud;
+    s = t->tsize;
     p = t->pixels + (ULONG) (row - t->y) * t->stride + (ULONG) (t->x0 - t->x) * t->cpp;
     for (i = 0; i < t->n; i++)
     {
         v = argb[i];
-        if (t->format == GL_RGBA)
+        n = 1;
+        switch (t->format)
         {
-            p[0] = (UBYTE) (v >> 16);
-            p[1] = (UBYTE) (v >> 8);
-            p[2] = (UBYTE) v;
-            p[3] = (UBYTE) (v >> 24);
+            case GL_RGBA:
+                c[0] = (v >> 16) & 0xff; c[1] = (v >> 8) & 0xff; c[2] = v & 0xff; c[3] = v >> 24;
+                n = 4;
+                break;
+            case GL_RGB:
+                c[0] = (v >> 16) & 0xff; c[1] = (v >> 8) & 0xff; c[2] = v & 0xff;
+                n = 3;
+                break;
+            case GL_RED:    c[0] = (v >> 16) & 0xff; break;
+            case GL_GREEN:  c[0] = (v >> 8) & 0xff; break;
+            case GL_BLUE:   c[0] = v & 0xff; break;
+            case GL_ALPHA:  c[0] = v >> 24; break;
+            default:        /* GL_LUMINANCE(_ALPHA): GL's R + G + B, clamped */
+                c[0] = ((v >> 16) & 0xff) + ((v >> 8) & 0xff) + (v & 0xff);
+                if (c[0] > 255)
+                    c[0] = 255;
+                if (t->format == GL_LUMINANCE_ALPHA)
+                {
+                    c[1] = v >> 24;
+                    n = 2;
+                }
+                break;
         }
-        else if (t->format == GL_RGB)
-        {
-            p[0] = (UBYTE) (v >> 16);
-            p[1] = (UBYTE) (v >> 8);
-            p[2] = (UBYTE) v;
-        }
-        else if (t->format == GL_ALPHA)
-            p[0] = (UBYTE) (v >> 24);
-        else                        /* GL_LUMINANCE: GL's R + G + B, clamped */
-        {
-            v = ((v >> 16) & 0xff) + ((v >> 8) & 0xff) + (v & 0xff);
-            p[0] = (UBYTE) (v > 255 ? 255 : v);
-        }
+        if (t->type == GL_UNSIGNED_BYTE)
+            for (k = 0; k < n; k++)
+                p[k] = (UBYTE) c[k];
+        else
+            for (k = 0; k < n; k++)
+                PutComp(p + k * s, c[k], t->type, t->swap);
         p += t->cpp;
     }
+}
+
+static ULONG ReadComps(ULONG format)
+{
+    switch (format)
+    {
+        case GL_RGBA:               return 4;
+        case GL_RGB:                return 3;
+        case GL_LUMINANCE_ALPHA:    return 2;
+        case GL_RED:
+        case GL_GREEN:
+        case GL_BLUE:
+        case GL_ALPHA:
+        case GL_LUMINANCE:          return 1;
+    }
+    return 0;
+}
+
+static ULONG ReadTypeSize(ULONG type)
+{
+    switch (type)
+    {
+        case GL_UNSIGNED_BYTE:
+        case GL_BYTE:           return 1;
+        case GL_UNSIGNED_SHORT:
+        case GL_SHORT:          return 2;
+        case GL_UNSIGNED_INT:
+        case GL_INT:
+        case GL_FLOAT:          return 4;
+    }
+    return 0;
 }
 
 void Hook_GLReadPixels(GLcontext context, GLint x, GLint y, GLsizei width, GLsizei height,
                        GLenum format, GLenum type, GLvoid *pixels)
 {
     struct Rgl *r;
+    struct Core *c;
     struct ReadTo t;
     LONG x0, x1, y0, y1;
-    ULONG align;
+    ULONG n, s, l, k, a;
 
     r = (struct Rgl *) context;
     if (r == NULL)
         return;
-    if (IN_BEGIN(&r->core))
+    c = &r->core;
+    if (IN_BEGIN(c))
     {
-        Core_Error(&r->core, GL_INVALID_OPERATION);
+        Core_Error(c, GL_INVALID_OPERATION);
         return;
     }
     if (width < 0 || height < 0)
     {
-        Core_Error(&r->core, GL_INVALID_VALUE);
+        Core_Error(c, GL_INVALID_VALUE);
         return;
     }
-    if ((format != GL_RGBA && format != GL_RGB && format != GL_ALPHA && format != GL_LUMINANCE)
-        || type != GL_UNSIGNED_BYTE)
+    /* no depth buffer to read (it is tiled), no colour index */
+    if (format == GL_DEPTH_COMPONENT || format == GL_COLOR_INDEX)
     {
-        Core_Error(&r->core, GL_INVALID_ENUM);      /* the depth buffer is tiled: not read */
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    n = ReadComps(format);
+    s = ReadTypeSize(type);
+    if (n == 0 || s == 0)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
         return;
     }
     if (pixels == NULL || width == 0 || height == 0)
         return;
-    t.pixels = (UBYTE *) pixels;
+    /* GL 1.1 4.3.2: rows of k elements of s bytes */
+    l = c->pack_row ? c->pack_row : (ULONG) width;
+    a = c->pack_align;
+    if (s >= a)
+        k = n * l;
+    else
+        k = (a / s) * ((s * n * l + a - 1) / a);
+    t.stride = s * k;
+    t.pixels = (UBYTE *) pixels + c->pack_skip_rows * t.stride + c->pack_skip_px * s * n;
     t.x = x;
     t.y = y;
     t.format = format;
-    t.cpp = (format == GL_RGBA) ? 4 : (format == GL_RGB) ? 3 : 1;
-    align = r->core.pack_align;
-    t.stride = ((ULONG) width * t.cpp + align - 1) & ~(align - 1);
+    t.type = type;
+    t.tsize = s;
+    t.swap = c->pack_swap;
+    t.cpp = n * s;
     /* the part inside the frame; GL leaves the rest undefined (untouched) */
     x0 = (x < 0) ? 0 : x;
     y0 = (y < 0) ? 0 : y;
     x1 = x + width;
     y1 = y + height;
-    if (x1 > (LONG) r->core.target.width)
-        x1 = (LONG) r->core.target.width;
-    if (y1 > (LONG) r->core.target.height)
-        y1 = (LONG) r->core.target.height;
+    if (x1 > (LONG) c->target.width)
+        x1 = (LONG) c->target.width;
+    if (y1 > (LONG) c->target.height)
+        y1 = (LONG) c->target.height;
     if (x1 <= x0 || y1 <= y0)
         return;
     t.x0 = x0;
     t.n = (ULONG) (x1 - x0);
     if (!ReadRows(r, x0, x1, y0, y1, ToClient, &t))
-        Core_Error(&r->core, GL_OUT_OF_MEMORY);
+        Core_Error(c, GL_OUT_OF_MEMORY);
 }
 
 void Hook_GLPixelStorei(GLcontext context, GLenum pname, GLint param)
 {
-    struct Rgl *r;
-
-    r = (struct Rgl *) context;
-    if (r == NULL)
-        return;
-    if (param != 1 && param != 2 && param != 4 && param != 8)
-    {
-        Core_Error(&r->core, GL_INVALID_VALUE);
-        return;
-    }
-    if (pname == GL_PACK_ALIGNMENT)
-        r->core.pack_align = (ULONG) param;
-    else if (pname == GL_UNPACK_ALIGNMENT)
-        r->core.unpack_align = (ULONG) param;  /* stored; texture uploads read tight rows */
-    else
-        Core_Error(&r->core, GL_INVALID_ENUM);
+    if (context != NULL)
+        Core_PixelStore((struct Core *) context, pname, param);   /* compat.c: all twelve */
 }
 
 /* --- mglWriteShotPPM: the frame as a binary PPM --------------------------------------- */

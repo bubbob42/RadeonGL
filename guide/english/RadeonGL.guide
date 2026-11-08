@@ -500,28 +500,25 @@ To have no log at all:
 
 @{b}Not implemented yet@{ub}
 
-RadeonGL implements 122 of the 205 functions of minigl.library 29.1:
+RadeonGL implements 162 of the 205 functions of minigl.library 29.1:
 everything GLQuake uses, and more. A program calling one of the others
 gets nothing for it but the error GL_INVALID_OPERATION; the
 @{" log file " link Log} names such calls.
 
     * Display lists (glNewList, glCallList and the rest).
-    * glTexCoord4f, the texture environment GL_BLEND (drawn as
-      GL_MODULATE) and GL_DECAL with an RGBA texture.
-    * Stencil and accumulation buffers, line and polygon stipple, logic
-      operations.
-    * Reading the depth buffer, copying pixels (glCopyTexImage2D,
-      glCopyTexSubImage2D), glDrawBuffer, glReadBuffer.
-    * The double-precision calls (glLoadMatrixd, glMultMatrixd,
-      glRotated, glScaled, glTranslated, glGetDoublev).
-    * glArrayElement, glInterleavedArrays, glMultiDrawArrays, edge flags
-      and colour-index mode.
-    * glBlendEquation, glBlendFuncSeparate, glColorTable, glTexEnvfv,
-      texture priorities and residency.
-    * GLU and GLUT (gluPerspective, gluLookAt, gluBuild2DMipmaps, the
-      quadrics; the GLUT window and shape functions).
-    * MiniGL's own main loop and its callbacks (mglMainLoop, mglIdleFunc,
-      mglKeyFunc, mglMouseFunc), mglLockBack, mglTexMemStat.
+    * Paletted textures (glColorTable), copying pixels
+      (glCopyTexImage2D, glCopyTexSubImage2D), glBlendEquation,
+      glBlendFuncSeparate.
+    * GLUT (its window and shape functions).
+    * Polygons drawn as lines or points (glPolygonMode), stencil and
+      accumulation buffers, line and polygon stipple, logic operations,
+      reading the depth buffer.
+
+Accepted but without effect: edge flags and colour-index values,
+glDrawBuffer and glReadBuffer (RadeonGL draws into the picture being
+built and reads from it), texture priorities, mglProhibit... and
+mglProposeCloseDesktop. mglLockBack always refuses. glTexCoord4f divides
+by q at each corner (the Radeon is not given q).
 @endnode
 
 @node Inside "How it works"

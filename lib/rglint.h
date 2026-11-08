@@ -43,6 +43,19 @@ struct Rgl
     ULONG resizes;              /* mglResizeContext calls that changed the size (2026-11-06) */
     ULONG resize_failed;        /* ... that kept the old one */
     char resize_why[96];        /* the last one's reason */
+    /* MiniGL's main loop (rglcompat.c, 2026-11-08): the program's handlers */
+    IdleFn ml_idle;
+    KeyHandlerFn ml_key;
+    MouseHandlerFn ml_mouse;
+    SpecialHandlerFn ml_special;
+    ULONG ml_running;
 };
+
+/* rgl.c: every context, newest first (W3) */
+extern struct Rgl *rgl_list;
+
+/* rglcompat.c (linked last): glGet with the context's buffering known */
+void Rglc_GetFloatv(struct Core *c, ULONG pname, float *out);
+void Rglc_GetIntegerv(struct Core *c, ULONG pname, LONG *out);
 
 #endif /* RADEONGL_RGLINT_H */

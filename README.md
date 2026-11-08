@@ -45,7 +45,7 @@ needs.
 - **Textures:** two units (multitexture), RGB565, ARGB4444, ARGB8888 (for
   `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
   the card's memory (up to 16 MB), nearest, linear and mipmap filters,
-  repeat and clamp, the environments MODULATE, REPLACE, DECAL (RGB) and
+  repeat and clamp, the environments MODULATE, REPLACE, DECAL, BLEND and
   ADD, `glTexSubImage2D` updates.
 - **Lighting on the Radeon's TCL:** `glLight`, `glMaterial`,
   `glLightModel` (ambient, local viewer, two-sided), `glColorMaterial`,
@@ -57,10 +57,19 @@ needs.
   matrices (`glMatrixMode(GL_TEXTURE)`).
 - **Fog and lines:** `glFog` (linear, exp, exp2; computed by the TCL from
   the eye depth), `glLineWidth` up to 64 pixels.
-- **Reading back:** `glReadPixels` (RGBA, RGB, alpha, luminance; unsigned
-  bytes; `glPixelStorei(GL_PACK_ALIGNMENT)`) and MiniGL's `mglWriteShotPPM`,
+- **Reading back:** `glReadPixels` (RGBA, RGB, red, green, blue, alpha,
+  luminance; every GL 1.1 type; the whole pack state of `glPixelStorei`)
+  and MiniGL's `mglWriteShotPPM`,
   through Picasso96 from the card's memory (about 4 MB a second on a
   Mediator).
+- **The rest of MiniGL 29.1's calls:** GLU (`gluPerspective`,
+  `gluLookAt`, `gluBuild2DMipmaps`, spheres, cylinders and disks,
+  `gluErrorString`), `glArrayElement`, `glInterleavedArrays`,
+  `glMultiDrawArrays`, the double-precision matrix calls, the texture
+  environments `GL_BLEND` (with `glTexEnvfv`'s colour) and RGBA `GL_DECAL`,
+  texture uploads in every GL 1.1 layout and type (`glPixelStorei`) and
+  `glReadPixels` in every type, the `glGet` queries 29.1 answers, and
+  MiniGL's own main loop with its key, mouse and idle callbacks.
 - **Fragments:** blending, alpha test, depth test with every function,
   depth mask, polygon offset and `mglSetZOffset`, back-face culling,
   scissor, colour mask, flat and smooth shading, point size.
@@ -86,24 +95,24 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL implements 122 of the 205 functions of `minigl.library` 29.1:
+RadeonGL implements 162 of the 205 functions of `minigl.library` 29.1:
 everything GLQuake uses, and more. A missing function draws nothing and
 sets GL_INVALID_OPERATION; the library's log names every such call.
 
-- Display lists, `glTexCoord4f`.
-- The texture environment `GL_BLEND` (drawn as `GL_MODULATE`) and
-  `GL_DECAL` with an RGBA texture; generic 32-bit textures (`GL_RGBA`, 4)
-  are stored with 16 bits -- ask for `GL_RGBA8` or `GL_RGB8` to keep 8 bits.
-- Stencil and accumulation buffers, line and polygon stipple, logic
-  operations.
-- Reading the depth buffer, `glCopyTexImage2D`, `glCopyTexSubImage2D`,
-  `glDrawBuffer`, `glReadBuffer`.
-- The double-precision calls, `glArrayElement`, `glInterleavedArrays`,
-  `glMultiDrawArrays`, edge flags, colour-index mode,
-  `glBlendEquation`, `glBlendFuncSeparate`, `glColorTable`.
-- GLU and GLUT; MiniGL's own main loop and callbacks; contexts on a 24-bit
-  or 8-bit screen (the Radeon draws 15, 16 and 32 bit).
-- Textures beyond 16 MB are not swapped out.
+- Display lists.
+- Paletted textures (`glColorTable`), `glCopyTexImage2D`,
+  `glCopyTexSubImage2D`, `glBlendEquation`, `glBlendFuncSeparate`.
+- GLUT.
+- Polygons drawn as lines or points (`glPolygonMode`), stencil and
+  accumulation buffers, line and polygon stipple, logic operations,
+  reading the depth buffer.
+- Generic 32-bit textures (`GL_RGBA`, 4) are stored with 16 bits -- ask
+  for `GL_RGBA8` or `GL_RGB8` to keep 8 bits.
+- Contexts on a 24-bit or 8-bit screen (the Radeon draws 15, 16 and 32
+  bit). Textures beyond 16 MB are not swapped out.
+- Accepted without effect: edge flags and colour-index values,
+  `glDrawBuffer` and `glReadBuffer`, texture priorities. `mglLockBack`
+  always refuses. `glTexCoord4f` divides by q at each corner.
 
 ## GLQuake benchmarks
 

@@ -33,8 +33,9 @@ void Fog_Defaults(struct Core *c)
     c->fog_end = 1.0f;
     c->fog_color[0] = c->fog_color[1] = c->fog_color[2] = c->fog_color[3] = 0.0f;
     c->line_width = 1.0f;
-    c->pack_align = 4;              /* glPixelStorei's defaults (lib/rglread.c) */
+    c->pack_align = 4;              /* glPixelStorei's defaults (compat.c) */
     c->unpack_align = 4;
+    Compat_Defaults(c);             /* the rest of 29.1's state (compat.c) */
     Fog_Forget(c);
 }
 

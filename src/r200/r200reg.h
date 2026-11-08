@@ -433,6 +433,10 @@
 #define   R_TXA_ARG_R0_ALPHA      10UL
 #define   R_TXA_ARG_R1_ALPHA      12UL
 #define   R_TXC_OP_MADD           (0UL << 28)    /* A * B + C */
+#define   R_TXC_OP_LERP           (3UL << 28)    /* A * (1 - C) + B * C (Mesa: GL_INTERPOLATE) */
+#define   R_TXC_ARG_TFACTOR_COLOR 8UL            /* the stage's PP_TFACTOR (TFACTOR_SEL) */
+#define   R_TXC_ARG_R0_ALPHA      11UL           /* a colour arg: R0's alpha in r, g and b; R1 13 */
+#define   R_TXA_ARG_TFACTOR_ALPHA 8UL
 #define   R_TXC_COMP_ARG_B        (1UL << 20)    /* B = 1 - B (B = ZERO gives one) */
 #define   R_TXA_COMP_ARG_B        (1UL << 20)    /* the same bit in TXABLEND */
 #define   R_TXC_CLAMP_0_1         (1UL << 12)    /* in TXCBLEND2 / TXABLEND2 */

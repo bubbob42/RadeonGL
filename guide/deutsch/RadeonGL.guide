@@ -536,29 +536,25 @@ Für gar kein Protokoll:
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL setzt 122 der 205 Funktionen der minigl.library 29.1 um: alles,
+RadeonGL setzt 162 der 205 Funktionen der minigl.library 29.1 um: alles,
 was GLQuake verwendet, und mehr. Ein Programm, das eine der anderen
 aufruft, bekommt dafür nur den Fehler GL_INVALID_OPERATION; die
 @{" Protokolldatei " link Log} nennt solche Aufrufe.
 
     * Display-Listen (glNewList, glCallList und die übrigen).
-    * glTexCoord4f, die Texturumgebung GL_BLEND (wie GL_MODULATE
-      gezeichnet) und GL_DECAL mit einer RGBA-Textur.
-    * Stencil- und Akkumulationspuffer, Linien- und Flächenmuster,
-      logische Verknüpfungen.
-    * Den Tiefenpuffer lesen, Pixel kopieren (glCopyTexImage2D,
-      glCopyTexSubImage2D), glDrawBuffer, glReadBuffer.
-    * Die Aufrufe mit doppelter Genauigkeit (glLoadMatrixd, glMultMatrixd,
-      glRotated, glScaled, glTranslated, glGetDoublev).
-    * glArrayElement, glInterleavedArrays, glMultiDrawArrays, Kantenmarken
-      und der Farbindex-Modus.
-    * glBlendEquation, glBlendFuncSeparate, glColorTable, glTexEnvfv,
-      Texturprioritäten.
-    * GLU und GLUT (gluPerspective, gluLookAt, gluBuild2DMipmaps, die
-      Quadriken; die Fenster- und Körperfunktionen von GLUT).
-    * Die eigene Hauptschleife von MiniGL mit ihren Rückrufen
-      (mglMainLoop, mglIdleFunc, mglKeyFunc, mglMouseFunc), mglLockBack,
-      mglTexMemStat.
+    * Texturen mit Farbpalette (glColorTable), Pixel kopieren
+      (glCopyTexImage2D, glCopyTexSubImage2D), glBlendEquation,
+      glBlendFuncSeparate.
+    * GLUT (die Fenster- und Körperfunktionen).
+    * Polygone als Linien oder Punkte (glPolygonMode), Stencil- und
+      Akkumulationspuffer, Linien- und Flächenmuster, logische
+      Verknüpfungen, den Tiefenpuffer lesen.
+
+Angenommen, aber ohne Wirkung: Kantenmarken und Farbindex-Werte,
+glDrawBuffer und glReadBuffer (RadeonGL zeichnet in das Bild, das gerade
+entsteht, und liest von dort), die Texturprioritäten, mglProhibit... und
+mglProposeCloseDesktop. mglLockBack lehnt immer ab. glTexCoord4f teilt an
+jeder Ecke durch q (die Radeon bekommt q nicht).
 @endnode
 
 @node Inside "Wie es funktioniert"

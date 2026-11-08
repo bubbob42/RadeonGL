@@ -37,5 +37,9 @@
 #ifndef GL_CLIENT_ACTIVE_TEXTURE_ARB
 #define GL_CLIENT_ACTIVE_TEXTURE_ARB    0x84e1UL
 #endif
+/* MiniGL's gl.h spells this one GL_TEXTURE_DOOR_ARRAY_POINTER (the same value) */
+#ifndef GL_TEXTURE_COORD_ARRAY_POINTER
+#define GL_TEXTURE_COORD_ARRAY_POINTER  0x8092UL
+#endif
 
 #endif /* CORE_GLEXTRA_H */

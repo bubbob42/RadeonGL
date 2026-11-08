@@ -760,6 +760,8 @@ static void test_texgen(void)
 
 /* W2: GL_RGBA8 and GL_RGB8 stored as ARGB8888, one texel a dword */
 static ULONG Texel(const struct CoreTex *t, ULONG l, ULONG x, ULONG y);
+static int Near(float a, float b);
+static ULONG RegSince(ULONG start, ULONG reg);
 
 static void test_tex32(void)
 {
@@ -792,6 +794,332 @@ static void test_tex32(void)
     Draw1();
     CHECK_INT(Checked(&st), R2CE_OK);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
+/* --- minigl.library 29.1's other calls (compat.c, 2026-11-08) ------------------------ */
+
+/* The packets of one triangle as the stream holds them, for comparing two
+ * ways of sending it */
+static ULONG CpDump(ULONG *buf, ULONG max)
+{
+    ULONG n;
+    ULONG i;
+
+    n = (ULONG) (cs.ptr - stream);
+    if (n > max)
+        n = max;
+    for (i = 0; i < n; i++)
+        buf[i] = stream[i];
+    return n;
+}
+
+static void test_compat(void)
+{
+    static const float pos[9] = { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+    static const UBYTE col[12] = { 255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 64 };
+    static ULONG a[2048], b[2048];
+    /* 2 x 2 RGB, rows padded to 4 bytes (GL_UNPACK_ALIGNMENT 4) */
+    static const UBYTE rgb[16] = { 1, 2, 3, 4, 5, 6, 0xee, 0xee, 7, 8, 9, 10, 11, 12, 0xee, 0xee };
+    static const UBYTE tight[18] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 };
+    /* a 4 x 3 RGBA image, of which the 2 x 2 at (1, 1) is uploaded */
+    UBYTE big[4 * 3 * 4];
+    static const float fl[2 * 4] = { 0.0f, 0.5f, 1.0f, 2.0f, -1.0f, 0.25f, 0.75f, 1.0f };
+    static const UBYTE us[4] = { 0xff, 0xff, 0x80, 0x00 };     /* big-endian, as on the Amiga */
+    static const BYTE sb[2] = { -5, 127 };
+    static const UBYTE red[2] = { 200, 100 };
+    static const float plain[4] = { 1.0f, 0.5f, 0.0f, 0.25f };
+    struct R2ChkState st;
+    struct CoreTex *t;
+    struct CoreMat *m;
+    LONG iv[4];
+    float fv[16];
+    void *ptr;
+    ULONG na, nb;
+    ULONG i;
+    ULONG start;
+    ULONG names[2];
+    LONG cur, peak;
+
+    /* glArrayElement sends what glColor + glVertex send */
+    Fresh(1);
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
+    Core_ColorPointer(&core, 4, GL_UNSIGNED_BYTE, 0, col);
+    Core_EnableClientStateX(&core, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientStateX(&core, GL_COLOR_ARRAY, 1);
+    Core_Begin(&core, GL_TRIANGLES);
+    for (i = 0; i < 3; i++)
+        Core_ArrayElement(&core, (LONG) i);
+    Core_End(&core);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    na = CpDump(a, 2048);
+    Fresh(1);
+    Core_Begin(&core, GL_TRIANGLES);
+    for (i = 0; i < 3; i++)
+    {
+        Core_Color4ub(&core, col[i * 4], col[i * 4 + 1], col[i * 4 + 2], col[i * 4 + 3]);
+        Core_Vertex3f(&core, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+    }
+    Core_End(&core);
+    nb = CpDump(b, 2048);
+    CHECK_INT(na, nb);
+    CHECK(na == nb && memcmp(a, b, na * 4) == 0);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* enables and client states 29.1 has */
+    Fresh(1);
+    CHECK_INT(Core_IsEnabledX(&core, MGL_ARRAY_TRANSFORMATIONS), 1);
+    Core_EnableX(&core, MGL_ARRAY_TRANSFORMATIONS, 0);
+    CHECK_INT(Core_IsEnabledX(&core, MGL_ARRAY_TRANSFORMATIONS), 0);
+    Core_EnableX(&core, GL_DEPTH_WRITEMASK, 0);
+    CHECK_INT(core.depth_mask, 0);
+    CHECK_INT(Core_IsEnabledX(&core, GL_DEPTH_WRITEMASK), 0);
+    Core_EnableX(&core, GL_POLYGON_OFFSET_LINE, 1);
+    CHECK_INT(Core_IsEnabledX(&core, GL_POLYGON_OFFSET_LINE), 1);
+    Core_EnableClientStateX(&core, GL_EDGE_FLAG_ARRAY, 1);
+    Core_EnableClientStateX(&core, GL_INDEX_ARRAY, 1);
+    CHECK_INT(Core_IsEnabledX(&core, GL_EDGE_FLAG_ARRAY), 1);
+    CHECK_INT(Core_IsEnabledX(&core, GL_INDEX_ARRAY), 1);
+    CHECK_INT(Core_IsEnabledX(&core, GL_VERTEX_ARRAY), 0);
+    Core_EnableX(&core, GL_BLEND, 1);                       /* passed on */
+    CHECK_INT(Core_IsEnabledX(&core, GL_BLEND), 1);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* the glGet names 29.1 answers */
+    Core_GetIntegervX(&core, GL_RED_BITS, iv);   CHECK_INT(iv[0], 5);
+    Core_GetIntegervX(&core, GL_GREEN_BITS, iv); CHECK_INT(iv[0], 6);
+    Core_GetIntegervX(&core, GL_ALPHA_BITS, iv); CHECK_INT(iv[0], 0);
+    Core_GetIntegervX(&core, GL_DEPTH_BITS, iv); CHECK_INT(iv[0], 16);
+    Core_GetIntegervX(&core, GL_DOUBLEBUFFER, iv); CHECK_INT(iv[0], 1);
+    Core_GetIntegervX(&core, GL_DRAW_BUFFER, iv); CHECK_INT(iv[0], (LONG) GL_BACK);
+    core.single_buffer = 1;
+    Core_GetIntegervX(&core, GL_DOUBLEBUFFER, iv); CHECK_INT(iv[0], 0);
+    Core_GetIntegervX(&core, GL_READ_BUFFER, iv); CHECK_INT(iv[0], (LONG) GL_FRONT);
+    core.single_buffer = 0;
+    CHECK_INT(Core_GetCountX(GL_MAX_VIEWPORT_DIMS), 2);
+    Core_GetIntegervX(&core, GL_MAX_VIEWPORT_DIMS, iv);
+    CHECK_INT(iv[0], 2048);
+    CHECK_INT(iv[1], 2048);
+    Core_PushMatrix(&core);
+    Core_GetIntegervX(&core, GL_MODELVIEW_STACK_DEPTH, iv); CHECK_INT(iv[0], 2);
+    Core_PopMatrix(&core);
+    Core_GetIntegervX(&core, GL_EDGE_FLAG_ARRAY, iv); CHECK_INT(iv[0], 1);
+    Core_GetIntegervX(&core, GL_POLYGON_MODE, iv);
+    CHECK_INT(iv[0], (LONG) GL_FILL);
+    CHECK_INT(iv[1], (LONG) GL_FILL);
+    Core_EnableX(&core, GL_LIGHT3, 1);
+    Core_GetIntegervX(&core, GL_LIGHT3, iv); CHECK_INT(iv[0], 1);
+    Core_GetIntegervX(&core, GL_LIGHT2, iv); CHECK_INT(iv[0], 0);
+    Core_GetFloatvX(&core, GL_LINE_WIDTH, fv); CHECK(fv[0] == 1.0f);
+    Core_GetIntegervX(&core, GL_VERTEX_ARRAY_TYPE, iv); CHECK_INT(iv[0], (LONG) GL_FLOAT);
+    Core_GetIntegervX(&core, GL_VIEWPORT, iv);          /* get.c's, passed on */
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    Core_GetIntegervX(&core, 0x7fff, iv);               /* nobody's */
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
+    ptr = NULL;
+    Core_GetPointerv(&core, GL_VERTEX_ARRAY_POINTER, &ptr);
+    CHECK(ptr == (void *) pos);
+    Core_GetPointerv(&core, GL_TEXTURE_COORD_ARRAY_POINTER, &ptr);
+    CHECK(ptr == NULL);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* the pixel store */
+    Core_GetIntegervX(&core, GL_UNPACK_ALIGNMENT, iv); CHECK_INT(iv[0], 4);
+    Core_PixelStore(&core, GL_UNPACK_ROW_LENGTH, 8);
+    Core_GetIntegervX(&core, GL_UNPACK_ROW_LENGTH, iv); CHECK_INT(iv[0], 8);
+    Core_PixelStore(&core, GL_UNPACK_ROW_LENGTH, 0);
+    Core_PixelStore(&core, GL_PACK_ALIGNMENT, 3);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_VALUE);
+    Core_PixelStore(&core, GL_UNPACK_SKIP_ROWS, -1);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_VALUE);
+    Core_PixelStore(&core, 0x7fff, 1);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+
+    /* uploads in other layouts: alignment, row length and skips, types */
+    Fresh(1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    t = core.tex[3];
+    CHECK(t != NULL);
+    if (t == NULL)
+        return;
+    CHECK_HEX(Texel(t, 0, 1, 0), 0xff040506UL);
+    CHECK_HEX(Texel(t, 0, 0, 1), 0xff070809UL);     /* the second row after the padding */
+    CHECK_HEX(Texel(t, 0, 1, 1), 0xff0a0b0cUL);
+    Core_PixelStore(&core, GL_UNPACK_ALIGNMENT, 1);
+    Core_TexSubImage2DX(&core, GL_TEXTURE_2D, 0, 0, 1, 2, 1, GL_RGB, GL_UNSIGNED_BYTE, rgb + 8);
+    CHECK_HEX(Texel(t, 0, 1, 1), 0xff0a0b0cUL);
+    /* alignment 1: tight 6-byte rows (texture.c alone reads 8-byte ones) */
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, tight);
+    CHECK_HEX(Texel(t, 0, 0, 1), 0xff070809UL);
+    CHECK_HEX(Texel(t, 0, 1, 1), 0xff0a0b0cUL);
+    Core_TexSubImage2DX(&core, GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGB, GL_UNSIGNED_BYTE, tight + 6);
+    CHECK_HEX(Texel(t, 0, 0, 0), 0xff070809UL);
+    Core_PixelStore(&core, GL_UNPACK_ALIGNMENT, 4);
+    for (i = 0; i < sizeof(big); i++)
+        big[i] = (UBYTE) i;
+    Core_PixelStore(&core, GL_UNPACK_ROW_LENGTH, 4);
+    Core_PixelStore(&core, GL_UNPACK_SKIP_PIXELS, 1);
+    Core_PixelStore(&core, GL_UNPACK_SKIP_ROWS, 1);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, big);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(Texel(t, 0, 0, 0), 0x17141516UL);     /* pixel (1, 1) = bytes 20..23: A R G B */
+    CHECK_HEX(Texel(t, 0, 1, 1), 0x2b28292aUL);     /* pixel (2, 2) = bytes 40..43 */
+    Core_PixelStore(&core, GL_UNPACK_ROW_LENGTH, 0);
+    Core_PixelStore(&core, GL_UNPACK_SKIP_PIXELS, 0);
+    Core_PixelStore(&core, GL_UNPACK_SKIP_ROWS, 0);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 1, 0, GL_RGBA, GL_FLOAT, fl);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(Texel(t, 0, 0, 0), 0xff0080ffUL);     /* 0, 0.5, 1, 2 -> 00 80 ff ff */
+    CHECK_HEX(Texel(t, 0, 1, 0), 0xff0040bfUL);     /* -1, 0.25, 0.75, 1 */
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_LUMINANCE, 2, 1, 0, GL_LUMINANCE, GL_UNSIGNED_SHORT, us);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(Texel(t, 0, 0, 0), 0xffUL);
+    CHECK_HEX(Texel(t, 0, 1, 0), 0x80UL);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_LUMINANCE, 2, 1, 0, GL_LUMINANCE, GL_BYTE, sb);
+    CHECK_HEX(Texel(t, 0, 0, 0), 0x00UL);
+    CHECK_HEX(Texel(t, 0, 1, 0), 0xffUL);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 1, 0, GL_RED, GL_UNSIGNED_BYTE, red);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(Texel(t, 0, 0, 0), 0xffc80000UL);
+    CHECK_HEX(Texel(t, 0, 1, 0), 0xff640000UL);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 1, 0, GL_RGB, 0x7fff, red);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);   /* refused where it always was */
+    Core_TexMemStat(&core, &cur, &peak);
+    CHECK(cur > 0 && peak >= cur);
+
+    /* the environment colour: GL_BLEND and RGBA GL_DECAL on the combiner */
+    Fresh(1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 4);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_LUMINANCE, 2, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, red);
+    Core_EnableX(&core, GL_TEXTURE_2D, 1);
+    Core_TexEnvfv(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, plain);
+    Core_TexEnvi(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_BLEND);
+    Draw1();
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(LastReg(R_PP_TFACTOR_0), 0x40ff8000UL);
+    CHECK_HEX(LastReg(R_PP_TXCBLEND_0), (R_TXC_ARG_DIFFUSE_COLOR << R_TXC_ARG_A_SHIFT)
+              | (R_TXC_ARG_TFACTOR_COLOR << R_TXC_ARG_B_SHIFT)
+              | (R_TXC_ARG_R0_COLOR << R_TXC_ARG_C_SHIFT) | R_TXC_OP_LERP);
+    CHECK_HEX(LastReg(R_PP_TXABLEND_0), (R_TXA_ARG_DIFFUSE_ALPHA << R_TXC_ARG_C_SHIFT) | R_TXC_OP_MADD);
+    start = (ULONG) (cs.ptr - stream);
+    Draw1();                                        /* nothing changed: no TFACTOR */
+    CHECK_HEX(RegSince(start, R_PP_TFACTOR_0), 0xdeadbeefUL);
+    fv[0] = 0.0f; fv[1] = 0.0f; fv[2] = 1.0f; fv[3] = 1.0f;
+    Core_TexEnvfv(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, fv);
+    start = (ULONG) (cs.ptr - stream);
+    Draw1();
+    CHECK_HEX(RegSince(start, R_PP_TFACTOR_0), 0xff0000ffUL);
+    Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 1, 0, GL_RGBA, GL_FLOAT, fl);
+    Core_TexEnvi(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL);
+    Draw1();
+    CHECK_HEX(LastReg(R_PP_TXCBLEND_0), (R_TXC_ARG_DIFFUSE_COLOR << R_TXC_ARG_A_SHIFT)
+              | (R_TXC_ARG_R0_COLOR << R_TXC_ARG_B_SHIFT)
+              | (R_TXC_ARG_R0_ALPHA << R_TXC_ARG_C_SHIFT) | R_TXC_OP_LERP);
+    CHECK_HEX(LastReg(R_PP_TXABLEND_0), (R_TXA_ARG_DIFFUSE_ALPHA << R_TXC_ARG_C_SHIFT) | R_TXC_OP_MADD);
+    Core_TexEnvfv(&core, GL_TEXTURE_ENV, 0x7fff, fv);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* gluPerspective and gluLookAt */
+    Fresh(1);
+    Core_MatrixMode(&core, GL_PROJECTION);
+    Core_Perspective(&core, 90.0f, 2.0f, 1.0f, 3.0f);
+    m = Core_TopMatrix(&core, GL_PROJECTION);
+    CHECK(Near(m->m[0], 0.5f));                     /* near / (aspect * near tan 45) */
+    CHECK(Near(m->m[5], 1.0f));
+    CHECK(Near(m->m[10], -2.0f));                   /* -(f + n) / (f - n) */
+    CHECK(Near(m->m[14], -3.0f));                   /* -2 f n / (f - n) */
+    CHECK(Near(m->m[11], -1.0f));
+    Core_Perspective(&core, 90.0f, 0.0f, 1.0f, 3.0f);   /* GLU returns early */
+    CHECK(Near(m->m[0], 0.5f));
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    fv[0] = 5.0f; fv[1] = 0.0f; fv[2] = 0.0f;           /* the eye on +x */
+    fv[3] = 0.0f; fv[4] = 0.0f; fv[5] = 0.0f;           /* looking at the origin */
+    fv[6] = 0.0f; fv[7] = 1.0f; fv[8] = 0.0f;
+    Core_LookAt(&core, fv, fv + 3, fv + 6);
+    m = Core_TopMatrix(&core, GL_MODELVIEW);
+    /* the origin lands 5 in front of the eye: (0, 0, -5) */
+    CHECK(Near(m->m[12], 0.0f));
+    CHECK(Near(m->m[13], 0.0f));
+    CHECK(Near(m->m[14], -5.0f));
+    /* +z of the world points to the eye's left: x_eye = -1 */
+    CHECK(Near(m->m[8], -1.0f));
+    CHECK(Near(m->m[5], 1.0f));                     /* up stays up */
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* glTexCoord4f, glMultiDrawArrays, buffers, residency */
+    Core_TexCoord4f(&core, 2.0f, 4.0f, 0.0f, 2.0f);
+    CHECK(core.cur_st[0][0] == 1.0f && core.cur_st[0][1] == 2.0f);
+    Core_TexCoord4f(&core, 3.0f, 5.0f, 0.0f, 0.0f);
+    CHECK(core.cur_st[0][0] == 3.0f && core.cur_st[0][1] == 5.0f);
+    Core_MultiDrawArrays(&core, GL_TRIANGLES, NULL, NULL, -1);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_VALUE);
+    Core_DrawBuffer(&core, GL_FRONT);
+    Core_GetIntegervX(&core, GL_DRAW_BUFFER, iv); CHECK_INT(iv[0], (LONG) GL_FRONT);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    Core_DrawBuffer(&core, GL_RIGHT);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_OPERATION);
+    Core_ReadBuffer(&core, GL_NONE);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    Core_GenTextures(&core, 1, names);
+    Core_BindTexture(&core, GL_TEXTURE_2D, names[0]);
+    CHECK_INT(Core_AreTexturesResident(&core, 1, names), 1);
+    names[1] = 999;
+    CHECK_INT(Core_AreTexturesResident(&core, 2, names), 0);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_VALUE);
+    Core_IndexPointer(&core, GL_UNSIGNED_SHORT, 0, NULL);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    Core_EdgeFlag(&core, 0);
+    Core_GetIntegervX(&core, GL_EDGE_FLAG, iv); CHECK_INT(iv[0], 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* glInterleavedArrays: GL_T2F_C4UB_V3F sets three arrays, the normal off */
+    {
+        static UBYTE ilv[2 * 24];
+
+        Core_EnableClientStateX(&core, GL_NORMAL_ARRAY, 1);
+        Core_InterleavedArrays(&core, GL_T2F_C4UB_V3F, 0, ilv);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK(core.va.enabled && core.ca.enabled && core.ta[core.client_unit].enabled);
+        CHECK_INT(core.na.enabled, 0);
+        CHECK(core.ta[core.client_unit].ptr == ilv && core.ca.ptr == ilv + 8 && core.va.ptr == ilv + 12);
+        CHECK_INT(core.va.stride, 24);
+        CHECK_INT(core.ca.type, GL_UNSIGNED_BYTE);
+        CHECK_INT(core.va.size, 3);
+        Core_InterleavedArrays(&core, GL_V2F, 40, ilv);
+        CHECK_INT(core.ca.enabled, 0);
+        CHECK_INT(core.va.stride, 40);
+        Core_InterleavedArrays(&core, 0x7fff, 0, ilv);
+        CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    }
+
+    /* gluBuild2DMipmaps: 3 x 3 goes to 4 x 4 (GLU's nearest power), then
+     * 2 x 2 and 1 x 1, each the mean of the level above */
+    {
+        static const UBYTE l3[3 * 4] = { 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 0 };   /* rows of 4 */
+        struct CoreTex *tm;
+
+        Fresh(1);
+        Core_BindTexture(&core, GL_TEXTURE_2D, 9);
+        CHECK_INT(Core_Build2DMipmaps(&core, GL_TEXTURE_2D, GL_LUMINANCE, 3, 3, GL_LUMINANCE,
+                                      GL_UNSIGNED_BYTE, l3), 0);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        tm = core.tex[9];
+        CHECK(tm != NULL && tm->w == 4 && tm->h == 4);
+        if (tm != NULL)
+        {
+            CHECK_HEX(tm->levels, 0x7UL);           /* 4 x 4, 2 x 2, 1 x 1 */
+            CHECK_HEX(Texel(tm, 0, 0, 0), 0x00UL);
+            CHECK_HEX(Texel(tm, 0, 3, 3), 0xffUL);  /* the bottom row of 3 at 255 */
+            CHECK_HEX(Texel(tm, 2, 0, 0), 0x40UL);  /* a quarter of the 4 x 4 is 255 */
+        }
+        CHECK_INT(Core_Build2DMipmaps(&core, GL_TEXTURE_2D, GL_LUMINANCE, 0, 3, GL_LUMINANCE,
+                                      GL_UNSIGNED_BYTE, l3), 100901);
+        CHECK_INT(Core_Build2DMipmaps(&core, 0x7fff, GL_LUMINANCE, 3, 3, GL_LUMINANCE,
+                                      GL_UNSIGNED_BYTE, l3), 100900);
+    }
 }
 
 /* --- Textures ------------------------------------------------------------------- */
@@ -3819,6 +4147,7 @@ int main(void)
     test_lighting();
     test_texgen();
     test_lit_locked();
+    test_compat();
     test_tex32();
     test_textures();
     test_state();
