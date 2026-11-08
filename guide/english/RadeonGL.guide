@@ -1,12 +1,12 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.7 (6.11.2026)
+@$VER: RadeonGL.guide 0.9 (8.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
 
 @node Main "RadeonGL"
 
-@{b}RadeonGL 0.6@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
+@{b}RadeonGL 0.9@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
 
 RadeonGL is a minigl.library that draws with the 3D engine of an ATI
 Radeon from the R200 family, on a graphics card that Picasso96 drives. It
@@ -45,8 +45,12 @@ Warp3D or a software renderer.
 @{b}What it does@{ub}
 
     * draws textured, coloured and blended triangles with the Radeon's
-      own transformation and rasterising hardware
-    * opens a Picasso96 screen of its own for the program, in 16 or 32 bit
+      own transformation and rasterising hardware, and lets it light
+      them, fog them and compute texture coordinates
+    * opens a Picasso96 screen of its own for the program, in 16 or 32
+      bit, or draws in a window on the Workbench, or into the program's
+      own bitmap
+    * lets several programs draw at once
     * keeps textures in the card's memory
     * checks every list of commands before the Radeon runs it, and
       stops a faulty one before it reaches the card (this can be turned
@@ -213,8 +217,9 @@ other minigl.library 29.
       lists them under "slots called but not implemented". Please report
       them.
 
-Only one program can draw through RadeonGL at a time. A second one is
-refused until the first one ends.
+Several programs can draw through RadeonGL at the same time, each on a
+screen of its own, in a window or into a bitmap (see
+@{" Limits of this version " link Limits}).
 @endnode
 
 @node Screen "The screen"
@@ -362,6 +367,9 @@ sets it) and vertical sync off, frames a second:
     demo1       33.5        32.5         32.9
     demo2       30.6           -         26.0
     demo3       28.9           -         27.5
+
+RadeonGL 0.9 runs GLQuake as fast as 0.8: demo1 at 320 x 240 took 29.1
+seconds instead of 29.0, the smallest step GLQuake's timedemo shows.
 
 Vertical sync (on in GLQuake by default) makes a frame wait for the
 beam: about 2% in play at 800 x 600.
@@ -604,6 +612,24 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.9 (8.11.2026)
+    * contexts in a window and in a bitmap: in the program's own window
+      (mglCreateContextFromWindow), in a window RadeonGL opens on the
+      default public screen (mglChooseWindowMode), or straight into the
+      program's bitmap (mglCreateContextFromBitMap), on 15-, 16- and
+      32-bit screens of the Radeon; resizable
+    * several programs at once, each with its own context
+    * lighting on the Radeon: glLight, glMaterial, glLightModel,
+      glColorMaterial, glNormalPointer; eight lights, directional, local
+      and spot, with attenuation and two-sided lighting
+    * texture coordinate generation (glTexGen: object linear, eye
+      linear, sphere map) and texture matrices
+    * fog (glFog), wide lines (glLineWidth), glReadPixels and
+      mglWriteShotPPM
+    * textures with 8 bits a component for GL_RGBA8 and GL_RGB8
+    * lit compiled vertex arrays take the fast path too
+    * GLQuake as fast as with 0.8
 
 0.8 (7.11.2026)
     * every screen mode of the card: Picasso96's own list stops at 256

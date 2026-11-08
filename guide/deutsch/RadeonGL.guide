@@ -1,12 +1,12 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.7 (6.11.2026)
+@$VER: RadeonGL.guide 0.9 (8.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
 
 @node Main "RadeonGL"
 
-@{b}RadeonGL 0.6@{ub} -- minigl.library für die ATI Radeon 8500 bis 9250
+@{b}RadeonGL 0.9@{ub} -- minigl.library für die ATI Radeon 8500 bis 9250
 
 RadeonGL ist eine minigl.library, die mit der 3D-Einheit einer ATI Radeon
 der R200-Familie zeichnet, auf einer Grafikkarte, die Picasso96 betreibt.
@@ -45,9 +45,12 @@ oder eines Software-Renderers.
 @{b}Was sie kann@{ub}
 
     * zeichnet texturierte, farbige und überblendete Dreiecke mit der
-      Transformations- und Rasterhardware der Radeon
+      Transformations- und Rasterhardware der Radeon, und lässt sie dort
+      beleuchten, vernebeln und mit berechneten Texturkoordinaten versehen
     * öffnet für das Programm einen eigenen Picasso96-Bildschirm, in 16
-      oder 32 Bit
+      oder 32 Bit, oder zeichnet in ein Fenster auf der Workbench oder in
+      die Bitmap des Programms
+    * lässt mehrere Programme gleichzeitig zeichnen
     * hält die Texturen im Speicher der Karte
     * prüft jede Befehlsliste, bevor die Radeon sie ausführt, und hält
       eine fehlerhafte auf, bevor sie die Karte erreicht (abschaltbar,
@@ -227,8 +230,9 @@ sind, öffnen sie wie jede andere minigl.library 29.
       (glGetError); die @{" Protokolldatei " link Log} nennt sie unter
       "slots called but not implemented". Bitte melden Sie sie.
 
-Es kann immer nur ein Programm über RadeonGL zeichnen. Ein zweites wird
-abgewiesen, bis das erste endet.
+Mehrere Programme können gleichzeitig über RadeonGL zeichnen, jedes auf
+einem eigenen Bildschirm, in einem Fenster oder in eine Bitmap (siehe
+@{" Grenzen dieser Version " link Limits}).
 @endnode
 
 @node Screen "Der Bildschirm"
@@ -389,6 +393,10 @@ Bilder pro Sekunde:
     demo1       33,5        32,5         32,9
     demo2       30,6           -         26,0
     demo3       28,9           -         27,5
+
+RadeonGL 0.9 lässt GLQuake so schnell laufen wie 0.8: demo1 bei
+320 x 240 brauchte 29,1 statt 29,0 Sekunden, den kleinsten Schritt, den
+das Timedemo von GLQuake anzeigt.
 
 Die vertikale Synchronisation (in GLQuake von Haus aus an) lässt jedes
 Bild auf den Strahl warten: etwa 2% beim Spielen bei 800 x 600.
@@ -644,6 +652,25 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.9 (8.11.2026)
+    * Kontexte in einem Fenster und in einer Bitmap: im eigenen Fenster
+      des Programms (mglCreateContextFromWindow), in einem Fenster, das
+      RadeonGL auf dem voreingestellten öffentlichen Bildschirm öffnet
+      (mglChooseWindowMode), oder direkt in die Bitmap des Programms
+      (mglCreateContextFromBitMap), auf 15-, 16- und 32-Bit-Bildschirmen
+      der Radeon; in der Größe veränderbar
+    * mehrere Programme gleichzeitig, jedes mit eigenem Kontext
+    * Beleuchtung auf der Radeon: glLight, glMaterial, glLightModel,
+      glColorMaterial, glNormalPointer; acht Lichter, gerichtet, lokal
+      und als Spot, mit Abschwächung und beidseitiger Beleuchtung
+    * Texturkoordinaten von der Radeon (glTexGen: object linear, eye
+      linear, sphere map) und Texturmatrizen
+    * Nebel (glFog), breite Linien (glLineWidth), glReadPixels und
+      mglWriteShotPPM
+    * Texturen mit 8 Bit je Komponente für GL_RGBA8 und GL_RGB8
+    * beleuchtete compiled vertex arrays nehmen auch den schnellen Weg
+    * GLQuake so schnell wie mit 0.8
 
 0.8 (7.11.2026)
     * jeder Bildschirmmodus der Karte: Picasso96s eigene Liste endet nach

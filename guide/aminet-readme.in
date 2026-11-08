@@ -45,14 +45,22 @@ FEATURES
     program sends again unchanged in the card's memory
   * Transformation and rasterising on the Radeon, the full float matrix
     stack
-  * Two texture units; RGB565, ARGB4444, I8, AI88 in up to 16 MB of card
-    memory; nearest, linear and mipmap filters; repeat and clamp;
-    MODULATE, REPLACE, DECAL (RGB), ADD
+  * Two texture units; RGB565, ARGB4444, ARGB8888 (GL_RGB8, GL_RGBA8),
+    I8, AI88 in up to 16 MB of card memory; nearest, linear and mipmap
+    filters; repeat and clamp; MODULATE, REPLACE, DECAL (RGB), ADD
+  * Lighting on the Radeon: eight lights, directional, local and spot,
+    with attenuation, two-sided; materials, colour material, normal
+    arrays
+  * Texture coordinate generation (object linear, eye linear, sphere
+    map), texture matrices, fog, wide lines, glReadPixels
   * Blending, alpha test, depth test, polygon offset, culling, scissor,
     colour mask, flat and smooth shading, point size
   * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048, in
     every mode of the card, switched while the program runs; vertical
     sync
+  * Or a window on the Workbench (the program's or one of its own), or
+    straight into the program's bitmap, on 15-, 16- and 32-bit screens
+  * Several programs at once, each with its own context
   * Every command list checked before the Radeon runs it (can be turned
     off for speed); one Picasso96 lock a frame
   * Installer, manuals in English and German, a card test, a card report
@@ -61,19 +69,19 @@ FEATURES
 
 NOT IMPLEMENTED YET
 
-102 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
+122 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
 and more. A missing one sets GL_INVALID_OPERATION; the log names it.
 
-  * Lighting and materials, fog, display lists, texture coordinate
-    generation
-  * GL_BLEND and RGBA GL_DECAL texture environments; 32-bit textures are
-    stored with 16 bits
+  * Display lists, glTexCoord4f
+  * GL_BLEND and RGBA GL_DECAL texture environments; generic 32-bit
+    textures are stored with 16 bits (GL_RGBA8 and GL_RGB8 keep 8)
   * Stencil and accumulation buffers, stipple, logic operations
-  * glReadPixels, glCopyTexImage2D, glPixelStorei, glDrawBuffer
+  * Reading the depth buffer, glCopyTexImage2D, glDrawBuffer
   * Double-precision calls, glArrayElement, interleaved arrays, colour
-    index, glBlendEquation, glLineWidth, glColorTable
-  * GLU and GLUT; MiniGL's own main loop; contexts in a window or bitmap
-  * One program at a time; textures beyond 16 MB are not swapped out
+    index, glBlendEquation, glColorTable
+  * GLU and GLUT; MiniGL's own main loop; contexts on 24- and 8-bit
+    screens
+  * Textures beyond 16 MB are not swapped out
 
 
 GLQUAKE BENCHMARKS
@@ -88,6 +96,9 @@ AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.8, command check off
     demo1       33.5        32.5         32.9
     demo2       30.6           -         26.0
     demo3       28.9           -         27.5
+
+RadeonGL 0.9 runs them as fast as 0.8 (demo1 at 320 x 240: 29.1
+seconds instead of 29.0).
 
 The Aminet source built for the 68060, on RadeonGL 0.6: demo1 24.4 /
 23.7 / 23.3, demo2 21.7 / - / 17.9, demo3 21.4 / - / 19.9. With the
@@ -139,6 +150,11 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.9 (8.11.2026)
+  - contexts in a window and in a bitmap, several programs at once,
+    lighting, texture coordinate generation, fog, wide lines,
+    glReadPixels, 8-bit-per-component textures
 
 0.8 (7.11.2026)
   - every screen mode, live mode switches, vertical sync, no stale

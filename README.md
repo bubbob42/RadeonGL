@@ -121,6 +121,9 @@ start window sets it) and vertical sync off. Frames a second:
 | demo2 | 30.6 | | 26.0 |
 | demo3 | 28.9 | | 27.5 |
 
+RadeonGL 0.9 runs them as fast as 0.8: demo1 at 320 x 240 took 29.1
+seconds instead of 29.0, the smallest step the timedemo shows.
+
 - The same timedemos with the Aminet source (built for the 68060) on
   RadeonGL 0.6: demo1 24.4 / 23.7 / 23.3, demo2 21.7 / - / 17.9,
   demo3 21.4 / - / 19.9 -- the edition 1.2 and 0.8 are 35 to 45% faster.
