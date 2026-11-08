@@ -104,9 +104,13 @@ static ULONG SeCntl(struct Core *c)
 
     v = R_FLAT_SHADE_VTX_LAST | R_VTX_PIX_CENTER_OGL | R_ROUND_MODE_TRUNC | R_ROUND_PREC_8TH_PIX
       | R_BFACE_SOLID | R_FFACE_SOLID;
+    /* GL_FLAT flattens the colour only: fog -- here the factor the TCL puts
+     * in the specular alpha -- is interpolated still. Flat fog gave every
+     * triangle one corner's fog, hard-edged wedges on GLQuake's world (it
+     * draws GL_FLAT) with gl_fog 1 (MEASURED 2026-11-08) */
     if (c->shade_model == GL_FLAT)
         v |= R_DIFFUSE_SHADE_FLAT | R_ALPHA_SHADE_FLAT | R_SPECULAR_SHADE_FLAT
-           | R_FOG_SHADE_FLAT | R_DISC_FOG_SHADE_FLAT;
+           | R_FOG_SHADE_GOURAUD | R_DISC_FOG_SHADE_GOURAUD;
     else
         v |= R_DIFFUSE_SHADE_GOURAUD | R_ALPHA_SHADE_GOURAUD | R_SPECULAR_SHADE_GOURAUD
            | R_FOG_SHADE_GOURAUD | R_DISC_FOG_SHADE_GOURAUD;
