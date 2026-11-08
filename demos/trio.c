@@ -232,8 +232,8 @@ int main(int argc, char **argv)
     }
 
     Printf((CONST_STRPTR) "%s\n", (LONG) (ver + 6));
-    Printf((CONST_STRPTR) "Three programs, three contexts, one Radeon. Each window is where\n");
-    Printf((CONST_STRPTR) "its program's mglCreateContext(offx, offy, w, h) put it.\n");
+    Printf((CONST_STRPTR) "Three programs, three contexts, one Radeon: each window\n");
+    Printf((CONST_STRPTR) "is where its program's mglCreateContext(offx, offy) put it.\n");
     started = 0;
     for (i = 0; i < NPROGS; i++)
     {
@@ -255,7 +255,7 @@ int main(int argc, char **argv)
     if (seconds != 0)
         Printf((CONST_STRPTR) "They end after %ld seconds, or with Ctrl-C here.\n", seconds);
     else
-        Printf((CONST_STRPTR) "Ctrl-C here ends all three; Esc in a window ends that one.\n");
+        Printf((CONST_STRPTR) "Ctrl-C here ends all three, Esc in a window that one.\n");
 
     rc = RETURN_OK;
     stopping = FALSE;
