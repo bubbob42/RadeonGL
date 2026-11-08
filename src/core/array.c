@@ -84,7 +84,7 @@ void Core_EnableClientState(struct Core *c, ULONG array, ULONG on)
         case GL_TEXTURE_COORD_ARRAY:    c->ta[c->client_unit].enabled = on ? 1 : 0; return;
         case GL_NORMAL_ARRAY:           c->na.enabled = on ? 1 : 0; return;
     }
-    Core_Error(c, GL_INVALID_ENUM);
+    Compat_ClientState(c, array, on);       /* edge flag and index arrays, else an error */
 }
 
 void Core_LockArrays(struct Core *c, LONG first, LONG count)

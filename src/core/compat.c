@@ -32,6 +32,7 @@ void Compat_Defaults(struct Core *c)
     c->cur_edge = 1;
     c->cur_index = 1.0f;
     c->array_xform = 1;                     /* 29.1 starts with it on */
+    c->unpack_plain = 1;
     c->draw_buffer = 0;                     /* 0: GL's default, front or back as the */
     c->read_buffer = 0;                     /* context has (single_buffer, the library) */
 }
@@ -43,18 +44,17 @@ static ULONG DefBuffer(struct Core *c, ULONG mode)
 
 /* --- Enables ------------------------------------------------------------------------ */
 
-void Core_EnableX(struct Core *c, ULONG cap, ULONG on)
+/* Core_Enable's path for a cap state.c does not know (it checked glBegin):
+ * those 29.1 adds, else GL_INVALID_ENUM. GLQuake's caps never come here --
+ * a call into this module (linked last) costs the 68060 a cache line, and
+ * wrappers in front of every glEnable cost GLQuake 1% (MEASURED 2026-11-08) */
+void Compat_Enable(struct Core *c, ULONG cap, ULONG on)
 {
     ULONG *flag;
 
     switch (cap)
     {
         case GL_DEPTH_WRITEMASK:            /* MiniGL's own cap: the depth mask */
-            if (IN_BEGIN(c))
-            {
-                Core_Error(c, GL_INVALID_OPERATION);
-                return;
-            }
             Core_DepthMask(c, on);
             return;
         case GL_POLYGON_OFFSET_LINE:        /* only filled polygons are drawn: stored */
@@ -67,18 +67,14 @@ void Core_EnableX(struct Core *c, ULONG cap, ULONG on)
             flag = &c->array_xform;
             break;
         default:
-            Core_Enable(c, cap, on);
+            Core_Error(c, GL_INVALID_ENUM);
             return;
-    }
-    if (IN_BEGIN(c))
-    {
-        Core_Error(c, GL_INVALID_OPERATION);
-        return;
     }
     *flag = on ? 1UL : 0UL;
 }
 
-ULONG Core_IsEnabledX(struct Core *c, ULONG cap)
+/* Core_IsEnabled's path for the same: the client arrays too */
+ULONG Compat_IsEnabled(struct Core *c, ULONG cap)
 {
     switch (cap)
     {
@@ -93,17 +89,19 @@ ULONG Core_IsEnabledX(struct Core *c, ULONG cap)
         case GL_POLYGON_OFFSET_POINT:   return c->poly_offset_point;
         case MGL_ARRAY_TRANSFORMATIONS: return c->array_xform;
     }
-    return Core_IsEnabled(c, cap);
+    Core_Error(c, GL_INVALID_ENUM);
+    return 0;
 }
 
-void Core_EnableClientStateX(struct Core *c, ULONG array, ULONG on)
+/* Core_EnableClientState's path for an array array.c does not know */
+void Compat_ClientState(struct Core *c, ULONG array, ULONG on)
 {
     if (array == GL_EDGE_FLAG_ARRAY)
         c->ea.enabled = on ? 1UL : 0UL;     /* edge flags and colour index: no effect */
     else if (array == GL_INDEX_ARRAY)
         c->ia.enabled = on ? 1UL : 0UL;
     else
-        Core_EnableClientState(c, array, on);
+        Core_Error(c, GL_INVALID_ENUM);
 }
 
 /* --- Queries ------------------------------------------------------------------------ */
@@ -165,7 +163,7 @@ static ULONG QueryX(struct Core *c, ULONG pname, float *v)
         case GL_TEXTURE_COORD_ARRAY:
         case GL_EDGE_FLAG_ARRAY:
         case GL_INDEX_ARRAY:
-            v[0] = (float) Core_IsEnabledX(c, pname);
+            v[0] = (float) Core_IsEnabled(c, pname);
             return 1;
         case GL_VERTEX_ARRAY_SIZE:          v[0] = (float) ArrSize(&c->va); return 1;
         case GL_VERTEX_ARRAY_TYPE:          v[0] = (float) ArrType(&c->va); return 1;
@@ -238,7 +236,7 @@ static ULONG QueryX(struct Core *c, ULONG pname, float *v)
         case MGL_Z_OFFSET:
         case MGL_PERSPECTIVE_MAPPING:
         case MGL_ARRAY_TRANSFORMATIONS:
-            v[0] = (float) Core_IsEnabledX(c, pname);
+            v[0] = (float) Core_IsEnabled(c, pname);
             return 1;
     }
     if (pname >= GL_LIGHT0 && pname <= GL_LIGHT0 + 7)
@@ -320,6 +318,16 @@ void Core_GetPointerv(struct Core *c, ULONG pname, void **out)
 
 /* --- The pixel store ---------------------------------------------------------------- */
 
+/* unpack_plain: the unpack state texture.c reads uploads in -- rows padded
+ * to 4 bytes, nothing skipped or swapped -- so that an upload of unsigned
+ * bytes goes on at once (Core_TexSubImage2DX: GLQuake's lightmaps, every
+ * frame) */
+static void PlainState(struct Core *c)
+{
+    c->unpack_plain = (c->unpack_align == 4 && c->unpack_row == 0 && c->unpack_skip_px == 0
+                       && c->unpack_skip_rows == 0 && !c->unpack_swap) ? 1UL : 0UL;
+}
+
 void Core_PixelStore(struct Core *c, ULONG pname, LONG param)
 {
     ULONG *f;
@@ -342,10 +350,11 @@ void Core_PixelStore(struct Core *c, ULONG pname, LONG param)
                 c->pack_align = (ULONG) param;
             else
                 c->unpack_align = (ULONG) param;
+            PlainState(c);
             return;
         case GL_PACK_SWAP_BYTES:    c->pack_swap = param ? 1UL : 0UL; return;
         case GL_PACK_LSB_FIRST:     c->pack_lsb = param ? 1UL : 0UL; return;   /* bitmaps only */
-        case GL_UNPACK_SWAP_BYTES:  c->unpack_swap = param ? 1UL : 0UL; return;
+        case GL_UNPACK_SWAP_BYTES:  c->unpack_swap = param ? 1UL : 0UL; PlainState(c); return;
         case GL_UNPACK_LSB_FIRST:   c->unpack_lsb = param ? 1UL : 0UL; return;
         case GL_PACK_ROW_LENGTH:    f = &c->pack_row; break;
         case GL_PACK_SKIP_PIXELS:   f = &c->pack_skip_px; break;
@@ -363,6 +372,7 @@ void Core_PixelStore(struct Core *c, ULONG pname, LONG param)
         return;
     }
     *f = (ULONG) param;
+    PlainState(c);
 }
 
 /* --- Texture uploads in any layout and type ------------------------------------------
@@ -578,6 +588,13 @@ static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
     return out;
 }
 
+/* What texture.c reads as it is: unsigned bytes (MiniGL's packed 16-bit
+ * formats come with that type too), not GL_RED/GREEN/BLUE, in the default
+ * unpack state -- straight on, before anything else (a few instructions:
+ * GLQuake's lightmap uploads, every frame) */
+#define UPLOAD_PLAIN(c, format, type) ((c)->unpack_plain && (type) == GL_UNSIGNED_BYTE \
+                                       && ((format) < GL_RED || (format) > GL_BLUE))
+
 void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
                       LONG w, LONG h, LONG border, ULONG format, ULONG type,
                       const void *pixels)
@@ -585,6 +602,11 @@ void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
     void *tmp;
     ULONG size;
 
+    if (UPLOAD_PLAIN(c, format, type))
+    {
+        Core_TexImage2D(c, target, level, internal, w, h, border, format, type, pixels);
+        return;
+    }
     size = 0;
     tmp = Unpack(c, w, h, &format, &type, &pixels, &size);
     if (tmp == NULL && size != 0)
@@ -600,6 +622,11 @@ void Core_TexSubImage2DX(struct Core *c, ULONG target, LONG level, LONG x, LONG 
     void *tmp;
     ULONG size;
 
+    if (UPLOAD_PLAIN(c, format, type))
+    {
+        Core_TexSubImage2D(c, target, level, x, y, w, h, format, type, pixels);
+        return;
+    }
     size = 0;
     tmp = Unpack(c, w, h, &format, &type, &pixels, &size);
     if (tmp == NULL && size != 0)
@@ -651,12 +678,26 @@ void Core_TexEnvfv(struct Core *c, ULONG target, ULONG pname, const float *v)
 /* hwstate.c's EmitCombiner, for a stage s with GL_DECAL or GL_BLEND: the
  * colour and alpha blends into *cb and *ab (they hold the pass-through on
  * entry), and the stage's TFACTOR when the stage goes out (a changed
- * colour forgets the stage, Core_TexEnvfv). texc is the texture's colour
- * argument (its alpha is texc + 1 as a colour argument, texc as an alpha
- * one), prevc and preva the previous stage's. */
-LONG Core_CombExtra(struct Core *c, ULONG s, ULONG texc, ULONG base, ULONG prevc,
-                    ULONG preva, ULONG out, ULONG *cb, ULONG *ab)
+ * colour forgets the stage, Core_TexEnvfv). The arguments EmitCombiner
+ * uses are worked out again here, so that its call stays small: hwstate.o
+ * keeps 0.9's size, and GLQuake's code its places (the 68060 layout note
+ * at the top). texc is the texture's colour argument (its alpha is texc + 1
+ * as a colour argument, texc as an alpha one), prevc and preva the previous
+ * stage's. An emit error sticks in the stream: EmitCombiner's next emit
+ * returns it. */
+void Core_CombExtra(struct Core *c, ULONG s, ULONG *cb, ULONG *ab)
 {
+    ULONG texc, prevc, preva, out, base;
+    struct CoreTex *t;
+
+    t = Core_Texture(c, s);
+    if (t == NULL)
+        return;
+    base = t->base;
+    texc = R_TXC_ARG_R0_COLOR + 2 * s;
+    prevc = (s == 0) ? R_TXC_ARG_DIFFUSE_COLOR : R_TXC_ARG_R0_COLOR;
+    preva = (s == 0) ? R_TXA_ARG_DIFFUSE_ALPHA : R_TXA_ARG_R0_ALPHA;
+    out = R_TXC_CLAMP_0_1 | R_TXC_OUTPUT_REG_R0 | (s << R_TXC_TFACTOR_SEL_SHIFT);
     if (c->tex_env[s] == GL_DECAL)
     {
         /* GL 1.1: RGB C = Ct; RGBA C = Cf (1 - At) + Ct At; A = Af. The
@@ -666,7 +707,7 @@ LONG Core_CombExtra(struct Core *c, ULONG s, ULONG texc, ULONG base, ULONG prevc
                 | ((texc + 1) << R_TXC_ARG_C_SHIFT) | R_TXC_OP_LERP;
         else if (base != GL_ALPHA)
             *cb = (texc << R_TXC_ARG_C_SHIFT) | R_TXC_OP_MADD;
-        return R2_OK;
+        return;
     }
     /* GL_BLEND: C = Cf (1 - Ct) + Cc Ct with the environment colour Cc;
      * A = Af At, but Af (1 - At) + Ac At for an intensity texture */
@@ -680,8 +721,7 @@ LONG Core_CombExtra(struct Core *c, ULONG s, ULONG texc, ULONG base, ULONG prevc
         *ab = (texc << R_TXC_ARG_A_SHIFT) | (preva << R_TXC_ARG_B_SHIFT) | R_TXC_OP_MADD;
     if (c->hw_comb[s][0] != *cb || c->hw_comb[s][1] != out || c->hw_comb[s][2] != *ab
         || c->hw_comb[s][3] != out)
-        return R2E_Reg(c->cs, R_PP_TFACTOR_0 + 4 * s, c->tf_color[s]);
-    return R2_OK;
+        (void) R2E_Reg(c->cs, R_PP_TFACTOR_0 + 4 * s, c->tf_color[s]);
 }
 
 /* --- Vertices: glArrayElement, glMultiDrawArrays, glTexCoord4f ------------------------- */
@@ -1037,18 +1077,18 @@ void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const voi
     }
     b = (const UBYTE *) p;
     s = stride ? stride : (LONG) f->s;
-    Core_EnableClientStateX(c, GL_EDGE_FLAG_ARRAY, 0);
-    Core_EnableClientStateX(c, GL_INDEX_ARRAY, 0);
-    Core_EnableClientStateX(c, GL_TEXTURE_COORD_ARRAY, f->st != 0);
+    Core_EnableClientState(c, GL_EDGE_FLAG_ARRAY, 0);
+    Core_EnableClientState(c, GL_INDEX_ARRAY, 0);
+    Core_EnableClientState(c, GL_TEXTURE_COORD_ARRAY, f->st != 0);
     if (f->st)
         Core_TexCoordPointer(c, f->st, GL_FLOAT, s, b);
-    Core_EnableClientStateX(c, GL_COLOR_ARRAY, f->sc != 0);
+    Core_EnableClientState(c, GL_COLOR_ARRAY, f->sc != 0);
     if (f->sc)
         Core_ColorPointer(c, f->sc, f->tc, s, b + f->pc);
-    Core_EnableClientStateX(c, GL_NORMAL_ARRAY, f->en);
+    Core_EnableClientState(c, GL_NORMAL_ARRAY, f->en);
     if (f->en)
         Core_NormalPointer(c, GL_FLOAT, s, b + f->pn);
-    Core_EnableClientStateX(c, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientState(c, GL_VERTEX_ARRAY, 1);
     Core_VertexPointer(c, f->sv, GL_FLOAT, s, b + f->pv);
 }
 

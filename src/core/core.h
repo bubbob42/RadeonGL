@@ -439,6 +439,7 @@ struct Core
     struct CoreArray ea, ia;                /* edge flag and colour index arrays: stored only */
     ULONG poly_offset_line, poly_offset_point;  /* GL_POLYGON_OFFSET_LINE/POINT: stored */
     ULONG array_xform;                      /* MGL_ARRAY_TRANSFORMATIONS: stored, as 29.1 does */
+    ULONG unpack_plain;                     /* the unpack state texture.c reads (compat.c) */
 };
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
@@ -652,14 +653,15 @@ void Core_GetIntegerv(struct Core *c, ULONG pname, LONG *out);
 const char *Core_GetString(struct Core *c, ULONG name);
 
 /* --- minigl.library 29.1's other calls (compat.c) ------------------------------------
- * The library's hooks call the ...X wrappers instead of the plain calls
- * above: they handle what was added for 29.1 and pass everything else on,
- * so the hot objects stay as they are (code-layout note in compat.c). */
+ * Enables and client arrays reach compat.c through the plain calls' paths
+ * for unknown values; glGet, glGetDoublev and texture uploads through the
+ * ...X wrappers, which the library's hooks call instead (rare in GLQuake).
+ * Code-layout and cache notes in compat.c. */
 
 void Compat_Defaults(struct Core *c);
-void Core_EnableX(struct Core *c, ULONG cap, ULONG on);
-ULONG Core_IsEnabledX(struct Core *c, ULONG cap);
-void Core_EnableClientStateX(struct Core *c, ULONG array, ULONG on);
+void Compat_Enable(struct Core *c, ULONG cap, ULONG on);           /* state.c's unknown caps */
+ULONG Compat_IsEnabled(struct Core *c, ULONG cap);
+void Compat_ClientState(struct Core *c, ULONG array, ULONG on);    /* array.c's unknown arrays */
 void Core_GetFloatvX(struct Core *c, ULONG pname, float *out);
 void Core_GetIntegervX(struct Core *c, ULONG pname, LONG *out);
 ULONG Core_GetCountX(ULONG pname);
@@ -671,8 +673,7 @@ void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
 void Core_TexSubImage2DX(struct Core *c, ULONG target, LONG level, LONG x, LONG y,
                          LONG w, LONG h, ULONG format, ULONG type, const void *pixels);
 void Core_TexEnvfv(struct Core *c, ULONG target, ULONG pname, const float *v);
-LONG Core_CombExtra(struct Core *c, ULONG s, ULONG texc, ULONG base, ULONG prevc,
-                    ULONG preva, ULONG out, ULONG *cb, ULONG *ab);   /* hwstate.c */
+void Core_CombExtra(struct Core *c, ULONG s, ULONG *cb, ULONG *ab);   /* hwstate.c */
 void Core_ArrayElement(struct Core *c, LONG i);
 void Core_MultiDrawArrays(struct Core *c, ULONG mode, const LONG *first, const LONG *count,
                           LONG primcount);

@@ -844,8 +844,8 @@ static void test_compat(void)
     Fresh(1);
     Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
     Core_ColorPointer(&core, 4, GL_UNSIGNED_BYTE, 0, col);
-    Core_EnableClientStateX(&core, GL_VERTEX_ARRAY, 1);
-    Core_EnableClientStateX(&core, GL_COLOR_ARRAY, 1);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
     Core_Begin(&core, GL_TRIANGLES);
     for (i = 0; i < 3; i++)
         Core_ArrayElement(&core, (LONG) i);
@@ -867,21 +867,21 @@ static void test_compat(void)
 
     /* enables and client states 29.1 has */
     Fresh(1);
-    CHECK_INT(Core_IsEnabledX(&core, MGL_ARRAY_TRANSFORMATIONS), 1);
-    Core_EnableX(&core, MGL_ARRAY_TRANSFORMATIONS, 0);
-    CHECK_INT(Core_IsEnabledX(&core, MGL_ARRAY_TRANSFORMATIONS), 0);
-    Core_EnableX(&core, GL_DEPTH_WRITEMASK, 0);
+    CHECK_INT(Core_IsEnabled(&core, MGL_ARRAY_TRANSFORMATIONS), 1);
+    Core_Enable(&core, MGL_ARRAY_TRANSFORMATIONS, 0);
+    CHECK_INT(Core_IsEnabled(&core, MGL_ARRAY_TRANSFORMATIONS), 0);
+    Core_Enable(&core, GL_DEPTH_WRITEMASK, 0);
     CHECK_INT(core.depth_mask, 0);
-    CHECK_INT(Core_IsEnabledX(&core, GL_DEPTH_WRITEMASK), 0);
-    Core_EnableX(&core, GL_POLYGON_OFFSET_LINE, 1);
-    CHECK_INT(Core_IsEnabledX(&core, GL_POLYGON_OFFSET_LINE), 1);
-    Core_EnableClientStateX(&core, GL_EDGE_FLAG_ARRAY, 1);
-    Core_EnableClientStateX(&core, GL_INDEX_ARRAY, 1);
-    CHECK_INT(Core_IsEnabledX(&core, GL_EDGE_FLAG_ARRAY), 1);
-    CHECK_INT(Core_IsEnabledX(&core, GL_INDEX_ARRAY), 1);
-    CHECK_INT(Core_IsEnabledX(&core, GL_VERTEX_ARRAY), 0);
-    Core_EnableX(&core, GL_BLEND, 1);                       /* passed on */
-    CHECK_INT(Core_IsEnabledX(&core, GL_BLEND), 1);
+    CHECK_INT(Core_IsEnabled(&core, GL_DEPTH_WRITEMASK), 0);
+    Core_Enable(&core, GL_POLYGON_OFFSET_LINE, 1);
+    CHECK_INT(Core_IsEnabled(&core, GL_POLYGON_OFFSET_LINE), 1);
+    Core_EnableClientState(&core, GL_EDGE_FLAG_ARRAY, 1);
+    Core_EnableClientState(&core, GL_INDEX_ARRAY, 1);
+    CHECK_INT(Core_IsEnabled(&core, GL_EDGE_FLAG_ARRAY), 1);
+    CHECK_INT(Core_IsEnabled(&core, GL_INDEX_ARRAY), 1);
+    CHECK_INT(Core_IsEnabled(&core, GL_VERTEX_ARRAY), 0);
+    Core_Enable(&core, GL_BLEND, 1);                       /* passed on */
+    CHECK_INT(Core_IsEnabled(&core, GL_BLEND), 1);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 
     /* the glGet names 29.1 answers */
@@ -906,7 +906,7 @@ static void test_compat(void)
     Core_GetIntegervX(&core, GL_POLYGON_MODE, iv);
     CHECK_INT(iv[0], (LONG) GL_FILL);
     CHECK_INT(iv[1], (LONG) GL_FILL);
-    Core_EnableX(&core, GL_LIGHT3, 1);
+    Core_Enable(&core, GL_LIGHT3, 1);
     Core_GetIntegervX(&core, GL_LIGHT3, iv); CHECK_INT(iv[0], 1);
     Core_GetIntegervX(&core, GL_LIGHT2, iv); CHECK_INT(iv[0], 0);
     Core_GetFloatvX(&core, GL_LINE_WIDTH, fv); CHECK(fv[0] == 1.0f);
@@ -993,7 +993,7 @@ static void test_compat(void)
     Fresh(1);
     Core_BindTexture(&core, GL_TEXTURE_2D, 4);
     Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_LUMINANCE, 2, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, red);
-    Core_EnableX(&core, GL_TEXTURE_2D, 1);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
     Core_TexEnvfv(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, plain);
     Core_TexEnvi(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_BLEND);
     Draw1();
@@ -1079,7 +1079,7 @@ static void test_compat(void)
     {
         static UBYTE ilv[2 * 24];
 
-        Core_EnableClientStateX(&core, GL_NORMAL_ARRAY, 1);
+        Core_EnableClientState(&core, GL_NORMAL_ARRAY, 1);
         Core_InterleavedArrays(&core, GL_T2F_C4UB_V3F, 0, ilv);
         CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
         CHECK(core.va.enabled && core.ca.enabled && core.ta[core.client_unit].enabled);

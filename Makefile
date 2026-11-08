@@ -1060,6 +1060,16 @@ RGL_DEFS   ?=
 # The 2026-11-07 modules (lighting, texgen, fog) likewise go after the hot
 # ones, so that GLQuake's code keeps its places.
 CORE_LATE  := light texgen fog arraylit compat
+# The dispatch object shrinks by a stub for every slot that becomes a hook
+# (the 29.1 calls of 2026-11-08: 708 bytes less), and the core in front of
+# core_vertex.o changed (hwstate.o +24, state.o -12). Its padding keeps
+# everything from core_vertex.o on at 0.9's places: rgl_dispatch.o +
+# core_core..hwstate as long as in 0.9 (and rgl.o, card.o, runtime.o
+# unchanged); check build/rgl/minigl.map against 0.9's after any change in
+# front of the core. (Most of the 1% GLQuake first lost to the 29.1 batch
+# was wrappers in front of glEnable and friends, not this layout: MEASURED,
+# see compat.c Compat_Enable.)
+RGL_DISPATCH_PAD := 696
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
@@ -1070,7 +1080,7 @@ RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/c
 build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c Makefile
 	@mkdir -p build/rgl
 	$(PYTHON) -I tools/gen_dispatch.py $(MGL_DISPATCH) build/rgl/rgl_dispatch \
-	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' \
+	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' --pad $(RGL_DISPATCH_PAD) \
 	    --include rgl.h --hooks $(RGL_HOOKS)
 
 build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \

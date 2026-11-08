@@ -104,6 +104,10 @@ def main():
     ap.add_argument("--include", action="append", default=[])
     ap.add_argument("--direct", default="")
     ap.add_argument("--hooks-file", default="")
+    # --pad N: N bytes of constant data at the end of the object, so that it
+    # can keep a size while slots become hooks (the 68060 cares where the
+    # library's hot code sits: RadeonGL Makefile, RGL_DISPATCH_PAD)
+    ap.add_argument("--pad", type=int, default=0)
     a = ap.parse_args()
 
     slots = read_table(a.header)
@@ -173,6 +177,9 @@ def main():
     for i, (ret, name, params) in enumerate(slots):
         c.append('    "%s"%s' % (name, "," if i + 1 < len(slots) else ""))
     c.append("};")
+    if a.pad > 0:
+        c.append("\n/* Padding (--pad): keeps the code after this object where it was */")
+        c.append("const unsigned char %sPad[%d] = { 0x52 };" % (a.prefix, a.pad))
 
     open(a.out + ".h", "w").write("\n".join(h) + "\n")
     open(a.out + ".c", "w").write("\n".join(c) + "\n")

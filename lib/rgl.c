@@ -1439,11 +1439,11 @@ void Hook_MGLSetState(GLcontext context, GLenum cap, GLboolean state)
 {
     (void) context;
     GUARD;
-    Core_EnableX(C, cap, state);
+    Core_Enable(C, cap, state);     /* the caps 29.1 adds: Core_Enable's unknown-cap path (compat.c) */
     NOTE("glEnable/glDisable", cap);
 }
 
-GLboolean Hook_GLIsEnabled(GLcontext context, GLenum cap) { (void) context; return rgl ? (GLboolean) Core_IsEnabledX(C, cap) : GL_FALSE; }
+GLboolean Hook_GLIsEnabled(GLcontext context, GLenum cap) { (void) context; return rgl ? (GLboolean) Core_IsEnabled(C, cap) : GL_FALSE; }
 void Hook_GLActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ActiveTexture(C, unit); NOTE("glActiveTextureARB", unit); }
 void Hook_GLClientActiveTextureARB(GLcontext context, GLenum unit) { (void) context; GUARD; Core_ClientActiveTexture(C, unit); NOTE("glClientActiveTextureARB", unit); }
 
@@ -1476,8 +1476,8 @@ void Hook_GLLockArrays(GLcontext context, GLuint first, GLsizei count)
 }
 
 void Hook_GLUnlockArrays(GLcontext context) { (void) context; GUARD; Core_UnlockArrays(C); NOTE("glUnlockArrays", 0); }
-void Hook_GLEnableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientStateX(C, cap, 1); NOTE("glEnableClientState", cap); }
-void Hook_GLDisableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientStateX(C, cap, 0); NOTE("glDisableClientState", cap); }
+void Hook_GLEnableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 1); NOTE("glEnableClientState", cap); }
+void Hook_GLDisableClientState(GLcontext context, GLenum cap) { (void) context; GUARD; Core_EnableClientState(C, cap, 0); NOTE("glDisableClientState", cap); }
 
 void Hook_GLVertexPointer(GLcontext context, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer)
 {

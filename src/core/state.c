@@ -101,7 +101,7 @@ void Core_Enable(struct Core *c, ULONG cap, ULONG on)
     bit = Bit(cap);
     if (bit == 0)
     {
-        Core_Error(c, GL_INVALID_ENUM);
+        Compat_Enable(c, cap, on);  /* 29.1's other caps, else GL_INVALID_ENUM (compat.c) */
         return;
     }
     if (((c->enables & bit) != 0) == (on != 0))
@@ -122,10 +122,7 @@ ULONG Core_IsEnabled(struct Core *c, ULONG cap)
         return Core_TexGenEnabled(c, cap);
     bit = Bit(cap);
     if (bit == 0)
-    {
-        Core_Error(c, GL_INVALID_ENUM);
-        return 0;
-    }
+        return Compat_IsEnabled(c, cap);    /* 29.1's other caps, else GL_INVALID_ENUM */
     return (c->enables & bit) ? 1UL : 0UL;
 }
 

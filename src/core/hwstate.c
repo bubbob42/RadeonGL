@@ -301,9 +301,7 @@ static LONG EmitCombiner(struct Core *c, ULONG units)
                     break;
                 case GL_DECAL:
                 case GL_BLEND:      /* compat.c, linked last: LERP, the TFACTOR */
-                    e = Core_CombExtra(c, s, texc, t->base, prevc, preva, out, &cb, &ab);
-                    if (e != R2_OK)
-                        return e;
+                    Core_CombExtra(c, s, &cb, &ab);
                     break;
                 case GL_ADD:
                     if (HasRgb(t->base))
