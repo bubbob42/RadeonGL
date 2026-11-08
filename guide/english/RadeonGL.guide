@@ -1,12 +1,12 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.10 (8.11.2026)
+@$VER: RadeonGL.guide 0.11 (8.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
 
 @node Main "RadeonGL"
 
-@{b}RadeonGL 0.10@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
+@{b}RadeonGL 0.11@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
 
 RadeonGL is a minigl.library that draws with the 3D engine of an ATI
 Radeon from the R200 family, on a graphics card that Picasso96 drives. It
@@ -392,10 +392,10 @@ sets it) and vertical sync off, frames a second:
     demo2       30.6           -         26.0
     demo3       28.9           -         27.5
 
-RadeonGL 0.10 runs GLQuake as fast as 0.9: demo1 at 320 x 240, without
-vertical sync and averaged over six load addresses, took 29.37 seconds
-against 29.41. (Where the library lands in memory alone moves a run by
-about a tenth of a second, so a single run decides nothing.)
+RadeonGL 0.11 runs GLQuake as fast as 0.9: demo1 at 320 x 240, without
+vertical sync and averaged over six load addresses, took 29.44 seconds
+against 29.39 -- less than where the library lands in memory moves a run
+on its own (about a tenth of a second), so a single run decides nothing.
 
 Vertical sync (on in GLQuake by default) makes a frame wait for the
 beam: about 2% in play at 800 x 600.
@@ -650,6 +650,17 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.11 (8.11.2026)
+    * all 205 functions of minigl.library 29.1
+    * display lists that keep the calls themselves: a list may bind
+      textures, change matrices, materials and lights, switch states and
+      call other lists (glNewList, glEndList, glCallList, glGenLists,
+      glDeleteLists, glIsList)
+    * GLUT: a window or a game-mode screen, the display, idle, keyboard
+      and reshape callbacks, glutGet, and the solid cube, sphere, cone,
+      torus and dodecahedron
+    * GLQuake as fast as with 0.9
 
 0.10 (8.11.2026)
     * 177 of minigl.library 29.1's 205 functions: the GLU calls

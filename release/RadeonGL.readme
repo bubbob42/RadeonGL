@@ -2,7 +2,7 @@ Short:        minigl.library for R200 Radeons on P96
 Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
 Author:       marcus.gerards@googlemail.com (Marcus Gerards)
 Type:         driver/video
-Version:      0.10
+Version:      0.11
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
@@ -12,7 +12,7 @@ Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
               AmigaOS 3.1+ (tested on 3.2).
 Kurz:         minigl.library fuer R200-Radeons an P96
 
-RadeonGL 0.10  --  8.11.2026
+RadeonGL 0.11  --  8.11.2026
 
 
 WHAT IT IS
@@ -73,10 +73,8 @@ FEATURES
 
 NOT IMPLEMENTED YET
 
-177 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
-and more. A missing one sets GL_INVALID_OPERATION; the log names it.
+All 205 functions of minigl.library 29.1 are there. Not yet:
 
-  * Display lists, GLUT
   * Polygons as lines or points, stencil and accumulation buffers,
     stipple, logic operations, reading the depth buffer
   * Generic 32-bit textures are stored with 16 bits (GL_RGBA8 and
@@ -98,8 +96,8 @@ AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.8, command check off
     demo2       30.6           -         26.0
     demo3       28.9           -         27.5
 
-RadeonGL 0.10 runs them as fast as 0.9 (demo1 at 320 x 240 without
-vsync, averaged over six load addresses: 29.37 seconds against 29.41).
+RadeonGL 0.11 runs them as fast as 0.9 (demo1 at 320 x 240 without
+vsync, averaged over six load addresses: 29.44 seconds against 29.39).
 
 The Aminet source built for the 68060, on RadeonGL 0.6: demo1 24.4 /
 23.7 / 23.3, demo2 21.7 / - / 17.9, demo3 21.4 / - / 19.9. With the
@@ -151,6 +149,9 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.11 (8.11.2026)
+  - all 205 functions of minigl.library 29.1: display lists, GLUT
 
 0.10 (8.11.2026)
   - 177 of minigl.library 29.1's 205 functions: GLU, MiniGL's main loop,

@@ -137,9 +137,9 @@ start window sets it) and vertical sync off. Frames a second:
 | demo2 | 30.6 | | 26.0 |
 | demo3 | 28.9 | | 27.5 |
 
-RadeonGL 0.10 runs them as fast as 0.9: demo1 at 320 x 240, without
-vertical sync and averaged over six load addresses, took 29.37 seconds
-against 29.41. Where the library lands in memory alone moves a run by
+RadeonGL 0.11 runs them as fast as 0.9: demo1 at 320 x 240, without
+vertical sync and averaged over six load addresses, took 29.44 seconds
+against 29.39. Where the library lands in memory alone moves a run by
 about a tenth of a second, so a single run decides nothing.
 
 - The same timedemos with the Aminet source (built for the 68060) on
