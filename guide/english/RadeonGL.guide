@@ -1,12 +1,12 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.9 (8.11.2026)
+@$VER: RadeonGL.guide 0.10 (8.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
 
 @node Main "RadeonGL"
 
-@{b}RadeonGL 0.9@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
+@{b}RadeonGL 0.10@{ub} -- minigl.library for the ATI Radeon 8500 to 9250
 
 RadeonGL is a minigl.library that draws with the 3D engine of an ATI
 Radeon from the R200 family, on a graphics card that Picasso96 drives. It
@@ -392,8 +392,10 @@ sets it) and vertical sync off, frames a second:
     demo2       30.6           -         26.0
     demo3       28.9           -         27.5
 
-RadeonGL 0.9 runs GLQuake as fast as 0.8: demo1 at 320 x 240 took 29.1
-seconds instead of 29.0, the smallest step GLQuake's timedemo shows.
+RadeonGL 0.10 runs GLQuake as fast as 0.9: demo1 at 320 x 240, without
+vertical sync and averaged over six load addresses, took 29.37 seconds
+against 29.41. (Where the library lands in memory alone moves a run by
+about a tenth of a second, so a single run decides nothing.)
 
 Vertical sync (on in GLQuake by default) makes a frame wait for the
 beam: about 2% in play at 800 x 600.
@@ -637,6 +639,25 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.10 (8.11.2026)
+    * 177 of minigl.library 29.1's 205 functions: the GLU calls
+      (gluPerspective, gluLookAt, gluBuild2DMipmaps, the quadrics),
+      glArrayElement, glMultiDrawArrays, glInterleavedArrays, the
+      double matrix calls, MiniGL's main loop (mglMainLoop and its
+      handlers)
+    * texture uploads and glReadPixels in every layout and type
+      (glPixelStorei), about 60 more glGet names
+    * the texture environments GL_BLEND and RGBA GL_DECAL with the
+      environment colour
+    * copying the picture into a texture (glCopyTexImage2D,
+      glCopyTexSubImage2D), blend equations and separate alpha factors
+      (glBlendEquation, glBlendFuncSeparate), paletted textures
+      (glColorTable)
+    * fog stays smooth on flat-shaded polygons
+    * Trio: three demos at once, each in its own window on the
+      Workbench
+    * GLQuake as fast as with 0.9
 
 0.9 (8.11.2026)
     * contexts in a window and in a bitmap: in the program's own window

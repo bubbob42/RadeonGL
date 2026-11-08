@@ -2,7 +2,7 @@ Short:        minigl.library for R200 Radeons on P96
 Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
 Author:       marcus.gerards@googlemail.com (Marcus Gerards)
 Type:         driver/video
-Version:      0.9
+Version:      0.10
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
@@ -12,7 +12,7 @@ Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
               AmigaOS 3.1+ (tested on 3.2).
 Kurz:         minigl.library fuer R200-Radeons an P96
 
-RadeonGL 0.9  --  8.11.2026
+RadeonGL 0.10  --  8.11.2026
 
 
 WHAT IT IS
@@ -47,7 +47,7 @@ FEATURES
     stack
   * Two texture units; RGB565, ARGB4444, ARGB8888 (GL_RGB8, GL_RGBA8),
     I8, AI88 in up to 16 MB of card memory; nearest, linear and mipmap
-    filters; repeat and clamp; MODULATE, REPLACE, DECAL (RGB), ADD
+    filters; repeat and clamp; MODULATE, REPLACE, DECAL, BLEND, ADD
   * Lighting on the Radeon: eight lights, directional, local and spot,
     with attenuation, two-sided; materials, colour material, normal
     arrays
@@ -55,6 +55,10 @@ FEATURES
     map), texture matrices, fog, wide lines, glReadPixels
   * Blending, alpha test, depth test, polygon offset, culling, scissor,
     colour mask, flat and smooth shading, point size
+  * The rest of MiniGL 29.1's calls: GLU (gluPerspective, gluLookAt,
+    gluBuild2DMipmaps, spheres, cylinders, disks), glArrayElement,
+    interleaved arrays, double-precision calls, uploads and glReadPixels
+    in every GL 1.1 layout and type, MiniGL's own main loop
   * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048, in
     every mode of the card, switched while the program runs; vertical
     sync
@@ -69,19 +73,16 @@ FEATURES
 
 NOT IMPLEMENTED YET
 
-122 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
+177 of minigl.library 29.1's 205 functions are there: all GLQuake uses,
 and more. A missing one sets GL_INVALID_OPERATION; the log names it.
 
-  * Display lists, glTexCoord4f
-  * GL_BLEND and RGBA GL_DECAL texture environments; generic 32-bit
-    textures are stored with 16 bits (GL_RGBA8 and GL_RGB8 keep 8)
-  * Stencil and accumulation buffers, stipple, logic operations
-  * Reading the depth buffer, glCopyTexImage2D, glDrawBuffer
-  * Double-precision calls, glArrayElement, interleaved arrays, colour
-    index, glBlendEquation, glColorTable
-  * GLU and GLUT; MiniGL's own main loop; contexts on 24- and 8-bit
-    screens
-  * Textures beyond 16 MB are not swapped out
+  * Display lists, GLUT
+  * Polygons as lines or points, stencil and accumulation buffers,
+    stipple, logic operations, reading the depth buffer
+  * Generic 32-bit textures are stored with 16 bits (GL_RGBA8 and
+    GL_RGB8 keep 8)
+  * Contexts on 24- and 8-bit screens; textures beyond 16 MB are not
+    swapped out
 
 
 GLQUAKE BENCHMARKS
@@ -97,8 +98,8 @@ AmigaOS 3.2, Picasso96 3.6), RadeonGL 0.8, command check off
     demo2       30.6           -         26.0
     demo3       28.9           -         27.5
 
-RadeonGL 0.9 runs them as fast as 0.8 (demo1 at 320 x 240: 29.1
-seconds instead of 29.0).
+RadeonGL 0.10 runs them as fast as 0.9 (demo1 at 320 x 240 without
+vsync, averaged over six load addresses: 29.37 seconds against 29.41).
 
 The Aminet source built for the 68060, on RadeonGL 0.6: demo1 24.4 /
 23.7 / 23.3, demo2 21.7 / - / 17.9, demo3 21.4 / - / 19.9. With the
@@ -150,6 +151,10 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.10 (8.11.2026)
+  - 177 of minigl.library 29.1's 205 functions: GLU, MiniGL's main loop,
+    every pixel layout, copy textures, blend equations, palettes; Trio
 
 0.9 (8.11.2026)
   - contexts in a window and in a bitmap, several programs at once,

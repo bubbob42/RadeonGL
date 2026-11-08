@@ -1,12 +1,12 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.9 (8.11.2026)
+@$VER: RadeonGL.guide 0.10 (8.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
 
 @node Main "RadeonGL"
 
-@{b}RadeonGL 0.9@{ub} -- minigl.library für die ATI Radeon 8500 bis 9250
+@{b}RadeonGL 0.10@{ub} -- minigl.library für die ATI Radeon 8500 bis 9250
 
 RadeonGL ist eine minigl.library, die mit der 3D-Einheit einer ATI Radeon
 der R200-Familie zeichnet, auf einer Grafikkarte, die Picasso96 betreibt.
@@ -420,9 +420,11 @@ Bilder pro Sekunde:
     demo2       30,6           -         26,0
     demo3       28,9           -         27,5
 
-RadeonGL 0.9 lässt GLQuake so schnell laufen wie 0.8: demo1 bei
-320 x 240 brauchte 29,1 statt 29,0 Sekunden, den kleinsten Schritt, den
-das Timedemo von GLQuake anzeigt.
+RadeonGL 0.10 lässt GLQuake so schnell laufen wie 0.9: demo1 bei
+320 x 240, ohne vertikale Synchronisation und gemittelt über sechs
+Ladeadressen, brauchte 29,37 statt 29,41 Sekunden. (Schon wo die
+Bibliothek im Speicher landet, verschiebt einen Lauf um etwa eine
+Zehntelsekunde; ein einzelner Lauf entscheidet also nichts.)
 
 Die vertikale Synchronisation (in GLQuake von Haus aus an) lässt jedes
 Bild auf den Strahl warten: etwa 2% beim Spielen bei 800 x 600.
@@ -678,6 +680,25 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.10 (8.11.2026)
+    * 177 der 205 Funktionen der minigl.library 29.1: die GLU-Aufrufe
+      (gluPerspective, gluLookAt, gluBuild2DMipmaps, die Quadriken),
+      glArrayElement, glMultiDrawArrays, glInterleavedArrays, die
+      Matrixaufrufe mit double, MiniGLs Hauptschleife (mglMainLoop und
+      seine Handler)
+    * Textur-Uploads und glReadPixels in jedem Layout und Typ
+      (glPixelStorei), rund 60 weitere glGet-Namen
+    * die Texturumgebungen GL_BLEND und RGBA-GL_DECAL mit der
+      Umgebungsfarbe
+    * das Bild in eine Textur kopieren (glCopyTexImage2D,
+      glCopyTexSubImage2D), Blend-Gleichungen und getrennte
+      Alpha-Faktoren (glBlendEquation, glBlendFuncSeparate), Texturen
+      mit Farbpalette (glColorTable)
+    * Nebel bleibt auf flach schattierten Polygonen weich
+    * Trio: drei Demos gleichzeitig, jede in ihrem eigenen Fenster auf
+      der Workbench
+    * GLQuake so schnell wie mit 0.9
 
 0.9 (8.11.2026)
     * Kontexte in einem Fenster und in einer Bitmap: im eigenen Fenster
