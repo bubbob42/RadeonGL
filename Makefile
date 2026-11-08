@@ -1069,7 +1069,7 @@ CORE_LATE  := light texgen fog arraylit compat
 # front of the core. (Most of the 1% GLQuake first lost to the 29.1 batch
 # was wrappers in front of glEnable and friends, not this layout: MEASURED,
 # see compat.c Compat_Enable.)
-RGL_DISPATCH_PAD := 696
+RGL_DISPATCH_PAD := 704
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \

@@ -440,6 +440,10 @@ struct Core
     ULONG poly_offset_line, poly_offset_point;  /* GL_POLYGON_OFFSET_LINE/POINT: stored */
     ULONG array_xform;                      /* MGL_ARRAY_TRANSFORMATIONS: stored, as 29.1 does */
     ULONG unpack_plain;                     /* the unpack state texture.c reads (compat.c) */
+    ULONG blend_eq_rgb, blend_eq_a;         /* glBlendEquation (GL_FUNC_ADD ...) */
+    ULONG blend_src_a, blend_dst_a;         /* glBlendFuncSeparate's alpha factors ... */
+    ULONG blend_sep;                        /* ... when they differ from colour's */
+    ULONG blend_x;                          /* either of the above: hwstate.c lets compat.c emit */
 };
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
@@ -690,6 +694,10 @@ ULONG Core_AreTexturesResident(struct Core *c, LONG n, const ULONG *names);
 void Core_PrioritizeTextures(struct Core *c, LONG n, const ULONG *names);
 void Core_TexMemStat(struct Core *c, LONG *current, LONG *peak);
 void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const void *p);
+void Core_BlendEquation(struct Core *c, ULONG mode);
+void Core_BlendFuncSeparate(struct Core *c, ULONG sr, ULONG dr, ULONG sa, ULONG da);
+void Compat_BlendFuncReset(struct Core *c);     /* state.c: glBlendFunc after a separate one */
+void Compat_EmitBlend(struct Core *c);          /* hwstate.c: D_BLEND with blend_x */
 LONG Core_Build2DMipmaps(struct Core *c, ULONG target, LONG internal, LONG w, LONG h,
                          ULONG format, ULONG type, const void *data);   /* 0 or a GLU error */
 

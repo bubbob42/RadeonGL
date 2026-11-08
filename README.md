@@ -97,13 +97,13 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL implements 162 of the 205 functions of `minigl.library` 29.1:
-everything GLQuake uses, and more. A missing function draws nothing and
-sets GL_INVALID_OPERATION; the library's log names every such call.
+RadeonGL answers 176 of the 205 functions of `minigl.library` 29.1:
+everything GLQuake uses, and more (a few accepted without effect). The
+other 29 draw nothing and set GL_INVALID_OPERATION; the library's log
+names every such call.
 
 - Display lists.
-- Paletted textures (`glColorTable`), `glCopyTexImage2D`,
-  `glCopyTexSubImage2D`, `glBlendEquation`, `glBlendFuncSeparate`.
+- Paletted textures (`glColorTable`).
 - GLUT.
 - Polygons drawn as lines or points (`glPolygonMode`), stencil and
   accumulation buffers, line and polygon stipple, logic operations,

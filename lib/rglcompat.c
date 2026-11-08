@@ -667,3 +667,25 @@ void Hook_GLUDisk(GLUquadricObj *q, GLdouble inner, GLdouble outer, GLint slices
         return;
     Core_Disk(c, &q->q, (float) inner, (float) outer, slices, loops);
 }
+
+/* --- glBlendEquation, glBlendFuncSeparate (compat.c) ----------------------------------------- */
+
+void Hook_GLBlendEquation(GLcontext context, GLenum mode)
+{
+    struct Core *c;
+
+    if ((c = Ctx(context)) == NULL)
+        return;
+    Core_BlendEquation(c, mode);
+}
+
+void Hook_GLBlendFuncSeparate(GLcontext context, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha,
+                              GLenum dstAlpha)
+{
+    struct Core *c;
+
+    if ((c = Ctx(context)) == NULL)
+        return;
+    Core_BlendFuncSeparate(c, srcRGB, dstRGB, srcAlpha, dstAlpha);
+}
+

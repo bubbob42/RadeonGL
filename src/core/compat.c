@@ -33,6 +33,8 @@ void Compat_Defaults(struct Core *c)
     c->cur_index = 1.0f;
     c->array_xform = 1;                     /* 29.1 starts with it on */
     c->unpack_plain = 1;
+    c->blend_eq_rgb = GL_FUNC_ADD;
+    c->blend_eq_a = GL_FUNC_ADD;
     c->draw_buffer = 0;                     /* 0: GL's default, front or back as the */
     c->read_buffer = 0;                     /* context has (single_buffer, the library) */
 }
@@ -180,11 +182,11 @@ static ULONG QueryX(struct Core *c, ULONG pname, float *v)
         case GL_INDEX_ARRAY_STRIDE:         v[0] = (float) c->ia.stride; return 1;
         case GL_EDGE_FLAG_ARRAY_STRIDE:     v[0] = (float) c->ea.stride; return 1;
         /* blending: one equation, one pair of factors for colour and alpha */
-        case GL_BLEND_EQUATION:     v[0] = (float) GL_FUNC_ADD; return 1;
-        case GL_BLEND_SRC_RGB:
-        case GL_BLEND_SRC_ALPHA:    v[0] = (float) c->blend_src; return 1;
-        case GL_BLEND_DST_RGB:
-        case GL_BLEND_DST_ALPHA:    v[0] = (float) c->blend_dst; return 1;
+        case GL_BLEND_EQUATION:     v[0] = (float) c->blend_eq_rgb; return 1;
+        case GL_BLEND_SRC_RGB:      v[0] = (float) c->blend_src; return 1;
+        case GL_BLEND_DST_RGB:      v[0] = (float) c->blend_dst; return 1;
+        case GL_BLEND_SRC_ALPHA:    v[0] = (float) (c->blend_sep ? c->blend_src_a : c->blend_src); return 1;
+        case GL_BLEND_DST_ALPHA:    v[0] = (float) (c->blend_sep ? c->blend_dst_a : c->blend_dst); return 1;
         /* lighting, rasterising */
         case GL_COLOR_MATERIAL_FACE:        v[0] = (float) c->cm_face; return 1;
         case GL_COLOR_MATERIAL_PARAMETER:   v[0] = (float) c->cm_mode; return 1;
@@ -1467,3 +1469,116 @@ void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float o
         Core_End(c);
     }
 }
+
+/* --- glBlendEquation, glBlendFuncSeparate ---------------------------------------------------
+ * The R200 blends colour by CBLENDCNTL and alpha by ABLENDCNTL (RB3D_CNTL's
+ * SEPARATE_ALPHA_ENABLE, set whenever blending is on: hwstate.c). They
+ * hold BLENDCNTL's value until a program sets an equation other than
+ * GL_FUNC_ADD or alpha factors of their own; then blend_x sends D_BLEND
+ * here. As Mesa's r200: GL_MIN and GL_MAX take factors ONE, ONE (GL
+ * ignores the factors for them). */
+
+static void BlendX(struct Core *c)
+{
+    c->blend_x = (c->blend_sep || c->blend_eq_rgb != GL_FUNC_ADD || c->blend_eq_a != GL_FUNC_ADD)
+               ? 1UL : 0UL;
+    c->dirty |= D_BLEND;
+}
+
+static ULONG BlendFcn(ULONG eq)
+{
+    switch (eq)
+    {
+        case GL_FUNC_SUBTRACT:          return R_COMB_FCN_SUB_CLAMP;
+        case GL_FUNC_REVERSE_SUBTRACT:  return R_COMB_FCN_RSUB_CLAMP;
+        case GL_MIN:                    return R_COMB_FCN_MIN;
+        case GL_MAX:                    return R_COMB_FCN_MAX;
+    }
+    return R_COMB_FCN_ADD_CLAMP;
+}
+
+/* A source and destination factor pair as GL 1.1 allows it (Core_BlendFunc's rule) */
+static ULONG BlendPairOk(ULONG src, ULONG dst)
+{
+    return (Hw_BlendFactor(src) != 0 && src != GL_SRC_COLOR && src != GL_ONE_MINUS_SRC_COLOR
+            && Hw_BlendFactor(dst) != 0 && dst != GL_DST_COLOR && dst != GL_ONE_MINUS_DST_COLOR
+            && dst != GL_SRC_ALPHA_SATURATE) ? 1UL : 0UL;
+}
+
+void Core_BlendEquation(struct Core *c, ULONG mode)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (mode != GL_FUNC_ADD && mode != GL_FUNC_SUBTRACT && mode != GL_FUNC_REVERSE_SUBTRACT
+        && mode != GL_MIN && mode != GL_MAX)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->blend_eq_rgb = mode;
+    c->blend_eq_a = mode;
+    BlendX(c);
+}
+
+void Core_BlendFuncSeparate(struct Core *c, ULONG sr, ULONG dr, ULONG sa, ULONG da)
+{
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (!BlendPairOk(sr, dr) || !BlendPairOk(sa, da))
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    c->blend_src = sr;
+    c->blend_dst = dr;
+    c->blend_src_a = sa;
+    c->blend_dst_a = da;
+    c->blend_sep = (sa != sr || da != dr) ? 1UL : 0UL;
+    BlendX(c);
+}
+
+void Compat_BlendFuncReset(struct Core *c)
+{
+    c->blend_sep = 0;
+    BlendX(c);
+}
+
+void Compat_EmitBlend(struct Core *c)
+{
+    ULONG sc, dc, sa, da, cb, ab;
+
+    if (!(c->enables & EN_BLEND))
+    {
+        /* As Mesa's r200: with blending off the registers go back to
+         * GL_FUNC_ADD, ONE, ZERO. GL_MIN or GL_FUNC_REVERSE_SUBTRACT left
+         * in them spoil drawing without blending (MEASURED 2026-11-08 on
+         * the A4000D: the unblended destination came out black). hwstate.c
+         * sends every RB3D_CNTL change here while blend_x is set. */
+        cb = R_COMB_FCN_ADD_CLAMP | (R_BLEND_GL_ONE << R_SRC_BLEND_SHIFT)
+           | (R_BLEND_GL_ZERO << R_DST_BLEND_SHIFT);
+        (void) R2E_Reg(c->cs, R_RB3D_BLENDCNTL, cb);
+        (void) R2E_Reg(c->cs, R_RB3D_ABLENDCNTL, cb);
+        (void) R2E_Reg(c->cs, R_RB3D_CBLENDCNTL, cb);
+        return;
+    }
+    sc = Hw_BlendFactor(c->blend_src);
+    dc = Hw_BlendFactor(c->blend_dst);
+    sa = c->blend_sep ? Hw_BlendFactor(c->blend_src_a) : sc;
+    da = c->blend_sep ? Hw_BlendFactor(c->blend_dst_a) : dc;
+    if (c->blend_eq_rgb == GL_MIN || c->blend_eq_rgb == GL_MAX)
+        sc = dc = R_BLEND_GL_ONE;
+    if (c->blend_eq_a == GL_MIN || c->blend_eq_a == GL_MAX)
+        sa = da = R_BLEND_GL_ONE;
+    cb = BlendFcn(c->blend_eq_rgb) | (sc << R_SRC_BLEND_SHIFT) | (dc << R_DST_BLEND_SHIFT);
+    ab = BlendFcn(c->blend_eq_a) | (sa << R_SRC_BLEND_SHIFT) | (da << R_DST_BLEND_SHIFT);
+    (void) R2E_Reg(c->cs, R_RB3D_BLENDCNTL, cb);
+    (void) R2E_Reg(c->cs, R_RB3D_ABLENDCNTL, ab);
+    (void) R2E_Reg(c->cs, R_RB3D_CBLENDCNTL, cb);
+}
+

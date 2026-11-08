@@ -46,6 +46,7 @@ static struct BitMap *bm;
 static struct RastPort rp;
 static LONG passed, failed;
 static LONG tol;
+static LONG fbdepth;
 static BOOL verbose;
 
 /* --- helpers ---------------------------------------------------------------------- */
@@ -362,6 +363,146 @@ static void MoreCases(void)
     glDisable(GL_TEXTURE_2D);
 }
 
+/* --- glCopyTexImage2D, glCopyTexSubImage2D ------------------------------------------------ */
+
+static void CopyCases(void)
+{
+    Ortho();
+    glDisable(GL_TEXTURE_2D);
+    Begin();
+    glColor3f(1.0f, 0.0f, 0.0f);            /* the left half red, the right half blue */
+    glBegin(GL_QUADS);
+    glVertex3f(0.0f, 0.0f, 0.0f); glVertex3f(S / 2.0f, 0.0f, 0.0f);
+    glVertex3f(S / 2.0f, (GLfloat) S, 0.0f); glVertex3f(0.0f, (GLfloat) S, 0.0f);
+    glColor3f(0.0f, 0.0f, 1.0f);
+    glVertex3f(S / 2.0f, 0.0f, 0.0f); glVertex3f((GLfloat) S, 0.0f, 0.0f);
+    glVertex3f((GLfloat) S, (GLfloat) S, 0.0f); glVertex3f(S / 2.0f, (GLfloat) S, 0.0f);
+    glEnd();
+    /* no mglSwitchDisplay: the copy must see what is still pending */
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 7);
+    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 0, 0, 4, 4, 0);         /* all red */
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 2, 0, S - 2, 0, 2, 4);        /* its right half blue */
+    WantInt("glCopyTexImage2D/glCopyTexSubImage2D: no error", (LONG) glGetError(), 0);
+    Nearest();
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    Begin(); TexQuad(); Show();
+    Want("copied texture, the left half: red", S / 4, S / 2, 1, 0, 0);
+    Want("copied texture, the right half: blue (sub image)", S * 3 / 4, S / 2, 0, 0, 1);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glDisable(GL_TEXTURE_2D);
+}
+
+/* --- glBlendEquation, glBlendFuncSeparate ------------------------------------------------ */
+
+/* the whole frame in one colour */
+static void Fill(float r, float g, float b, float a)
+{
+    glColor4f(r, g, b, a);
+    glBegin(GL_QUADS);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f((GLfloat) S, 0.0f, 0.0f);
+    glVertex3f((GLfloat) S, (GLfloat) S, 0.0f);
+    glVertex3f(0.0f, (GLfloat) S, 0.0f);
+    glEnd();
+}
+
+/* the destination (0.5, 0.25, 0.75, alpha 0.25) unblended, then the source
+ * (0.75, 0.5, 0.125, alpha 0.5) blended over it; the destination drawn with
+ * blending off after GL_MIN or GL_FUNC_REVERSE_SUBTRACT checks that those
+ * do not linger (Mesa's r200: they spoil unblended drawing) */
+static void BlendOver(GLenum eq, GLenum sf, GLenum df)
+{
+    glDisable(GL_BLEND);
+    Fill(0.5f, 0.25f, 0.75f, 0.25f);
+    glEnable(GL_BLEND);
+    glBlendFunc(sf, df);
+    glBlendEquation(eq);
+    Fill(0.75f, 0.5f, 0.125f, 0.5f);
+    glDisable(GL_BLEND);
+    Show();
+}
+
+/* the frame's alpha (glReadPixels) against want, both in 1/1000; only a
+ * 32-bit frame keeps alpha */
+static void WantAlpha(const char *what, LONG want)
+{
+    GLfloat f[4];
+    LONG got;
+    BOOL ok;
+
+    if (fbdepth != 32)
+        return;
+    f[3] = -1.0f;
+    glReadPixels(S / 2, S / 2, 1, 1, GL_RGBA, GL_FLOAT, f);
+    got = (LONG) (f[3] * 1000.0f + 0.5f);
+    ok = (BOOL) (Diff(got, want) <= 10);
+    Count(ok);
+    Printf("%s %-50s got %ld/1000, want %ld/1000\n", (LONG) (ok ? "PASS" : "FAIL"), (LONG) what, got, want);
+}
+
+static void BlendCases(void)
+{
+    GLint iv[4];
+
+    Ortho();
+    glDisable(GL_TEXTURE_2D);
+    BlendOver(GL_FUNC_ADD, GL_ONE, GL_ONE);
+    Want("GL_FUNC_ADD, ONE ONE: source + destination", S / 2, S / 2, 1.0f, 0.75f, 0.875f);
+    WantAlpha("GL_FUNC_ADD, ONE ONE: alpha 0.25 + 0.5", 750);
+    BlendOver(GL_FUNC_SUBTRACT, GL_ONE, GL_ONE);
+    Want("GL_FUNC_SUBTRACT: source - destination", S / 2, S / 2, 0.25f, 0.25f, 0.0f);
+    BlendOver(GL_FUNC_SUBTRACT, GL_ONE, GL_SRC_ALPHA);
+    Want("GL_FUNC_SUBTRACT, ONE SRC_ALPHA: s - d / 2", S / 2, S / 2, 0.5f, 0.375f, 0.0f);
+    BlendOver(GL_FUNC_REVERSE_SUBTRACT, GL_ONE, GL_ONE);
+    Want("GL_FUNC_REVERSE_SUBTRACT: destination - source", S / 2, S / 2, 0.0f, 0.0f, 0.625f);
+    WantAlpha("GL_FUNC_REVERSE_SUBTRACT: alpha 0.25 - 0.5 = 0", 0);
+    BlendOver(GL_MIN, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    Want("GL_MIN (the factors do not apply)", S / 2, S / 2, 0.5f, 0.25f, 0.125f);
+    WantAlpha("GL_MIN: alpha min(0.25, 0.5)", 250);
+    BlendOver(GL_MAX, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    Want("GL_MAX (the factors do not apply)", S / 2, S / 2, 0.75f, 0.5f, 0.75f);
+    WantAlpha("GL_MAX: alpha max(0.25, 0.5)", 500);
+    iv[0] = -1;
+    glGetIntegerv(GL_BLEND_EQUATION, iv);
+    WantInt("glGetIntegerv GL_BLEND_EQUATION", iv[0], GL_MAX);
+    glBlendEquation(GL_FUNC_ADD);
+
+    /* separate alpha factors: the colour from the source, the alpha kept */
+    glDisable(GL_BLEND);
+    Fill(0.5f, 0.25f, 0.75f, 0.25f);
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ONE, GL_ZERO, GL_ZERO, GL_ONE);
+    Fill(0.75f, 0.5f, 0.125f, 0.5f);
+    glDisable(GL_BLEND);
+    Show();
+    Want("glBlendFuncSeparate ONE ZERO, ZERO ONE: colour = source", S / 2, S / 2, 0.75f, 0.5f, 0.125f);
+    WantAlpha("glBlendFuncSeparate ONE ZERO, ZERO ONE: alpha kept", 250);
+    iv[0] = -1;
+    glGetIntegerv(GL_BLEND_DST_ALPHA, iv);
+    WantInt("glGetIntegerv GL_BLEND_DST_ALPHA", iv[0], GL_ONE);
+    /* the other way round: the colour kept, the alpha from the source */
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_ZERO, GL_ONE, GL_ONE, GL_ZERO);
+    Fill(0.25f, 1.0f, 0.0f, 0.5f);
+    glDisable(GL_BLEND);
+    Show();
+    Want("glBlendFuncSeparate ZERO ONE, ONE ZERO: colour kept", S / 2, S / 2, 0.75f, 0.5f, 0.125f);
+    WantAlpha("glBlendFuncSeparate ZERO ONE, ONE ZERO: alpha = source", 500);
+    /* a plain glBlendFunc ends the separate factors (BlendOver calls it) */
+    BlendOver(GL_FUNC_ADD, GL_ONE, GL_ONE);
+    Want("glBlendFunc after glBlendFuncSeparate: ONE ONE again", S / 2, S / 2, 1.0f, 0.75f, 0.875f);
+    WantAlpha("glBlendFunc after glBlendFuncSeparate: alpha added", 750);
+    iv[0] = -1;
+    glGetIntegerv(GL_BLEND_DST_ALPHA, iv);
+    WantInt("glGetIntegerv GL_BLEND_DST_ALPHA after glBlendFunc", iv[0], GL_ONE);
+    glBlendEquation(GL_ONE);
+    WantInt("glBlendEquation(GL_ONE): GL_INVALID_ENUM", (LONG) glGetError(), GL_INVALID_ENUM);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    WantInt("blending: no error left", (LONG) glGetError(), 0);
+}
+
 /* --- reading back, queries ------------------------------------------------------------- */
 
 static void QueryCases(void)
@@ -487,6 +628,7 @@ int main(void)
     depth = (args[0] && *(LONG *) args[0] == 16) ? 16 : 32;
     verbose = (BOOL) (args[1] != 0);
     tol = (depth == 16) ? 12 : 6;
+    fbdepth = depth;
     IntuitionBase = (struct IntuitionBase *) OpenLibrary((CONST_STRPTR) "intuition.library", 39);
     GfxBase = (struct GfxBase *) OpenLibrary((CONST_STRPTR) "graphics.library", 39);
     P96Base = OpenLibrary((CONST_STRPTR) "Picasso96API.library", 2);
@@ -534,6 +676,8 @@ int main(void)
     GluCases();
     ArrayCases();
     MoreCases();
+    CopyCases();
+    BlendCases();
     QueryCases();
     mglDeleteContext();
     LoopCase();

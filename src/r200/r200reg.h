@@ -157,6 +157,10 @@
 #define R_RE_SOLID_COLOR        0x1c1c
 #define R_RB3D_BLENDCNTL        0x1c20
 #define   R_COMB_FCN_ADD_CLAMP    (0UL << 12)
+#define   R_COMB_FCN_SUB_CLAMP    (2UL << 12)
+#define   R_COMB_FCN_MIN          (4UL << 12)
+#define   R_COMB_FCN_MAX          (5UL << 12)
+#define   R_COMB_FCN_RSUB_CLAMP   (6UL << 12)
 #define   R_BLEND_GL_ZERO         32UL
 #define   R_BLEND_GL_ONE          33UL
 #define   R_BLEND_GL_SRC_COLOR    34UL
@@ -189,6 +193,7 @@
 #define   R_ALPHA_TEST_ENABLE     0x00800000UL
 #define R_RB3D_CNTL             0x1c3c
 #define   R_ALPHA_BLEND_ENABLE    (1UL << 0)
+#define   R_SEPARATE_ALPHA_ENABLE (1UL << 16)   /* ABLENDCNTL alpha, CBLENDCNTL colour */
 #define   R_PLANE_MASK_ENABLE     (1UL << 1)
 #define   R_DITHER_ENABLE         (1UL << 2)
 #define   R_ROUND_ENABLE          (1UL << 3)

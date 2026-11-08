@@ -524,15 +524,14 @@ To have no log at all:
 
 @{b}Not implemented yet@{ub}
 
-RadeonGL implements 162 of the 205 functions of minigl.library 29.1:
-everything GLQuake uses, and more. A program calling one of the others
-gets nothing for it but the error GL_INVALID_OPERATION; the
+RadeonGL answers 176 of the 205 functions of minigl.library 29.1:
+everything GLQuake uses, and more (a few of them accepted without
+effect, see below). A program calling one of the other 29 gets nothing
+for it but the error GL_INVALID_OPERATION; the
 @{" log file " link Log} names such calls.
 
     * Display lists (glNewList, glCallList and the rest).
-    * Paletted textures (glColorTable), copying pixels
-      (glCopyTexImage2D, glCopyTexSubImage2D), glBlendEquation,
-      glBlendFuncSeparate.
+    * Paletted textures (glColorTable).
     * GLUT (its window and shape functions).
     * Polygons drawn as lines or points (glPolygonMode), stencil and
       accumulation buffers, line and polygon stipple, logic operations,

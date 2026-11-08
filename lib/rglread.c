@@ -350,6 +350,133 @@ void Hook_GLPixelStorei(GLcontext context, GLenum pname, GLint param)
         Core_PixelStore((struct Core *) context, pname, param);   /* compat.c: all twelve */
 }
 
+/* --- glCopyTexImage2D, glCopyTexSubImage2D (29.1's, 2026-11-08) ---------------------------
+ * A rectangle of the frame into a texture: read through ReadRows (which
+ * first draws whatever is pending, Card_WaitIdle) as RGBA bytes, rows from
+ * the bottom as a texture's go, then uploaded as glTexImage2D and
+ * glTexSubImage2D upload them. Pixels outside the frame are black. */
+
+struct CopyTo
+{
+    UBYTE *buf;                 /* w x h RGBA */
+    LONG x, y, x0;              /* the rectangle's corner; the first column read */
+    ULONG w;                    /* the rectangle's width */
+    ULONG n;                    /* columns read */
+};
+
+static void ToCopy(APTR ud, LONG row, const ULONG *argb)
+{
+    struct CopyTo *t;
+    UBYTE *p;
+    ULONG i;
+    ULONG v;
+
+    t = (struct CopyTo *) ud;
+    p = t->buf + ((ULONG) (row - t->y) * t->w + (ULONG) (t->x0 - t->x)) * 4;
+    for (i = 0; i < t->n; i++)
+    {
+        v = argb[i];
+        p[0] = (UBYTE) (v >> 16);
+        p[1] = (UBYTE) (v >> 8);
+        p[2] = (UBYTE) v;
+        p[3] = (UBYTE) (v >> 24);
+        p += 4;
+    }
+}
+
+/* The w x h rectangle at (x, y) as RGBA bytes (AllocVec, w * h * 4); NULL
+ * with a GL error raised */
+static UBYTE *CopyRect(struct Rgl *r, LONG x, LONG y, LONG w, LONG h)
+{
+    struct CopyTo t;
+    UBYTE *buf;
+    LONG x0, x1, y0, y1;
+
+    buf = (UBYTE *) AllocVec((ULONG) w * (ULONG) h * 4, MEMF_ANY | MEMF_CLEAR);
+    if (buf == NULL)
+    {
+        Core_Error(&r->core, GL_OUT_OF_MEMORY);
+        return NULL;
+    }
+    t.buf = buf;
+    t.x = x;
+    t.y = y;
+    t.w = (ULONG) w;
+    x0 = (x < 0) ? 0 : x;
+    y0 = (y < 0) ? 0 : y;
+    x1 = x + w;
+    y1 = y + h;
+    if (x1 > (LONG) r->core.target.width)
+        x1 = (LONG) r->core.target.width;
+    if (y1 > (LONG) r->core.target.height)
+        y1 = (LONG) r->core.target.height;
+    if (x1 > x0 && y1 > y0)
+    {
+        t.x0 = x0;
+        t.n = (ULONG) (x1 - x0);
+        if (!ReadRows(r, x0, x1, y0, y1, ToCopy, &t))
+        {
+            FreeVec(buf);
+            Core_Error(&r->core, GL_OUT_OF_MEMORY);
+            return NULL;
+        }
+    }
+    return buf;
+}
+
+/* GL's checks before the read: GL_INVALID_OPERATION inside glBegin,
+ * GL_INVALID_ENUM for another target, GL_INVALID_VALUE for a size the
+ * texture code would refuse anyway. TRUE: go on. */
+static BOOL CopyArgs(struct Rgl *r, ULONG target, LONG w, LONG h)
+{
+    if (IN_BEGIN(&r->core))
+        Core_Error(&r->core, GL_INVALID_OPERATION);
+    else if (target != GL_TEXTURE_2D)
+        Core_Error(&r->core, GL_INVALID_ENUM);
+    else if (w < 1 || h < 1 || w > CORE_MAX_TEXSIZE || h > CORE_MAX_TEXSIZE)
+        Core_Error(&r->core, GL_INVALID_VALUE);
+    else
+        return TRUE;
+    return FALSE;
+}
+
+void Hook_GLCopyTexImage2D(GLcontext context, GLenum target, GLint level, GLenum internalformat,
+                           GLint x, GLint y, GLsizei width, GLsizei height, GLint border)
+{
+    struct Rgl *r;
+    UBYTE *buf;
+
+    r = (struct Rgl *) context;
+    if (r == NULL || !CopyArgs(r, target, width, height))
+        return;
+    if (border != 0)
+    {
+        Core_Error(&r->core, GL_INVALID_VALUE);
+        return;
+    }
+    if ((buf = CopyRect(r, x, y, width, height)) == NULL)
+        return;
+    Core_TexImage2D(&r->core, target, level, (LONG) internalformat, width, height, 0, GL_RGBA,
+                    GL_UNSIGNED_BYTE, buf);
+    FreeVec(buf);
+}
+
+void Hook_GLCopyTexSubImage2D(GLcontext context, GLenum target, GLint level, GLint xoffset,
+                              GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height)
+{
+    struct Rgl *r;
+    UBYTE *buf;
+
+    r = (struct Rgl *) context;
+    if (r == NULL || !CopyArgs(r, target, width, height))
+        return;
+    if ((buf = CopyRect(r, x, y, width, height)) == NULL)
+        return;
+    Core_TexSubImage2D(&r->core, target, level, xoffset, yoffset, width, height, GL_RGBA,
+                       GL_UNSIGNED_BYTE, buf);
+    FreeVec(buf);
+}
+
 /* --- mglWriteShotPPM: the frame as a binary PPM --------------------------------------- */
 
 struct Shot

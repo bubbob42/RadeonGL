@@ -1396,9 +1396,48 @@ static void test_state(void)
     v = LastReg(R_RB3D_CNTL);
     CHECK(v & R_Z_ENABLE);
     CHECK(v & R_ALPHA_BLEND_ENABLE);
+    CHECK(v & R_SEPARATE_ALPHA_ENABLE);
     CHECK(v & R_PLANE_MASK_ENABLE);
     CHECK_HEX(LastReg(R_RB3D_PLANEMASK), 0xffe0UL);  /* RGB565 without blue */
     CHECK_HEX(LastReg(R_RB3D_BLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
+    CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
+    CHECK_HEX(LastReg(R_RB3D_ABLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
+    /* glBlendEquation, glBlendFuncSeparate: colour by CBLENDCNTL, alpha by ABLENDCNTL */
+    Core_BlendFuncSeparate(&core, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+    Core_BlendEquation(&core, GL_FUNC_REVERSE_SUBTRACT);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    Draw1();
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), R_COMB_FCN_RSUB_CLAMP | (R_BLEND_GL_SRC_ALPHA << 16)
+              | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
+    CHECK_HEX(LastReg(R_RB3D_BLENDCNTL), LastReg(R_RB3D_CBLENDCNTL));
+    CHECK_HEX(LastReg(R_RB3D_ABLENDCNTL), R_COMB_FCN_RSUB_CLAMP | (R_BLEND_GL_ONE << 16) | (R_BLEND_GL_ZERO << 24));
+    Core_BlendEquation(&core, GL_MAX);      /* MIN, MAX: factors ONE, ONE (as Mesa's r200) */
+    Draw1();
+    CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), R_COMB_FCN_MAX | (R_BLEND_GL_ONE << 16) | (R_BLEND_GL_ONE << 24));
+    CHECK_HEX(LastReg(R_RB3D_ABLENDCNTL), R_COMB_FCN_MAX | (R_BLEND_GL_ONE << 16) | (R_BLEND_GL_ONE << 24));
+    /* blending off: ADD, ONE, ZERO, or MIN/RSUB spoil unblended drawing; on again: MAX back */
+    Core_Enable(&core, GL_BLEND, 0);
+    Draw1();
+    CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), (R_BLEND_GL_ONE << 16) | (R_BLEND_GL_ZERO << 24));
+    CHECK_HEX(LastReg(R_RB3D_ABLENDCNTL), (R_BLEND_GL_ONE << 16) | (R_BLEND_GL_ZERO << 24));
+    CHECK(!(LastReg(R_RB3D_CNTL) & R_ALPHA_BLEND_ENABLE));
+    Core_Enable(&core, GL_BLEND, 1);
+    Draw1();
+    CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), R_COMB_FCN_MAX | (R_BLEND_GL_ONE << 16) | (R_BLEND_GL_ONE << 24));
+    Core_BlendEquation(&core, GL_ONE);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    Core_BlendFuncSeparate(&core, GL_ONE, GL_SRC_ALPHA_SATURATE, GL_ONE, GL_ZERO);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+    /* back to GL_FUNC_ADD and plain glBlendFunc: the separate alpha factors end, the
+     * three registers hold one value again */
+    Core_BlendEquation(&core, GL_FUNC_ADD);
+    Core_BlendFunc(&core, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    CHECK_INT((LONG) core.blend_x, 0);
+    Draw1();
+    CHECK_HEX(LastReg(R_RB3D_BLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
+    CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
+    CHECK_HEX(LastReg(R_RB3D_ABLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
     CHECK_HEX(LastReg(R_PP_MISC), 170UL | (5UL << 8));   /* round(0.666 * 255), GREATER */
     CHECK(LastReg(R_PP_CNTL) & R_ALPHA_TEST_ENABLE);
     v = LastReg(R_SE_CNTL);

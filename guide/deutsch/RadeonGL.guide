@@ -562,15 +562,14 @@ Für gar kein Protokoll:
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL setzt 162 der 205 Funktionen der minigl.library 29.1 um: alles,
-was GLQuake verwendet, und mehr. Ein Programm, das eine der anderen
-aufruft, bekommt dafür nur den Fehler GL_INVALID_OPERATION; die
-@{" Protokolldatei " link Log} nennt solche Aufrufe.
+RadeonGL beantwortet 176 der 205 Funktionen der minigl.library 29.1:
+alles, was GLQuake verwendet, und mehr (einige davon ohne Wirkung, siehe
+unten). Ein Programm, das eine der übrigen 29 aufruft, bekommt dafür nur
+den Fehler GL_INVALID_OPERATION; die @{" Protokolldatei " link Log}
+nennt solche Aufrufe.
 
     * Display-Listen (glNewList, glCallList und die übrigen).
-    * Texturen mit Farbpalette (glColorTable), Pixel kopieren
-      (glCopyTexImage2D, glCopyTexSubImage2D), glBlendEquation,
-      glBlendFuncSeparate.
+    * Texturen mit Farbpalette (glColorTable).
     * GLUT (die Fenster- und Körperfunktionen).
     * Polygone als Linien oder Punkte (glPolygonMode), Stencil- und
       Akkumulationspuffer, Linien- und Flächenmuster, logische

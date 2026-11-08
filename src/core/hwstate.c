@@ -68,8 +68,11 @@ static ULONG Rb3dCntl(struct Core *c)
     v = c->target.color_format;
     if (c->enables & EN_DEPTH_TEST)
         v |= R_Z_ENABLE;
+    /* as Mesa's r200: blending always through ABLENDCNTL (alpha) and
+     * CBLENDCNTL (colour), which hold BLENDCNTL's value unless a program
+     * set equations or separate alpha factors (compat.c) */
     if (c->enables & EN_BLEND)
-        v |= R_ALPHA_BLEND_ENABLE;
+        v |= R_ALPHA_BLEND_ENABLE | R_SEPARATE_ALPHA_ENABLE;
     if (c->color_mask != 0xf)
         v |= R_PLANE_MASK_ENABLE;
     if ((c->enables & EN_DITHER) && (c->target.color_format == R_COLOR_FORMAT_RGB565
@@ -473,18 +476,27 @@ static LONG ValidateOnce(struct Core *c)
     if (d & D_SCISSOR)
         EmitScissor(c);
     if (d & D_RB3D)
+    {
         R2E_Reg(cs, R_RB3D_CNTL, Rb3dCntl(c));
+        if (c->blend_x)
+            d |= D_BLEND;           /* blending on or off: Compat_EmitBlend follows */
+    }
     if (d & D_ZSTENCIL)
         R2E_Reg(cs, R_RB3D_ZSTENCILCNTL, R_DEPTH_FORMAT_16BIT_INT_Z
                 | (Hw_DepthFunc(c->depth_func) << R_Z_TEST_SHIFT) | R_STENCIL_TEST_ALWAYS
                 | (c->depth_mask ? R_Z_WRITE_ENABLE : 0));
     if (d & D_BLEND)
     {
-        v[0] = R_COMB_FCN_ADD_CLAMP | (Hw_BlendFactor(c->blend_src) << R_SRC_BLEND_SHIFT)
-             | (Hw_BlendFactor(c->blend_dst) << R_DST_BLEND_SHIFT);
-        R2E_Reg(cs, R_RB3D_BLENDCNTL, v[0]);
-        R2E_Reg(cs, R_RB3D_ABLENDCNTL, v[0]);
-        R2E_Reg(cs, R_RB3D_CBLENDCNTL, v[0]);
+        if (c->blend_x)
+            Compat_EmitBlend(c);    /* equations, separate alpha factors (compat.c) */
+        else
+        {
+            v[0] = R_COMB_FCN_ADD_CLAMP | (Hw_BlendFactor(c->blend_src) << R_SRC_BLEND_SHIFT)
+                 | (Hw_BlendFactor(c->blend_dst) << R_DST_BLEND_SHIFT);
+            R2E_Reg(cs, R_RB3D_BLENDCNTL, v[0]);
+            R2E_Reg(cs, R_RB3D_ABLENDCNTL, v[0]);
+            R2E_Reg(cs, R_RB3D_CBLENDCNTL, v[0]);
+        }
     }
     if (d & D_ALPHA)
         R2E_Reg(cs, R_PP_MISC, Core_Unit255(c->alpha_ref)

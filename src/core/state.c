@@ -142,6 +142,8 @@ void Core_BlendFunc(struct Core *c, ULONG src, ULONG dst)
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
+    if (c->blend_sep)
+        Compat_BlendFuncReset(c);   /* glBlendFuncSeparate's alpha factors end (compat.c) */
     if (src == c->blend_src && dst == c->blend_dst)
         return;
     c->blend_src = src;
