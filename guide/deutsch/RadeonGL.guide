@@ -207,7 +207,9 @@ Bildrate.
     öffnet sich dort, wo der mglCreateContext seines Programms es
     verlangt hat (offx und offy sind der Platz des Fensters). Ctrl-C im
     Fenster von Trio beendet alle drei, Esc in einem davon nur dieses.
-    Die Workbench braucht dafür 15, 16 oder 32 Bit auf der Radeon.
+    Die Workbench braucht dafür 15, 16 oder 32 Bit auf der Radeon; über
+    DVI kann ein Workbench-Modus mit hohem Pixeltakt den Monitor
+    aussetzen lassen (siehe @{" Der Bildschirm " link Screen}).
 
 Aus der Shell nehmen sie FRAMES (0: bis Esc), WIDTH, HEIGHT und DEPTH
 (16 oder 32), zum Beispiel:
@@ -313,6 +315,11 @@ Texturspeicher (RadeonGLHeapMax stellt weniger ein).
 und größer bei 60 Hz) auf dem Testrechner Punkte oder setzten aus,
 während die Radeon zeichnete. Timings mit reduzierter Austastung im
 Einsteller Picasso96Mode senken den Takt.
+
+In einem Fenster ist der Bildschirm auf dem Monitor die Workbench, also
+zählt ihr Modus: mit drei Programmen, die in Fenstern zeichneten (Trio),
+setzte der Monitor bei einer Workbench mit 1920 x 1080 und 60 Hz aus, bei
+50 Hz ab und zu, bei 1280 x 720 nie.
 @endnode
 
 @node Settings "Einstellungen"

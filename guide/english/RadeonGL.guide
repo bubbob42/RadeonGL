@@ -194,7 +194,8 @@ and its window then shows the frame rate.
     program's mglCreateContext asked for it (offx and offy are the
     window's place). Ctrl-C in Trio's window ends all three, Esc in one
     of them ends that one. The Workbench needs 15, 16 or 32 bits on the
-    Radeon.
+    Radeon; over DVI a Workbench mode with a high pixel clock can make
+    the monitor drop out (see @{" The screen " link Screen}).
 
 From a Shell they take FRAMES (0: until Esc), WIDTH, HEIGHT and DEPTH
 (16 or 32), for example:
@@ -293,6 +294,11 @@ Over DVI, modes with a pixel clock above about 110 MHz (1680 x 1050 and
 larger at 60 Hz) showed dots or dropped out on the test machine while the
 Radeon drew. Reduced-blanking timings in the Picasso96Mode preferences
 lower the clock.
+
+In a window, the screen on the monitor is the Workbench, so its mode is
+the one that counts: with three programs drawing in windows (Trio) the
+monitor dropped out with the Workbench at 1920 x 1080 and 60 Hz, now and
+then at 50 Hz, and never at 1280 x 720.
 @endnode
 
 @node Settings "Settings"
