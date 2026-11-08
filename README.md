@@ -97,13 +97,12 @@ needs.
 
 ## Not implemented yet
 
-RadeonGL answers 176 of the 205 functions of `minigl.library` 29.1:
+RadeonGL answers 177 of the 205 functions of `minigl.library` 29.1:
 everything GLQuake uses, and more (a few accepted without effect). The
-other 29 draw nothing and set GL_INVALID_OPERATION; the library's log
+other 28 draw nothing and set GL_INVALID_OPERATION; the library's log
 names every such call.
 
 - Display lists.
-- Paletted textures (`glColorTable`).
 - GLUT.
 - Polygons drawn as lines or points (`glPolygonMode`), stencil and
   accumulation buffers, line and polygon stipple, logic operations,
@@ -115,6 +114,9 @@ names every such call.
 - Accepted without effect: edge flags and colour-index values,
   `glDrawBuffer` and `glReadBuffer`, texture priorities. `mglLockBack`
   always refuses. `glTexCoord4f` divides by q at each corner.
+- Paletted textures as in MiniGL 29.1: one palette a context, applied when
+  a `GL_COLOR_INDEX` image is uploaded; a `GL_RGBA` palette is read as
+  A, R, G, B (MiniGL's order).
 
 ## GLQuake benchmarks
 

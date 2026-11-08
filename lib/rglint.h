@@ -55,6 +55,7 @@ struct Rgl
 extern struct Rgl *rgl_list;
 
 /* rglcompat.c (linked last): glGet with the context's buffering known */
+extern const char Rglc_Extensions[];    /* GL_EXTENSIONS (rglcompat.c) */
 void Rglc_GetFloatv(struct Core *c, ULONG pname, float *out);
 void Rglc_GetIntegerv(struct Core *c, ULONG pname, LONG *out);
 

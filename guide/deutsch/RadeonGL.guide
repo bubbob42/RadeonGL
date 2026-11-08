@@ -562,14 +562,13 @@ Für gar kein Protokoll:
 
 @{b}Noch nicht umgesetzt@{ub}
 
-RadeonGL beantwortet 176 der 205 Funktionen der minigl.library 29.1:
+RadeonGL beantwortet 177 der 205 Funktionen der minigl.library 29.1:
 alles, was GLQuake verwendet, und mehr (einige davon ohne Wirkung, siehe
-unten). Ein Programm, das eine der übrigen 29 aufruft, bekommt dafür nur
+unten). Ein Programm, das eine der übrigen 28 aufruft, bekommt dafür nur
 den Fehler GL_INVALID_OPERATION; die @{" Protokolldatei " link Log}
 nennt solche Aufrufe.
 
     * Display-Listen (glNewList, glCallList und die übrigen).
-    * Texturen mit Farbpalette (glColorTable).
     * GLUT (die Fenster- und Körperfunktionen).
     * Polygone als Linien oder Punkte (glPolygonMode), Stencil- und
       Akkumulationspuffer, Linien- und Flächenmuster, logische
@@ -580,6 +579,12 @@ glDrawBuffer und glReadBuffer (RadeonGL zeichnet in das Bild, das gerade
 entsteht, und liest von dort), die Texturprioritäten, mglProhibit... und
 mglProposeCloseDesktop. mglLockBack lehnt immer ab. glTexCoord4f teilt an
 jeder Ecke durch q (die Radeon bekommt q nicht).
+
+Texturen mit Farbpalette, wie in MiniGL 29.1: glColorTable setzt eine
+Palette für den Kontext, und ein GL_COLOR_INDEX-Upload wird beim Hochladen
+über sie in Farben umgesetzt; eine spätere Palette ändert vorhandene
+Texturen also nicht. Eine GL_RGBA-Palette wird als Alpha, Rot, Grün, Blau
+gelesen, in MiniGLs Reihenfolge.
 @endnode
 
 @node Inside "Wie es funktioniert"

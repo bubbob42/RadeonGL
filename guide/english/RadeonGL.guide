@@ -524,14 +524,13 @@ To have no log at all:
 
 @{b}Not implemented yet@{ub}
 
-RadeonGL answers 176 of the 205 functions of minigl.library 29.1:
+RadeonGL answers 177 of the 205 functions of minigl.library 29.1:
 everything GLQuake uses, and more (a few of them accepted without
-effect, see below). A program calling one of the other 29 gets nothing
+effect, see below). A program calling one of the other 28 gets nothing
 for it but the error GL_INVALID_OPERATION; the
 @{" log file " link Log} names such calls.
 
     * Display lists (glNewList, glCallList and the rest).
-    * Paletted textures (glColorTable).
     * GLUT (its window and shape functions).
     * Polygons drawn as lines or points (glPolygonMode), stencil and
       accumulation buffers, line and polygon stipple, logic operations,
@@ -542,6 +541,12 @@ glDrawBuffer and glReadBuffer (RadeonGL draws into the picture being
 built and reads from it), texture priorities, mglProhibit... and
 mglProposeCloseDesktop. mglLockBack always refuses. glTexCoord4f divides
 by q at each corner (the Radeon is not given q).
+
+Paletted textures, as in MiniGL 29.1: glColorTable sets one palette for
+the context, and a GL_COLOR_INDEX upload is turned into colours through
+it when it is made, so a later palette does not change textures already
+there. A GL_RGBA palette is read as alpha, red, green, blue, MiniGL's
+order.
 @endnode
 
 @node Inside "How it works"

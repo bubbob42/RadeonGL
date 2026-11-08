@@ -1669,6 +1669,8 @@ const GLubyte *Hook_GLGetString(GLcontext context, GLenum name)
         return NULL;
     if (name == GL_RGL_RESIZE_ERROR)
         return (const GLubyte *) rgl->resize_why;      /* extension GL_RGL_resize_error */
+    if (name == GL_EXTENSIONS)
+        return (const GLubyte *) Rglc_Extensions;      /* + 29.1's palette names */
     return (const GLubyte *) Core_GetString(C, name);
 }
 

@@ -445,7 +445,13 @@ static void WantAlpha(const char *what, LONG want)
 static void BlendCases(void)
 {
     GLint iv[4];
+    LONG keep;
 
+    /* RGB565: a blend compounds two truncations (the destination stored,
+     * the sum stored) on top of the 5-bit readback, one step more than 12 */
+    keep = tol;
+    if (fbdepth == 16)
+        tol = 20;
     Ortho();
     glDisable(GL_TEXTURE_2D);
     BlendOver(GL_FUNC_ADD, GL_ONE, GL_ONE);
@@ -501,6 +507,46 @@ static void BlendCases(void)
     WantInt("glBlendEquation(GL_ONE): GL_INVALID_ENUM", (LONG) glGetError(), GL_INVALID_ENUM);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     WantInt("blending: no error left", (LONG) glGetError(), 0);
+    tol = keep;
+}
+
+/* --- glColorTable: paletted textures (29.1's EXT_paletted_texture) ------------------------ */
+
+#ifndef GL_COLOR_INDEX8_EXT
+#define GL_COLOR_INDEX8_EXT 0x80E5
+#endif
+
+static void PaletteCases(void)
+{
+    static const GLubyte pal[4 * 3] = { 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0 };
+    static const GLubyte idx[4] = { 0, 1, 2, 3 };       /* 2 x 2, tight rows */
+    const GLubyte *ext;
+
+    ext = glGetString(GL_EXTENSIONS);
+    WantInt("GL_EXTENSIONS names GL_EXT_paletted_texture",
+            (LONG) (ext != NULL && strstr((const char *) ext, "GL_EXT_paletted_texture") != NULL), 1);
+    glEnable(GL_SHARED_TEXTURE_PALETTE_EXT);
+    WantInt("glIsEnabled GL_SHARED_TEXTURE_PALETTE_EXT", (LONG) glIsEnabled(GL_SHARED_TEXTURE_PALETTE_EXT), 1);
+    glColorTable(GL_COLOR_TABLE, GL_RGB, 4, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid *) pal);
+    Ortho();
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 9);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT, 2, 2, 0, GL_COLOR_INDEX, GL_UNSIGNED_BYTE,
+                 (void *) idx);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    WantInt("glColorTable + GL_COLOR_INDEX upload: no error", (LONG) glGetError(), 0);
+    Nearest();
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    Begin(); TexQuad(); Show();
+    Want("paletted texture: index 0, red (top left)", S / 4, S / 4, 1, 0, 0);
+    Want("paletted texture: index 1, green (top right)", S * 3 / 4, S / 4, 0, 1, 0);
+    Want("paletted texture: index 2, blue (bottom left)", S / 4, S * 3 / 4, 0, 0, 1);
+    Want("paletted texture: index 3, yellow (bottom right)", S * 3 / 4, S * 3 / 4, 1, 1, 0);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_SHARED_TEXTURE_PALETTE_EXT);
 }
 
 /* --- reading back, queries ------------------------------------------------------------- */
@@ -678,6 +724,7 @@ int main(void)
     MoreCases();
     CopyCases();
     BlendCases();
+    PaletteCases();
     QueryCases();
     mglDeleteContext();
     LoopCase();

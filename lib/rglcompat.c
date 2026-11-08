@@ -689,3 +689,17 @@ void Hook_GLBlendFuncSeparate(GLcontext context, GLenum srcRGB, GLenum dstRGB, G
     Core_BlendFuncSeparate(c, srcRGB, dstRGB, srcAlpha, dstAlpha);
 }
 
+/* --- glColorTable (compat.c); GL_EXTENSIONS with 29.1's palette names ------------------------ */
+
+const char Rglc_Extensions[] = CORE_EXTENSIONS RGL_PALETTE_EXTENSIONS;
+
+void Hook_GLColorTable(GLcontext context, GLenum target, GLenum internalformat, GLint width,
+                       GLenum format, GLenum type, GLvoid *data)
+{
+    struct Core *c;
+
+    if ((c = Ctx(context)) == NULL)
+        return;
+    Core_ColorTable(c, target, internalformat, width, format, type, data);
+}
+

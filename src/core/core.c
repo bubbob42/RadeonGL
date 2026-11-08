@@ -138,6 +138,7 @@ void Core_Free(struct Core *c)
     c->ucache_on = 0;
     c->ustaged = 0;
     c->ucache_size = 0;
+    Compat_Free(c);
     Heap_FreeAll(c);
 }
 

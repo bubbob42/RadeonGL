@@ -444,6 +444,9 @@ struct Core
     ULONG blend_src_a, blend_dst_a;         /* glBlendFuncSeparate's alpha factors ... */
     ULONG blend_sep;                        /* ... when they differ from colour's */
     ULONG blend_x;                          /* either of the above: hwstate.c lets compat.c emit */
+    ULONG shared_pal;                       /* GL_SHARED_TEXTURE_PALETTE_EXT: stored, as 29.1 */
+    ULONG pal_size, pal_base;               /* glColorTable: entries (0 = none yet), base format */
+    UBYTE *pal;                             /* ... 256 x R, G, B, A, allocated at the first call */
 };
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
@@ -694,10 +697,19 @@ ULONG Core_AreTexturesResident(struct Core *c, LONG n, const ULONG *names);
 void Core_PrioritizeTextures(struct Core *c, LONG n, const ULONG *names);
 void Core_TexMemStat(struct Core *c, LONG *current, LONG *peak);
 void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const void *p);
+/* GL_EXTENSIONS (get.c); the library appends RGL_PALETTE_EXTENSIONS. MiniGLV3D's
+ * spelling, so clients take the same paths (GLQuake finds GL_ARB_multitexture
+ * inside GL_MGL_...) */
+#define CORE_EXTENSIONS "GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array GL_MGL_packed_pixels " \
+                        "GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag GL_RGL_resize_error"
+#define RGL_PALETTE_EXTENSIONS " GL_EXT_color_table GL_EXT_paletted_texture GL_EXT_shared_texture_palette"
+void Core_ColorTable(struct Core *c, ULONG target, ULONG internal, LONG width, ULONG format,
+                     ULONG type, const void *data);
 void Core_BlendEquation(struct Core *c, ULONG mode);
 void Core_BlendFuncSeparate(struct Core *c, ULONG sr, ULONG dr, ULONG sa, ULONG da);
 void Compat_BlendFuncReset(struct Core *c);     /* state.c: glBlendFunc after a separate one */
 void Compat_EmitBlend(struct Core *c);          /* hwstate.c: D_BLEND with blend_x */
+void Compat_Free(struct Core *c);               /* Core_Free: what compat.c allocated */
 LONG Core_Build2DMipmaps(struct Core *c, ULONG target, LONG internal, LONG w, LONG h,
                          ULONG format, ULONG type, const void *data);   /* 0 or a GLU error */
 

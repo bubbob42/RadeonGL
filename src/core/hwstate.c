@@ -68,11 +68,11 @@ static ULONG Rb3dCntl(struct Core *c)
     v = c->target.color_format;
     if (c->enables & EN_DEPTH_TEST)
         v |= R_Z_ENABLE;
-    /* as Mesa's r200: blending always through ABLENDCNTL (alpha) and
-     * CBLENDCNTL (colour), which hold BLENDCNTL's value unless a program
-     * set equations or separate alpha factors (compat.c) */
+    /* ABLENDCNTL (alpha) and CBLENDCNTL (colour) apart only for a program
+     * that set equations or separate alpha factors (compat.c): always on,
+     * as Mesa's r200 has it, cost GLQuake 0.05 s (MEASURED 2026-11-08) */
     if (c->enables & EN_BLEND)
-        v |= R_ALPHA_BLEND_ENABLE | R_SEPARATE_ALPHA_ENABLE;
+        v |= R_ALPHA_BLEND_ENABLE | c->blend_x * R_SEPARATE_ALPHA_ENABLE;    /* blend_x: 0 or 1 */
     if (c->color_mask != 0xf)
         v |= R_PLANE_MASK_ENABLE;
     if ((c->enables & EN_DITHER) && (c->target.color_format == R_COLOR_FORMAT_RGB565

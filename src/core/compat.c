@@ -68,6 +68,9 @@ void Compat_Enable(struct Core *c, ULONG cap, ULONG on)
         case MGL_ARRAY_TRANSFORMATIONS:     /* stored and answered, as 29.1 does */
             flag = &c->array_xform;
             break;
+        case GL_SHARED_TEXTURE_PALETTE_EXT: /* the one palette serves anyway: stored */
+            flag = &c->shared_pal;
+            break;
         default:
             Core_Error(c, GL_INVALID_ENUM);
             return;
@@ -90,6 +93,7 @@ ULONG Compat_IsEnabled(struct Core *c, ULONG cap)
         case GL_POLYGON_OFFSET_LINE:    return c->poly_offset_line;
         case GL_POLYGON_OFFSET_POINT:   return c->poly_offset_point;
         case MGL_ARRAY_TRANSFORMATIONS: return c->array_xform;
+        case GL_SHARED_TEXTURE_PALETTE_EXT: return c->shared_pal;
     }
     Core_Error(c, GL_INVALID_ENUM);
     return 0;
@@ -238,6 +242,7 @@ static ULONG QueryX(struct Core *c, ULONG pname, float *v)
         case MGL_Z_OFFSET:
         case MGL_PERSPECTIVE_MAPPING:
         case MGL_ARRAY_TRANSFORMATIONS:
+        case GL_SHARED_TEXTURE_PALETTE_EXT:
             v[0] = (float) Core_IsEnabled(c, pname);
             return 1;
     }
@@ -483,7 +488,7 @@ static ULONG ToByte(const UBYTE *p, ULONG type, ULONG swap)
 static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
                     const void **pixels, ULONG *size)
 {
-    ULONG packed, plain;
+    ULONG packed, plain, index;
     ULONG s, n, l, k, a;
     ULONG stride, rowbytes, row4;
     ULONG outfmt, outcpp;
@@ -495,8 +500,22 @@ static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
 
     if (*pixels == NULL || w < 1 || h < 1 || w > CORE_MAX_TEXSIZE || h > CORE_MAX_TEXSIZE)
         return NULL;
-    packed = Packed16(*format, *type);
-    if (packed)
+    index = (*format == GL_COLOR_INDEX) ? 1UL : 0UL;
+    packed = index ? 0UL : Packed16(*format, *type);
+    if (index)
+    {
+        /* through glColorTable's palette, as 29.1: unsigned bytes only, and
+         * refused (nothing uploaded) before a palette was given */
+        if (*type != GL_UNSIGNED_BYTE || c->pal_size == 0)
+        {
+            Core_Error(c, (*type != GL_UNSIGNED_BYTE) ? GL_INVALID_ENUM : GL_INVALID_OPERATION);
+            *size = 1;                      /* said: the caller uploads nothing */
+            return NULL;
+        }
+        s = 1;
+        n = 1;
+    }
+    else if (packed)
     {
         s = 2;
         n = 1;
@@ -508,8 +527,8 @@ static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
         if (s == 0 || n == 0)
             return NULL;
     }
-    plain = packed || (*type == GL_UNSIGNED_BYTE && *format != GL_RED && *format != GL_GREEN
-                       && *format != GL_BLUE);
+    plain = !index && (packed || (*type == GL_UNSIGNED_BYTE && *format != GL_RED
+                                  && *format != GL_GREEN && *format != GL_BLUE));
     /* GL 1.1 3.6.3: a row is k elements of s bytes */
     l = c->unpack_row ? c->unpack_row : (ULONG) w;
     a = c->unpack_align;
@@ -554,10 +573,12 @@ static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
         return out;
     }
     /* every component to an unsigned byte; GL_RED, GL_GREEN and GL_BLUE as
-     * RGB with the other two 0 (GL 1.1 3.6.4: then alpha 1) */
-    ch = (*format == GL_RED) ? 0UL : (*format == GL_GREEN) ? 1UL : (*format == GL_BLUE) ? 2UL : 3UL;
-    outfmt = (ch < 3) ? GL_RGB : *format;
-    outcpp = (ch < 3) ? 3UL : n;
+     * RGB with the other two 0 (GL 1.1 3.6.4: then alpha 1); an index as
+     * its palette entry, RGBA (past the palette's end opaque black) */
+    ch = index ? 4UL : (*format == GL_RED) ? 0UL : (*format == GL_GREEN) ? 1UL
+       : (*format == GL_BLUE) ? 2UL : 3UL;
+    outfmt = index ? GL_RGBA : (ch < 3) ? GL_RGB : *format;
+    outcpp = index ? 4UL : (ch < 3) ? 3UL : n;
     row4 = (outcpp * (ULONG) w + 3) & ~3UL;
     *size = row4 * (ULONG) h;
     out = (UBYTE *) c->env.alloc(c->env.env, *size);
@@ -572,7 +593,23 @@ static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
         o = out + j * row4;
         for (i = 0; i < (ULONG) w; i++)
         {
-            if (ch < 3)
+            if (ch == 4)
+            {
+                q = p[0];
+                if (q < c->pal_size)
+                {
+                    o[0] = c->pal[q * 4];
+                    o[1] = c->pal[q * 4 + 1];
+                    o[2] = c->pal[q * 4 + 2];
+                    o[3] = c->pal[q * 4 + 3];
+                }
+                else
+                {
+                    o[0] = o[1] = o[2] = 0;
+                    o[3] = 255;
+                }
+            }
+            else if (ch < 3)
             {
                 o[0] = o[1] = o[2] = 0;
                 o[ch] = (UBYTE) ToByte(p, *type, c->unpack_swap);
@@ -595,7 +632,7 @@ static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
  * unpack state -- straight on, before anything else (a few instructions:
  * GLQuake's lightmap uploads, every frame) */
 #define UPLOAD_PLAIN(c, format, type) ((c)->unpack_plain && (type) == GL_UNSIGNED_BYTE \
-                                       && ((format) < GL_RED || (format) > GL_BLUE))
+                                       && ((format) < GL_COLOR_INDEX || (format) > GL_BLUE))
 
 void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
                       LONG w, LONG h, LONG border, ULONG format, ULONG type,
@@ -609,10 +646,15 @@ void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
         Core_TexImage2D(c, target, level, internal, w, h, border, format, type, pixels);
         return;
     }
+    /* EXT_paletted_texture's internal format: stored as what the palette
+     * holds, the indices being expanded at upload (29.1 keeps no indices either) */
+    if (format == GL_COLOR_INDEX && ((ULONG) internal == GL_COLOR_INDEX8_EXT
+                                     || (ULONG) internal == GL_COLOR_INDEX))
+        internal = (c->pal_base == GL_RGB || c->pal_base == GL_LUMINANCE) ? (LONG) GL_RGB : (LONG) GL_RGBA;
     size = 0;
     tmp = Unpack(c, w, h, &format, &type, &pixels, &size);
     if (tmp == NULL && size != 0)
-        return;                             /* out of memory, said */
+        return;                             /* out of memory or refused, said */
     Core_TexImage2D(c, target, level, internal, w, h, border, format, type, pixels);
     if (tmp != NULL)
         c->env.free(c->env.env, tmp, size);
@@ -1471,18 +1513,18 @@ void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float o
 }
 
 /* --- glBlendEquation, glBlendFuncSeparate ---------------------------------------------------
- * The R200 blends colour by CBLENDCNTL and alpha by ABLENDCNTL (RB3D_CNTL's
- * SEPARATE_ALPHA_ENABLE, set whenever blending is on: hwstate.c). They
- * hold BLENDCNTL's value until a program sets an equation other than
- * GL_FUNC_ADD or alpha factors of their own; then blend_x sends D_BLEND
- * here. As Mesa's r200: GL_MIN and GL_MAX take factors ONE, ONE (GL
+ * The R200 blends colour by CBLENDCNTL and alpha by ABLENDCNTL once RB3D_CNTL's
+ * SEPARATE_ALPHA_ENABLE is set -- hwstate.c sets it only with blend_x, i.e.
+ * once a program set an equation other than GL_FUNC_ADD or alpha factors
+ * of their own; then D_BLEND comes here too. Otherwise all three registers
+ * hold one value, as in 0.9. As Mesa's r200: GL_MIN and GL_MAX take factors ONE, ONE (GL
  * ignores the factors for them). */
 
 static void BlendX(struct Core *c)
 {
     c->blend_x = (c->blend_sep || c->blend_eq_rgb != GL_FUNC_ADD || c->blend_eq_a != GL_FUNC_ADD)
                ? 1UL : 0UL;
-    c->dirty |= D_BLEND;
+    c->dirty |= D_BLEND | D_RB3D;           /* RB3D_CNTL's SEPARATE_ALPHA_ENABLE follows blend_x */
 }
 
 static ULONG BlendFcn(ULONG eq)
@@ -1580,5 +1622,131 @@ void Compat_EmitBlend(struct Core *c)
     (void) R2E_Reg(c->cs, R_RB3D_BLENDCNTL, cb);
     (void) R2E_Reg(c->cs, R_RB3D_ABLENDCNTL, ab);
     (void) R2E_Reg(c->cs, R_RB3D_CBLENDCNTL, cb);
+}
+
+/* --- glColorTable: the palette GL_COLOR_INDEX uploads expand through -------------------------
+ * As 29.1: one palette a context, for all three targets (GL_COLOR_TABLE,
+ * GL_SHARED_TEXTURE_PALETTE_EXT, and GL_TEXTURE_2D, EXT_paletted_texture's);
+ * each entry kept as R, G, B, A in the form the texel takes (the source's
+ * missing components GL's defaults, then the internal format's base);
+ * an index image is expanded at upload and not kept, so a palette changed
+ * later does not reach textures already made. A GL_RGBA source is read
+ * A, R, G, B: MiniGL's order, which 29.1 keeps on purpose for its callers. */
+
+static ULONG PalBase(ULONG internal)
+{
+    switch (internal)
+    {
+        case GL_ALPHA: case GL_ALPHA8:                          return GL_ALPHA;
+        case 1: case GL_LUMINANCE: case GL_LUMINANCE8:          return GL_LUMINANCE;
+        case 2: case GL_LUMINANCE_ALPHA: case GL_LUMINANCE8_ALPHA8:
+                                                                return GL_LUMINANCE_ALPHA;
+        case GL_INTENSITY: case GL_INTENSITY8:                  return GL_INTENSITY;
+        case 3: case GL_RGB: case GL_RGB5: case GL_RGB8:        return GL_RGB;
+        case 4: case GL_RGBA: case GL_RGB5_A1: case GL_RGBA8:   return GL_RGBA;
+    }
+    return 0;
+}
+
+void Core_ColorTable(struct Core *c, ULONG target, ULONG internal, LONG width, ULONG format,
+                     ULONG type, const void *data)
+{
+    ULONG base, n, s, i;
+    ULONG r, g, b, a;
+    const UBYTE *p;
+    UBYTE *o;
+
+    if (IN_BEGIN(c))
+    {
+        Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (target != GL_COLOR_TABLE && target != GL_SHARED_TEXTURE_PALETTE_EXT && target != GL_TEXTURE_2D)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if (width < 0 || width > 256 || (width > 0 && data == NULL))
+    {
+        Core_Error(c, GL_INVALID_VALUE);
+        return;
+    }
+    base = PalBase(internal);
+    n = (format == GL_COLOR_INDEX) ? 0UL : FormatComps(format);
+    s = TypeBytes(type);
+    if (base == 0 || n == 0 || s == 0)
+    {
+        Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if (c->pal == NULL)
+    {
+        /* 1 KB only for a program that uses a palette (in struct Core it
+         * moved what follows the context: GLQuake 0.1 s, 2026-11-08) */
+        c->pal = (UBYTE *) c->env.alloc(c->env.env, 256 * 4);
+        if (c->pal == NULL)
+        {
+            Core_Error(c, GL_OUT_OF_MEMORY);
+            return;
+        }
+    }
+    p = (const UBYTE *) data;
+    o = c->pal;
+    for (i = 0; i < (ULONG) width; i++)
+    {
+        r = g = b = 0;
+        a = 255;
+        switch (format)
+        {
+            case GL_RED:    r = ToByte(p, type, 0); break;
+            case GL_GREEN:  g = ToByte(p, type, 0); break;
+            case GL_BLUE:   b = ToByte(p, type, 0); break;
+            case GL_ALPHA:  a = ToByte(p, type, 0); break;
+            case GL_LUMINANCE:
+                r = g = b = ToByte(p, type, 0);
+                break;
+            case GL_LUMINANCE_ALPHA:
+                r = g = b = ToByte(p, type, 0);
+                a = ToByte(p + s, type, 0);
+                break;
+            case GL_RGB:
+                r = ToByte(p, type, 0);
+                g = ToByte(p + s, type, 0);
+                b = ToByte(p + 2 * s, type, 0);
+                break;
+            default:        /* GL_RGBA: A, R, G, B (MiniGL's order) */
+                a = ToByte(p, type, 0);
+                r = ToByte(p + s, type, 0);
+                g = ToByte(p + 2 * s, type, 0);
+                b = ToByte(p + 3 * s, type, 0);
+                break;
+        }
+        switch (base)
+        {
+            case GL_ALPHA:              r = g = b = 255; break;
+            case GL_LUMINANCE:          g = b = r; a = 255; break;
+            case GL_LUMINANCE_ALPHA:    g = b = r; break;
+            case GL_INTENSITY:          g = b = a = r; break;
+            case GL_RGB:                a = 255; break;
+        }
+        o[0] = (UBYTE) r;
+        o[1] = (UBYTE) g;
+        o[2] = (UBYTE) b;
+        o[3] = (UBYTE) a;
+        o += 4;
+        p += n * s;
+    }
+    c->pal_size = (ULONG) width;
+    c->pal_base = base;
+}
+
+void Compat_Free(struct Core *c)
+{
+    if (c->pal != NULL)
+    {
+        c->env.free(c->env.env, c->pal, 256 * 4);
+        c->pal = NULL;
+    }
+    c->pal_size = 0;
 }
 

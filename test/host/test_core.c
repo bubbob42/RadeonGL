@@ -969,6 +969,47 @@ static void test_compat(void)
     Core_PixelStore(&core, GL_UNPACK_ROW_LENGTH, 0);
     Core_PixelStore(&core, GL_UNPACK_SKIP_PIXELS, 0);
     Core_PixelStore(&core, GL_UNPACK_SKIP_ROWS, 0);
+    /* glColorTable and GL_COLOR_INDEX uploads (29.1's paletted textures):
+     * indices expanded through the palette, past its end opaque black */
+    {
+        static const UBYTE pal3[3 * 3] = { 10, 20, 30, 40, 50, 60, 70, 80, 90 };
+        static const UBYTE pal4[2 * 4] = { 0x80, 1, 2, 3, 0x40, 4, 5, 6 };    /* A, R, G, B */
+        static const UBYTE idx[8] = { 0, 1, 0xee, 0xee, 2, 9, 0xee, 0xee };   /* rows of 4 */
+
+        Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, idx);
+        CHECK_INT(Core_GetError(&core), GL_INVALID_OPERATION);     /* no palette yet */
+        Core_ColorTable(&core, GL_COLOR_TABLE, GL_RGB, 3, GL_RGB, GL_UNSIGNED_BYTE, pal3);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, idx);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_HEX(Texel(t, 0, 0, 0), 0xff0a141eUL);
+        CHECK_HEX(Texel(t, 0, 1, 0), 0xff28323cUL);
+        CHECK_HEX(Texel(t, 0, 0, 1), 0xff46505aUL);
+        CHECK_HEX(Texel(t, 0, 1, 1), 0xff000000UL);                /* index 9 of 3 */
+        Core_ColorTable(&core, GL_SHARED_TEXTURE_PALETTE_EXT, GL_RGBA, 2, GL_RGBA, GL_UNSIGNED_BYTE, pal4);
+        Core_TexSubImage2DX(&core, GL_TEXTURE_2D, 0, 0, 0, 2, 1, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, idx);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_HEX(Texel(t, 0, 0, 0), 0x80010203UL);
+        CHECK_HEX(Texel(t, 0, 1, 0), 0x40040506UL);
+        CHECK_HEX(Texel(t, 0, 0, 1), 0xff46505aUL);                /* the sub image's one row */
+        /* EXT_paletted_texture's internal format: stored as the palette's base */
+        Core_ColorTable(&core, GL_TEXTURE_2D, GL_RGB, 3, GL_RGB, GL_UNSIGNED_BYTE, pal3);
+        Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT, 2, 2, 0, GL_COLOR_INDEX,
+                         GL_UNSIGNED_BYTE, idx);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_INT(t->base, GL_RGB);
+        Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_COLOR_INDEX, GL_FLOAT, idx);
+        CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+        Core_ColorTable(&core, GL_COLOR_TABLE, GL_RGB, 257, GL_RGB, GL_UNSIGNED_BYTE, pal3);
+        CHECK_INT(Core_GetError(&core), GL_INVALID_VALUE);
+        Core_ColorTable(&core, GL_TEXTURE_1D, GL_RGB, 3, GL_RGB, GL_UNSIGNED_BYTE, pal3);
+        CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
+        Core_Enable(&core, GL_SHARED_TEXTURE_PALETTE_EXT, 1);
+        CHECK_INT(Core_IsEnabled(&core, GL_SHARED_TEXTURE_PALETTE_EXT), 1);
+        Core_Enable(&core, GL_SHARED_TEXTURE_PALETTE_EXT, 0);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK(strstr(CORE_EXTENSIONS RGL_PALETTE_EXTENSIONS, "GL_EXT_shared_texture_palette") != NULL);
+    }
     Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 1, 0, GL_RGBA, GL_FLOAT, fl);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
     CHECK_HEX(Texel(t, 0, 0, 0), 0xff0080ffUL);     /* 0, 0.5, 1, 2 -> 00 80 ff ff */
@@ -1396,7 +1437,7 @@ static void test_state(void)
     v = LastReg(R_RB3D_CNTL);
     CHECK(v & R_Z_ENABLE);
     CHECK(v & R_ALPHA_BLEND_ENABLE);
-    CHECK(v & R_SEPARATE_ALPHA_ENABLE);
+    CHECK(!(v & R_SEPARATE_ALPHA_ENABLE));      /* only for equations / separate factors */
     CHECK(v & R_PLANE_MASK_ENABLE);
     CHECK_HEX(LastReg(R_RB3D_PLANEMASK), 0xffe0UL);  /* RGB565 without blue */
     CHECK_HEX(LastReg(R_RB3D_BLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
@@ -1408,6 +1449,7 @@ static void test_state(void)
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
     Draw1();
     CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK(LastReg(R_RB3D_CNTL) & R_SEPARATE_ALPHA_ENABLE);
     CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), R_COMB_FCN_RSUB_CLAMP | (R_BLEND_GL_SRC_ALPHA << 16)
               | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
     CHECK_HEX(LastReg(R_RB3D_BLENDCNTL), LastReg(R_RB3D_CBLENDCNTL));
@@ -1435,6 +1477,7 @@ static void test_state(void)
     Core_BlendFunc(&core, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     CHECK_INT((LONG) core.blend_x, 0);
     Draw1();
+    CHECK(!(LastReg(R_RB3D_CNTL) & R_SEPARATE_ALPHA_ENABLE));
     CHECK_HEX(LastReg(R_RB3D_BLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
     CHECK_HEX(LastReg(R_RB3D_CBLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
     CHECK_HEX(LastReg(R_RB3D_ABLENDCNTL), (R_BLEND_GL_SRC_ALPHA << 16) | (R_BLEND_GL_ONE_MINUS_SRC_ALPHA << 24));
