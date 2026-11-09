@@ -125,27 +125,35 @@ accepted without effect). Not there yet:
 
 [GLQuake for R200 68k](https://github.com/bubbob42/RadeonGL-GLQuake), the
 RadeonGL edition of GLQuake for `minigl.library` (a separate project and
-archive, latest [release 1.3](https://github.com/bubbob42/RadeonGL-GLQuake/releases/tag/v1.3)): 1.2's timedemos (all
+archive, [release 1.3](https://github.com/bubbob42/RadeonGL-GLQuake/releases/tag/v1.3)): its timedemos (all
 frames, no sound) on the test machine, an A4000D with a 68060 at 50 MHz on
 a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6,
-RadeonGL 0.8 with its command check off (`RadeonGLCheck=0`, as GLQuake's
-start window sets it) and vertical sync off. Frames a second:
+RadeonGL 0.11 with its command check off (`RadeonGLCheck=0`, as GLQuake's
+start window sets it) and vertical sync off; 9 November 2026, each the
+mean of three runs at different load addresses. Frames a second:
 
 | Demo | 320 x 240 | 640 x 480 | 1280 x 720 |
 |---|---:|---:|---:|
-| demo1 | 33.5 | 32.5 | 32.9 |
-| demo2 | 30.6 | | 26.0 |
-| demo3 | 28.9 | | 27.5 |
+| demo1 | 33.0 | 32.2 | 31.1 |
+| demo2 | 29.6 | | 28.4 |
+| demo3 | 28.6 | | 25.4 |
 
-GLQuake 1.3 (9 November 2026) brings back the textures under water: 1.2
-drew those surfaces from misread vertices (a compiler fault). demo2 in
-1.3: 29.8 fps at 320 x 240 and 28.3 at 1280 x 720, against 1.2's 29.5 and
-24.6 in the same series on RadeonGL 0.11 -- 15% faster at 1280 x 720.
+GLQuake 1.3 brings back the textures under water: 1.2 drew those surfaces
+from misread vertices (a compiler fault). demo2 in 1.3: 29.8 fps at
+320 x 240 and 28.3 at 1280 x 720, against 1.2's 29.5 and 24.6 in the same
+series on RadeonGL 0.11 -- 15% faster at 1280 x 720. GLQuake 1.2 on
+RadeonGL 0.8 (7 November): demo1 33.5 / 32.5 / 32.9, demo2 30.6 / 26.0,
+demo3 28.9 / 27.5.
 
-RadeonGL 0.11 runs them as fast as 0.9: demo1 at 320 x 240, without
-vertical sync and averaged over six load addresses, took 29.44 seconds
-against 29.39. Where the library lands in memory alone moves a run by
-about a tenth of a second, so a single run decides nothing.
+Where code lands in memory matters as much as what it does. GLQuake runs
+about 1.5% slower on 0.11 than on 0.8 (demo1 at 320 x 240, interleaved:
+29.53 against 29.03 seconds), yet profiles show the same work in the
+library and an unchanged routine taking twice the time at another
+address: the library grew from 118 to 191 KB, its hot code moved, and on
+the 68060's 8 KB caches GLQuake's and the library's hot code collide more.
+A change that only moved data cost 0.8% by itself. The machine also
+varies by a few per cent from one session to the next, so a single run,
+or figures from different days, decide nothing.
 
 - The same timedemos with the Aminet source (built for the 68060) on
   RadeonGL 0.6: demo1 24.4 / 23.7 / 23.3, demo2 21.7 / - / 17.9,
