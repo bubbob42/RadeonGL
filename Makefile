@@ -1114,6 +1114,13 @@ $(RGL_LIB): $(RGL_OBJS)
 	$(GCC_CC) -nostdlib -nostartfiles -nodefaultlibs -noixemul -m68060 -m68881 -o $@ $(RGL_OBJS) -lgcc \
 	    -Wl,-Map=build/rgl/minigl.map
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+	PREFIX=$(PREFIX) $(PYTHON) -I tools/hot_layout.py build/rgl/minigl.map tools/hot_layout.ref
+
+# After a GLQuake A/B accepted a build whose hot code moved: its offsets
+# become the reference tools/hot_layout.py compares with.
+.PHONY: hot-layout-ref
+hot-layout-ref: $(RGL_LIB)
+	PREFIX=$(PREFIX) $(PYTHON) -I tools/hot_layout.py build/rgl/minigl.map tools/hot_layout.ref --update
 
 .PHONY: rgl-lib
 rgl-lib: $(RGL_LIB)
