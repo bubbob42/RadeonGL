@@ -747,6 +747,12 @@ dist/Probe/C/ExecMap: build/probe/execmap.o
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# MemMap: every memory region with its priority, free bytes, largest free
+# chunk and number of chunks (where big allocations can still go)
+dist/Probe/C/MemMap: build/probe/memmap.o
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 # CxBreak quits the Blanker / DPMSManager commodities before a test
 dist/Probe/C/CxBreak: build/probe/cxbreak.o
 	@mkdir -p dist/Probe/C
@@ -847,6 +853,10 @@ dist/Probe/C/ExecMap_sasc: build/probe-sasc/execmap.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/MemMap_sasc: build/probe-sasc/memmap.o | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 dist/Probe/C/CxBreak_sasc: build/probe-sasc/cxbreak.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -877,7 +887,7 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
         dist/Probe/C/LockBench dist/Probe/C/BmFit dist/Probe/C/ExecMap dist/Probe/C/MemBench \
         dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
         dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc dist/Probe/C/BmFit_sasc \
-        dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc \
+        dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc dist/Probe/C/MemMap dist/Probe/C/MemMap_sasc \
         dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc dist/Probe/C/RadeonStat dist/Probe/C/RadeonStat_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
