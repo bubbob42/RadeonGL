@@ -309,7 +309,8 @@ Ein Bildschirm mit 24 Bit (R8G8B8, B8G8R8) oder 8 Bit nimmt kein
 GL-Fenster: Die Radeon kann in diesen Formaten nicht zeichnen. Ein solches
 Programm bekommt keinen Requester; die @{" Protokolldatei " link Log}
 nennt den Grund. Ein Fenster- oder Bitmap-Kontext beginnt mit 8 MB
-Texturspeicher (RadeonGLHeapMax stellt weniger ein).
+Texturspeicher; RadeonGLHeapMax stellt eine andere Größe ein, 2 bis 16 MB
+(GLQuake im Fenster braucht etwa 9: SetEnv RadeonGLHeapMax 12).
 
 Über DVI zeigten Modi mit einem Pixeltakt über etwa 110 MHz (1680 x 1050
 und größer bei 60 Hz) auf dem Testrechner Punkte oder setzten aus,

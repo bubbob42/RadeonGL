@@ -2366,7 +2366,10 @@ static ULONG OpenWindowKind(struct Card *k, struct Window *win, ULONG own, const
     k->width = w;
     k->height = h;
     k->heap_top = (o != NULL && o->heap_top >= (2UL << 20)) ? o->heap_top : (8UL << 20);
-    if (Card_HeapMax >= 2 && (Card_HeapMax << 20) < k->heap_top)
+    /* RadeonGLHeapMax sets a window's or bitmap's heap either way, 2 to 16
+     * MB (2026-11-09: GLQuake's demo1 needs about 8.7 MB; in a window its
+     * 8 MB refused 19 textures). Unset: 8 MB, room for three (Trio). */
+    if (Card_HeapMax >= 2)
         k->heap_top = Card_HeapMax << 20;
     if (k->heap_top > (16UL << 20))
         k->heap_top = 16UL << 20;
@@ -2562,8 +2565,8 @@ static ULONG CardOpenBitMap(struct Card *k, struct BitMap *bm, const struct Card
             k->width = w;
             k->height = h;
             k->heap_top = (o != NULL && o->heap_top >= (2UL << 20)) ? o->heap_top : (8UL << 20);
-            if (Card_HeapMax >= 2 && (Card_HeapMax << 20) < k->heap_top)
-                k->heap_top = Card_HeapMax << 20;
+            if (Card_HeapMax >= 2)
+                k->heap_top = Card_HeapMax << 20;   /* either way, as a window's */
             if (k->heap_top > (16UL << 20))
                 k->heap_top = 16UL << 20;
             k->heap_top &= ~((2UL << 20) - 1);

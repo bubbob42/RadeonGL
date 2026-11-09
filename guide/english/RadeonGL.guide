@@ -288,7 +288,8 @@ R5G6B5PC, B8G8R8A8):
 A 24-bit (R8G8B8, B8G8R8) or 8-bit screen takes no GL window: the Radeon
 cannot draw in those formats. Such a program gets no requester; the
 @{" log file " link Log} says why. A window or bitmap context starts with
-8 MB of texture memory (RadeonGLHeapMax sets less).
+8 MB of texture memory; RadeonGLHeapMax sets another size, 2 to 16 MB
+(GLQuake in a window needs about 9: SetEnv RadeonGLHeapMax 12).
 
 Over DVI, modes with a pixel clock above about 110 MHz (1680 x 1050 and
 larger at 60 Hz) showed dots or dropped out on the test machine while the
