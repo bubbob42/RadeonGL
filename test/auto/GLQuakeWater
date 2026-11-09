@@ -1,0 +1,46 @@
+; GLQuakeWater -- GLQuake's demo2 (E1M4, the Grisly Grotto: the player goes
+; under water) against the RadeonGL minigl.library on the null card, four
+; times, each run dumping one frame (RadeonGLDump: 200, 400, 600, 800) to
+; DEV:Test/water-f<n>.r2d for build/host/r200view: the user saw textures
+; missing under water (2026-11-09) where a Voodoo shows them.
+; Needs: gmake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 1000000
+Delete >NIL: DEV:Test/water-#? QUIET
+CD DEV:Quake
+Assign LIBS: DEV:Libs/RadeonGL ADD
+SetEnv RadeonGLDumpFile DEV:Test/water-f200.r2d
+SetEnv RadeonGLDump 200
+SetEnv RadeonGLLog DEV:Test/water-f200-lib.log
+Echo "=== frame 200 ===" >>DEV:Test/auto.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo demo2 >DEV:Test/water-f200.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+SetEnv RadeonGLDumpFile DEV:Test/water-f400.r2d
+SetEnv RadeonGLDump 400
+SetEnv RadeonGLLog DEV:Test/water-f400-lib.log
+Echo "=== frame 400 ===" >>DEV:Test/auto.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo demo2 >DEV:Test/water-f400.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+SetEnv RadeonGLDumpFile DEV:Test/water-f600.r2d
+SetEnv RadeonGLDump 600
+SetEnv RadeonGLLog DEV:Test/water-f600-lib.log
+Echo "=== frame 600 ===" >>DEV:Test/auto.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo demo2 >DEV:Test/water-f600.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+SetEnv RadeonGLDumpFile DEV:Test/water-f800.r2d
+SetEnv RadeonGLDump 800
+SetEnv RadeonGLLog DEV:Test/water-f800-lib.log
+Echo "=== frame 800 ===" >>DEV:Test/auto.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +timedemo demo2 >DEV:Test/water-f800.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+UnSetEnv RadeonGLLog
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Type DEV:Test/water-f800-lib.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

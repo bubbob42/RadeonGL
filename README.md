@@ -124,8 +124,8 @@ accepted without effect). Not there yet:
 ## GLQuake benchmarks
 
 [GLQuake for R200 68k](https://github.com/bubbob42/RadeonGL-GLQuake), the
-RadeonGL edition of GLQuake for `minigl.library` (1.2, a separate project
-and archive, [release](https://github.com/bubbob42/RadeonGL-GLQuake/releases/tag/v1.2)): its timedemos (all
+RadeonGL edition of GLQuake for `minigl.library` (a separate project and
+archive, latest [release 1.3](https://github.com/bubbob42/RadeonGL-GLQuake/releases/tag/v1.3)): 1.2's timedemos (all
 frames, no sound) on the test machine, an A4000D with a 68060 at 50 MHz on
 a CyberStorm MK II, Mediator, Radeon 9200, AmigaOS 3.2, Picasso96 3.6,
 RadeonGL 0.8 with its command check off (`RadeonGLCheck=0`, as GLQuake's
@@ -136,6 +136,11 @@ start window sets it) and vertical sync off. Frames a second:
 | demo1 | 33.5 | 32.5 | 32.9 |
 | demo2 | 30.6 | | 26.0 |
 | demo3 | 28.9 | | 27.5 |
+
+GLQuake 1.3 (9 November 2026) brings back the textures under water: 1.2
+drew those surfaces from misread vertices (a compiler fault). demo2 in
+1.3: 29.8 fps at 320 x 240 and 28.3 at 1280 x 720, against 1.2's 29.5 and
+24.6 in the same series on RadeonGL 0.11 -- 15% faster at 1280 x 720.
 
 RadeonGL 0.11 runs them as fast as 0.9: demo1 at 320 x 240, without
 vertical sync and averaged over six load addresses, took 29.44 seconds

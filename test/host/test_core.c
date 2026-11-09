@@ -2851,6 +2851,85 @@ static ULONG VfDraw(ULONG fast, ULONG mode, ULONG nv, ULONG base, ULONG *out)
     return n;
 }
 
+/* 2026-11-09, GLQuake's underwater surfaces (gl_rsurf.c, the warped branch):
+ * a fan of glMultiTexCoord2fv x 2 + glVertex3fv. Every record of the
+ * stream must hold its own vertex: x, y, z, colour, s0, t0, s1, t1. */
+static void test_vertex_fan2(void)
+{
+    static UBYTE pix[16 * 16 * 3];
+    ULONG swap, fast, i, k, at, bad, want, got, x, y, z;
+    float f, g;
+
+    bad = 0;
+    for (swap = 0; swap < 2; swap++)
+        for (fast = 0; fast < 2; fast++)
+        {
+            Fresh(swap);
+            Core_ActiveTexture(&core, GL_TEXTURE1_ARB);
+            Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, pix);
+            Core_Enable(&core, GL_TEXTURE_2D, 1);
+            Core_ActiveTexture(&core, GL_TEXTURE0_ARB);
+            Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, pix);
+            Core_Enable(&core, GL_TEXTURE_2D, 1);
+            at = (ULONG) (cs.ptr - stream);
+            Core_Begin(&core, GL_TRIANGLE_FAN);
+            for (i = 0; i < 7; i++)
+            {
+                f = 10.0f + (float) i;
+                g = f + 0.5f;
+                CORE_TEXCOORD_BITS(&core, 0, R2_FBITS(f), R2_FBITS(g));
+                f = 30.0f + (float) i;
+                g = f + 0.5f;
+                CORE_TEXCOORD_BITS(&core, 1, R2_FBITS(f), R2_FBITS(g));
+                f = 100.0f + (float) i;
+                x = R2_FBITS(f);
+                f = 200.0f + (float) i;
+                y = R2_FBITS(f);
+                f = 300.0f + (float) i;
+                z = R2_FBITS(f);
+                if (fast)
+                    CORE_VERTEX_FAST(&core, x, y, z);
+                else
+                    Core_VertexBits(&core, x, y, z);
+            }
+            Core_End(&core);
+            /* the first record: where x = 100.0 is */
+            f = 100.0f;
+            want = R2_FBITS(f);
+            if (swap)
+                R2_SWAPI(want);
+            for (k = at; k < (ULONG) (cs.ptr - stream) && stream[k] != want; k++)
+                ;
+            for (i = 0; i < 7; i++)
+            {
+                static const float base[8] = { 100.0f, 200.0f, 300.0f, 0.0f, 10.0f, 10.5f, 30.0f, 30.5f };
+                ULONG j;
+
+                for (j = 0; j < 8; j++)
+                {
+                    if (j == 3)
+                        continue;   /* the colour */
+                    f = base[j] + (float) i;
+                    want = R2_FBITS(f);
+                    got = stream[k + i * 8 + j];
+                    if (swap)
+                        R2_SWAPI(got);
+                    if (got != want)
+                    {
+                        if (bad < 6)
+                            printf("  fan2: swap %lu fast %lu vertex %lu dword %lu: %08lx, want %08lx\n",
+                                   (unsigned long) swap, (unsigned long) fast, (unsigned long) i,
+                                   (unsigned long) j, (unsigned long) got, (unsigned long) want);
+                        bad++;
+                    }
+                }
+            }
+        }
+    CHECK_INT(bad, 0);
+}
+
 static void test_vertex_fast(void)
 {
     static UBYTE pix[16 * 16 * 3];
@@ -4238,6 +4317,7 @@ int main(void)
     test_shadow_equivalence();
     test_vertex_bits();
     test_vertex_fast();
+    test_vertex_fan2();
     test_matrix_versions();
     test_color4f_repeat();
     test_matrices();
