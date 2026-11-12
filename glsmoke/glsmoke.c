@@ -15,7 +15,11 @@
  * Ctrl-C in the Shell) stops it early. A Shell program: started from the
  * Workbench it quits at once.
  *
- *   GLSmoke FRAMES/N,DEPTH/N,WIDTH/N,HEIGHT/N,NOSUB/S
+ *   GLSmoke FRAMES/N,DEPTH/N,WIDTH/N,HEIGHT/N,NOSUB/S,POLYMODE/K
+ *
+ * POLYMODE=LINE or POINT (2026-11-11): both shapes drawn with that
+ * glPolygonMode, back faces culled (both face the viewer), so the library's
+ * polygon-mode way runs every frame (test/auto/GLSmokePolyNull).
  *
  * The library writes its summary to RadeonGLLog (PROGDIR:radeongl.log by
  * default): flushes, presents, lock times, dropped frames, checker.
@@ -35,12 +39,12 @@
 #include <proto/minigl.h>
 
 #ifdef RGL_FOR_030
-static const char ver[] = "$VER: GLSmoke 0.1 (02.11.2026) for the 68020/68030";
+static const char ver[] = "$VER: GLSmoke 0.2 (11.11.2026) for the 68020/68030";
 #else
-static const char ver[] = "$VER: GLSmoke 0.1 (02.11.2026)";
+static const char ver[] = "$VER: GLSmoke 0.2 (11.11.2026)";
 #endif
 
-#define TEMPLATE "FRAMES/N,DEPTH/N,WIDTH/N,HEIGHT/N,NOSUB/S"
+#define TEMPLATE "FRAMES/N,DEPTH/N,WIDTH/N,HEIGHT/N,NOSUB/S,POLYMODE/K"
 
 struct Args
 {
@@ -49,11 +53,33 @@ struct Args
     LONG *width;
     LONG *height;
     LONG nosub;
+    STRPTR polymode;
 };
 
 #define TEX 64
 
 struct IntuitionBase *IntuitionBase = NULL;
+
+/* a with b, ASCII letters in either case */
+static BOOL SameWord(CONST_STRPTR a, const char *b)
+{
+    char x;
+    char y;
+
+    for (;;)
+    {
+        x = (char) *a++;
+        y = *b++;
+        if (x >= 'a' && x <= 'z')
+            x = (char) (x - 'a' + 'A');
+        if (y >= 'a' && y <= 'z')
+            y = (char) (y - 'a' + 'A');
+        if (x != y)
+            return FALSE;
+        if (x == 0)
+            return TRUE;
+    }
+}
 
 /* TRUE when Esc came in the library's window; every message replied */
 static BOOL EscPressed(struct Window *win)
@@ -170,6 +196,7 @@ int main(int argc, char **argv)
     args.width = NULL;
     args.height = NULL;
     args.nosub = 0;
+    args.polymode = NULL;
     rda = ReadArgs(TEMPLATE, (LONG *) &args, NULL);
     if (rda == NULL)
     {
@@ -222,6 +249,20 @@ int main(int argc, char **argv)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    if (args.polymode != NULL)
+    {
+        if (SameWord(args.polymode, "LINE"))
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        else if (SameWord(args.polymode, "POINT"))
+        {
+            glPolygonMode(GL_FRONT_AND_BACK, GL_POINT);
+            glPointSize(3.0f);
+        }
+        else
+            Printf("GLSmoke: POLYMODE is LINE or POINT; drawn filled\n");
+        glEnable(GL_CULL_FACE);
+        Printf("glPolygonMode %s, back faces culled\n", (LONG) args.polymode);
+    }
 
     DateStamp(&d0);
     for (f = 0; f < frames; f++)

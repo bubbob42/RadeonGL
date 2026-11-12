@@ -656,7 +656,7 @@ glquake glquake-data clean-glquake:
 
 # The GL core's modules (src/core): defined here, before the probe rules
 # that list them as prerequisites (those expand when the Makefile is read).
-CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen fog arraylit compat
+CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen fog arraylit compat polymode
 CORE_HDRS       := $(wildcard src/core/*.h)
 
 # --- Probes: the day-one tools for the real machine (docs/probes.md) --------
@@ -719,8 +719,11 @@ dist/Probe/C/R200Info: build/probe/r200info.o $(PROBE_OBJS)
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
 # RadeonStat (2026-11-08): a line a second -- GPU busy, CP lag, P96's free
-# card memory, the front screen's pixel clock; read-only
-dist/Probe/C/RadeonStat: build/probe/radeonstat.o $(PROBE_OBJS)
+# card memory, the front screen's pixel clock; read-only. Started from its
+# icon (or GUI) a ReAction window: rstatgui.c, rstatview.c (the readouts),
+# rstattt.c (the icon's tooltypes), rstat.c (the sampling, shared).
+RSTAT_MODS := rstat rstatgui rstatview rstattt
+dist/Probe/C/RadeonStat: build/probe/radeonstat.o $(addprefix build/probe/,$(addsuffix .o,$(RSTAT_MODS))) $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
@@ -750,6 +753,24 @@ dist/Probe/C/ExecMap: build/probe/execmap.o
 # MemMap: every memory region with its priority, free bytes, largest free
 # chunk and number of chunks (where big allocations can still go)
 dist/Probe/C/MemMap: build/probe/memmap.o
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
+# VoltLog: i2csensors voltages + temperatures ~10 times a second to the serial
+# port (RawPutChar), for the Pelt freeze vs. the Zorro 5 V line
+dist/Probe/C/VoltLog: build/probe/voltlog.o
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
+# VramProbe: video RAM beyond the P96 area through aperture 0 or 1, read and
+# (WRITE) pattern-written + restored inside a P96 lock, alias candidates checked
+dist/Probe/C/VramProbe: build/probe/vramprobe.o $(PROBE_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
+# RomDump: a PCI expansion ROM (address and size from `lspci verbose`) into
+# a file, read twice and compared, with the PCI ROM image checks
+dist/Probe/C/RomDump: build/probe/romdump.o
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
@@ -829,7 +850,7 @@ dist/Probe/C/R200Info_sasc: build/probe-sasc/r200info.o $(PROBE_SC_OBJS) | $(VAM
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
-dist/Probe/C/RadeonStat_sasc: build/probe-sasc/radeonstat.o $(PROBE_SC_OBJS) | $(VAMOSRC)
+dist/Probe/C/RadeonStat_sasc: build/probe-sasc/radeonstat.o $(addprefix build/probe-sasc/,$(addsuffix .o,$(RSTAT_MODS))) $(PROBE_SC_OBJS) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
@@ -854,6 +875,18 @@ dist/Probe/C/ExecMap_sasc: build/probe-sasc/execmap.o | $(VAMOSRC)
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
 dist/Probe/C/MemMap_sasc: build/probe-sasc/memmap.o | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
+dist/Probe/C/VoltLog_sasc: build/probe-sasc/voltlog.o | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
+dist/Probe/C/VramProbe_sasc: build/probe-sasc/vramprobe.o $(PROBE_SC_OBJS) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
+dist/Probe/C/RomDump_sasc: build/probe-sasc/romdump.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
@@ -888,6 +921,8 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
         dist/Probe/C/R200Info_sasc dist/Probe/C/BusBench_sasc dist/Probe/C/CPRing_sasc dist/Probe/C/Tri_sasc \
         dist/Probe/C/CxBreak_sasc dist/Probe/C/LockBench_sasc dist/Probe/C/BmFit_sasc \
         dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc dist/Probe/C/MemMap dist/Probe/C/MemMap_sasc \
+        dist/Probe/C/RomDump dist/Probe/C/RomDump_sasc dist/Probe/C/VramProbe dist/Probe/C/VramProbe_sasc \
+        dist/Probe/C/VoltLog dist/Probe/C/VoltLog_sasc \
         dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc dist/Probe/C/RadeonStat dist/Probe/C/RadeonStat_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
@@ -1009,7 +1044,7 @@ build/host/texscene.o: src/probe/texscene.c src/probe/texscene.h src/probe/trisc
 	@mkdir -p build/host
 	$(HOSTCC) $(HOST_MOD_CFLAGS) $(HOST_INC) -Isrc/core -c $< -o $@
 
-# GLBench's patterns on the host, for a native profiler (not part of `test`)
+# GLCost's patterns on the host, for a native profiler (not part of `test`)
 build/host/bench_core: build/host/bench_core.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
@@ -1027,10 +1062,17 @@ build/host/r200view: build/host/r200view.o build/host/r200sim.o
 	$(HOSTCC) $^ -o $@
 
 .PHONY: test
-test: build/host/test_r200 build/host/test_core build/host/test_sim build/host/r200view
+test: build/host/test_r200 build/host/test_core build/host/test_sim build/host/r200view build/host/test_flip
 	./build/host/test_r200
 	./build/host/test_core
 	./build/host/test_sim
+	./build/host/test_flip
+
+# triple buffering's bookkeeping (lib/cardflip_sm.h) against a model of the
+# display and the Radeon
+build/host/test_flip.o: lib/cardflip_sm.h
+build/host/test_flip: build/host/test_flip.o
+	$(HOSTCC) $^ -o $@
 
 R200_GCC_CFLAGS := $(GCC_WARNINGS) -O2 -std=gnu99 -m68020 -noixemul -fomit-frame-pointer -fno-strict-aliasing -Isrc/r200
 R200_GCC_OBJS   := $(addprefix build/r200-gcc/,$(addsuffix .o,$(R200_MODULES)))
@@ -1067,7 +1109,7 @@ build/core-sasc/%.o: src/core/%.c $(CORE_HDRS) $(R200_HDRS) | $(VAMOSRC)
 # stub that records GL_INVALID_OPERATION and the slot name for the log.
 # -m68060 -m68881 together (without -m68881 GCC 6.5 falls back to soft float).
 RGL_LIB    := dist/Libs/RadeonGL/minigl.library
-RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c | sort -u | paste -sd, -}
+RGL_HOOKS  := ${shell sed -n 's/^[A-Za-z].*[ *]Hook_\([A-Za-z0-9_]*\)(.*/\1/p' lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c lib/cardflip.c | sort -u | paste -sd, -}
 RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declaration \
               -O2 -fno-peephole2 -fomit-frame-pointer -fno-builtin -fno-tree-loop-distribute-patterns \
               -fno-strict-aliasing -m68060 -m68881 -DRGL_CPU_040 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl \
@@ -1079,7 +1121,7 @@ RGL_DEFS   ?=
 # functions and cost GLQuake ~0.8% (lib/rgllight.c, MEASURED 2026-11-07)
 # The 2026-11-07 modules (lighting, texgen, fog) likewise go after the hot
 # ones, so that GLQuake's code keeps its places.
-CORE_LATE  := light texgen fog arraylit compat
+CORE_LATE  := light texgen fog arraylit compat polymode
 # The dispatch object shrinks by a stub for every slot that becomes a hook
 # (the 29.1 calls of 2026-11-08: 708 bytes less), and the core in front of
 # core_vertex.o changed (hwstate.o +24, state.o -12). Its padding keeps
@@ -1088,22 +1130,27 @@ CORE_LATE  := light texgen fog arraylit compat
 # unchanged); check build/rgl/minigl.map against 0.9's after any change in
 # front of the core. (Most of the 1% GLQuake first lost to the 29.1 batch
 # was wrappers in front of glEnable and friends, not this layout: MEASURED,
-# see compat.c Compat_Enable.)
-RGL_DISPATCH_PAD := 968
+# see compat.c Compat_Enable.) 2026-11-12, the fast create: rgl.o -2412
+# (the buffered log), core_core.o +16: 968 + 2396. nullcard.o, card.o and
+# runtime.o sit in front of the pad and moved by rgl.o's change.
+# 2026-11-12, triple buffering merged (card.c, rgl.c grew 1772 bytes in
+# front of the pad; cardflip.o is linked last): 3364 - 1772.
+RGL_DISPATCH_PAD := 1592
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
               $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES))) \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_LATE))) \
-              build/rgl/rgllight.o build/rgl/rglread.o build/rgl/rglcompat.o build/rgl/rgldlist.o build/rgl/rglglut.o
+              build/rgl/rgllight.o build/rgl/rglread.o build/rgl/rglcompat.o build/rgl/rgldlist.o build/rgl/rglglut.o \
+              build/rgl/rgltable.o build/rgl/cardflip.o
 
-build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c Makefile
+build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c lib/cardflip.c Makefile
 	@mkdir -p build/rgl
 	$(PYTHON) -I tools/gen_dispatch.py $(MGL_DISPATCH) build/rgl/rgl_dispatch \
 	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' --pad $(RGL_DISPATCH_PAD) \
 	    --include rgl.h --hooks $(RGL_HOOKS)
 
-build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
+build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
                src/RadeonGL_rev.h
 	@mkdir -p build/rgl
 	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
@@ -1146,7 +1193,7 @@ RGL030_LIB    := dist/Libs/RadeonGL030/minigl.library
 RGL030_CFLAGS := $(filter-out -DRGL_CPU_040,$(subst -m68060,-m68030,$(RGL_CFLAGS)))
 RGL030_OBJS   := $(patsubst build/rgl/%,build/rgl030/%,$(RGL_OBJS))
 
-build/rgl030/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/nullcard.h lib/card.h build/rgl/rgl_dispatch.h $(CORE_HDRS) \
+build/rgl030/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) \
                   $(R200_HDRS) src/RadeonGL_rev.h
 	@mkdir -p build/rgl030
 	$(GCC_CC) $(RGL030_CFLAGS) -c $< -o $@
@@ -1194,12 +1241,12 @@ $(GLSMOKE030): glsmoke/glsmoke.c
 	    -I$(MGL_SDK_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu881.py $@
 
-GLBENCH := dist/GLSmoke/GLBench
+GLCOST := dist/GLSmoke/GLCost
 
-$(GLBENCH): glsmoke/glbench.c glsmoke/pcprof.c glsmoke/pcprof.h
+$(GLCOST): glsmoke/glcost.c glsmoke/pcprof.c glsmoke/pcprof.h
 	@mkdir -p dist/GLSmoke
 	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
-	    -I$(MGL_SDK_INC) -o $@ glsmoke/glbench.c glsmoke/pcprof.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	    -I$(MGL_SDK_INC) -o $@ glsmoke/glcost.c glsmoke/pcprof.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 # GLModes: the library's screen modes, a context from a mode, live resizes
@@ -1254,7 +1301,7 @@ $(GLGLUT): glsmoke/glglut.c
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLBENCH) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLCOST) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke
@@ -1270,6 +1317,7 @@ glsmoke: $(GLSMOKE) $(GLBENCH) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(G
 	@echo "glsmoke: staged DEV:GLSmoke (GLSmoke, Libs/minigl.library, RunGLSmoke)"
 
 include demos/demos.mk
+include glbench/glbench.mk
 
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a
@@ -1382,6 +1430,8 @@ REL_DRAWER_ICON := icons/release.info
 #       RadeonGL.info              the installed drawer's icon
 #       RadeonGL/                  -> <chosen drawer>/RadeonGL/
 #         the two manuals, Test and CardReport (IconX scripts, install/),
+#         RadeonStat (the card's load, memory and display in a window;
+#         a tool icon whose Tool Types are its settings),
 #         C/GLSmoke + C/R200Info (no icons), Licences/ (the three texts),
 #         Demos/ (the demonstrators' IconX launchers, demos/scripts/, with
 #         the programs in Demos/C/: demos/README.md)
@@ -1396,7 +1446,7 @@ REL_DRAWER_WIN := --show-icons
 # "RadeonGL 0.3": what the library's $$VER must carry (src/RadeonGL_rev.h)
 REL_VERS := ${shell awk -F'"' '/^\#define VERS[ \t]/ {print $$2}' $(REV_H)}
 
-release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info $(DEMO_BIN) $(DEMO030_BIN) guides installer
+release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info dist/Probe/C/RadeonStat $(DEMO_BIN) $(DEMO030_BIN) guides installer
 	rm -rf $(RELSTAGE)
 	mkdir -p $(RELDRAWER)/Files/Libs $(REL_FILES)/C $(REL_FILES)/Licences $(REL_FILES)/Demos/C
 	mkdir -p $(RELDRAWER)/Files/68030/Libs $(RELDRAWER)/Files/68030/C $(RELDRAWER)/Files/68030/Demos/C
@@ -1420,7 +1470,7 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info $(DEMO_BIN
 	@# here, and release-aminet renders the same file beside the archive
 	$(PYTHON) tools/make_aminet_readme.py -o $(RELDRAWER)/RadeonGL.readme >/dev/null
 	$(PYTHON) tools/make_aminet_readme.py --check $(RELDRAWER)/RadeonGL.readme
-	cp $(REL_ICON_TXT) $(RELDRAWER)/RadeonGL.readme.info
+	cp icons/readme.info $(RELDRAWER)/RadeonGL.readme.info     # plain text: no AmigaGuide icon
 	@# the Installer (comments stripped by `gmake installer`)
 	cp dist/Install dist/Install.info $(RELDRAWER)/
 	@# Test and CardReport: IconX scripts (icons/run.info keeps the
@@ -1428,6 +1478,10 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info $(DEMO_BIN
 	cp install/Test install/CardReport $(REL_FILES)/
 	cp icons/run.info $(REL_FILES)/Test.info
 	cp icons/run.info $(REL_FILES)/CardReport.info
+	@# RadeonStat: a -m68020 program (both builds' machines), opened from
+	@# its tool icon (tools/make_radeonstat_icon.py), read-only
+	cp dist/Probe/C/RadeonStat $(REL_FILES)/RadeonStat
+	cp icons/radeonstat.info $(REL_FILES)/RadeonStat.info
 	@# the demonstrators: launchers in Demos (their windows keep the frame
 	@# rate), the programs out of sight in Demos/C
 	cp $(DEMO_BIN) $(REL_FILES)/Demos/C/
@@ -1452,19 +1506,20 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info $(DEMO_BIN
 	$(SETPOS) $(RELDRAWER)/RadeonGL_deutsch.guide.info --center-x 290 8
 	$(SETPOS) $(RELDRAWER)/RadeonGL.readme.info --center-x 100 70
 	$(SETPOS) $(RELDRAWER)/Install.info --center-x 290 70
-	$(SETPOS) $(REL_FILES)/RadeonGL.guide.info --center-x 110 8
-	$(SETPOS) $(REL_FILES)/RadeonGL_deutsch.guide.info --center-x 320 8
-	$(SETPOS) $(REL_FILES)/Test.info --center-x 55 70
-	$(SETPOS) $(REL_FILES)/CardReport.info --center-x 160 70
-	$(SETPOS) $(REL_FILES)/Demos.info --center-x 265 70
-	$(SETPOS) $(REL_FILES)/Licences.info --center-x 370 70
+	$(SETPOS) $(REL_FILES)/RadeonGL.guide.info --center-x 135 8
+	$(SETPOS) $(REL_FILES)/RadeonGL_deutsch.guide.info --center-x 345 8
+	$(SETPOS) $(REL_FILES)/Test.info --center-x 50 70
+	$(SETPOS) $(REL_FILES)/CardReport.info --center-x 145 70
+	$(SETPOS) $(REL_FILES)/RadeonStat.info --center-x 240 70
+	$(SETPOS) $(REL_FILES)/Demos.info --center-x 335 70
+	$(SETPOS) $(REL_FILES)/Licences.info --center-x 430 70
 	$(SETPOS) $(REL_FILES)/Demos/Spinner.info --center-x 60 8
 	$(SETPOS) $(REL_FILES)/Demos/Glow.info --center-x 160 8
 	$(SETPOS) $(REL_FILES)/Demos/Landscape.info --center-x 260 8
 	$(SETPOS) $(REL_FILES)/Demos/Showcase.info --center-x 360 8
 	$(SETPOS) $(REL_FILES)/Demos/Trio.info --center-x 460 8
 	$(SETPOS) $(REL_FILES)/Demos.info --window 180 90 520 80 $(REL_DRAWER_WIN)
-	$(SETPOS) $(RELDRAWER)/Files/RadeonGL.info --no-pos --window 140 50 440 165 $(REL_DRAWER_WIN)
+	$(SETPOS) $(RELDRAWER)/Files/RadeonGL.info --no-pos --window 140 50 490 165 $(REL_DRAWER_WIN)
 	$(SETPOS) $(REL_FILES)/Licences/RadeonGL.txt.info --center-x 70 8
 	$(SETPOS) $(REL_FILES)/Licences/MiniGL.txt.info --center-x 190 8
 	$(SETPOS) $(REL_FILES)/Licences/R200-Microcode.txt.info --center-x 320 8
@@ -1487,6 +1542,7 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info $(DEMO_BIN
 	         Files/68030/C/GLSmoke $(foreach d,$(DEMO_NAMES),Files/68030/Demos/C/$(d)) \
 	         Files/RadeonGL/RadeonGL.guide Files/RadeonGL/RadeonGL_deutsch.guide \
 	         Files/RadeonGL/Test Files/RadeonGL/Test.info Files/RadeonGL/CardReport Files/RadeonGL/CardReport.info \
+	         Files/RadeonGL/RadeonStat Files/RadeonGL/RadeonStat.info \
 	         Files/RadeonGL/C/GLSmoke Files/RadeonGL/C/R200Info Files/RadeonGL/Licences.info \
 	         Files/RadeonGL/Licences/RadeonGL.txt Files/RadeonGL/Licences/MiniGL.txt \
 	         Files/RadeonGL/Licences/R200-Microcode.txt Files/RadeonGL/Demos.info \

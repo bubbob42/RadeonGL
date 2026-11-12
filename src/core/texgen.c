@@ -99,6 +99,15 @@ static void Needs(struct Core *c)
     }
 }
 
+/* Who hears of a vnorm or pm_mask change (the library's task table, lib/
+ * rgltable.c): one function for every context, set once */
+CoreStateHook core_state_hook = NULL;
+
+void Core_SetStateHook(CoreStateHook fn)
+{
+    core_state_hook = fn;
+}
+
 /* lighting on, or a sphere map: the vertices carry normals (vertex.c) */
 void Core_UpdateVnorm(struct Core *c)
 {
@@ -109,6 +118,8 @@ void Core_UpdateVnorm(struct Core *c)
     {
         c->vnorm = v;
         c->dirty |= D_VTXFMT;
+        if (core_state_hook != NULL)
+            core_state_hook(c);
     }
     Core_Extras(c);
 }

@@ -53,6 +53,11 @@ struct Rgl
     ULONG ml_running;
     ULONG ml_close;             /* the close gadget ends the loop (GLUT, rglglut.c) */
     struct RglDL *dl;           /* display lists (rgldlist.c), made at the first list call */
+    /* the task table's state hooks (rgltable.c, 2026-11-12); at the end,
+     * so that nothing above moves */
+    ULONG tab_armed;            /* the core reports this context's vnorm and pm_mask */
+    ULONG tab_hooks;            /* the groups the task's table holds (TAB_LIT, TAB_PM) */
+    MGLDispatchTable *tab_table;    /* ... that table */
 };
 
 /* rgl.c: every context, newest first (W3) */
@@ -62,8 +67,10 @@ extern struct Rgl *rgl_list;
 extern const char Rglc_Extensions[];    /* GL_EXTENSIONS (rglcompat.c) */
 /* shell.c: the calling task's own dispatch table, NULL on the shared one */
 MGLDispatchTable *Shell_TaskTable(void);
-/* rgldlist.c: a context's lists freed; glGet's list names */
+/* rgldlist.c: a context's lists freed; glGet's list names; a list being
+ * made (its recorders hold the task table's slots) */
 void Rgldl_Free(struct Rgl *r);
+BOOL Rgldl_Recording(struct Rgl *r);
 /* rglglut.c: a task's GLUT state, when the task leaves */
 void Rglg_ClientGone(struct Task *task);
 /* rglcompat.c: the GLU quadric object (opaque to programs); its settings first */

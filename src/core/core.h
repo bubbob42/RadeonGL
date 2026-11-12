@@ -81,6 +81,11 @@ struct CoreEnv
 {
     APTR (*alloc)(APTR env, ULONG size);            /* zeroed, or NULL */
     void (*free)(APTR env, APTR mem, ULONG size);
+    /* As alloc, but the bytes are left as they are: only for a buffer
+     * whose every reader reads only what was written into it first (the
+     * upload cache's mirror, Core_SetVram; 2026-11-12, the fast create:
+     * clearing 2 MB cost ~90 ms). Freed with free. NULL: alloc is used. */
+    APTR (*alloc_raw)(APTR env, ULONG size);
     /* Return once the GPU has finished everything emitted so far. Needed
      * before the CPU rewrites VRAM the GPU may still read. */
     LONG (*wait_idle)(APTR env);
@@ -357,7 +362,7 @@ struct Core
     ULONG ucache_off, ucache_size, ucache_pos, ucache_on;
     ULONG ustaged;
     ULONG *ushadow;                 /* CORE_UCACHE_BYTES of fast RAM, staged only; 16-byte aligned */
-    APTR ushadow_mem;               /* as env.alloc gave it (16 bytes more), for env.free */
+    APTR ushadow_mem;               /* as env.alloc_raw (or alloc) gave it (16 bytes more), for env.free */
     ULONG udirty_off[CORE_UDIRTY], udirty_len[CORE_UDIRTY];  /* bytes in the region */
     ULONG udirty_n, udirty_all;
     struct CoreUEntry uq[CORE_UQ];
@@ -447,7 +452,22 @@ struct Core
     ULONG shared_pal;                       /* GL_SHARED_TEXTURE_PALETTE_EXT: stored, as 29.1 */
     ULONG pal_size, pal_base;               /* glColorTable: entries (0 = none yet), base format */
     UBYTE *pal;                             /* ... 256 x R, G, B, A, allocated at the first call */
+
+    /* glPolygonMode (polymode.c, 2026-11-11): polygons as edges or points,
+     * culled on the CPU. At the end too, for the same reason. */
+    ULONG pm_front, pm_back;                /* GL_FILL, GL_LINE or GL_POINT */
+    ULONG pm_mask;                          /* bit m: GL mode m is not drawn filled (0: all are) */
+    ULONG pm_on;                            /* the open glBegin collects into pm_cs */
+    ULONG pm_prim;                          /* ... its GL mode */
+    ULONG pm_seq;                           /* ... its packets drawn so far */
+    ULONG pm_nev;                           /* glEdgeFlag changes in pm_cs */
+    ULONG pm_flag0;                         /* the edge flag at pm_cs's first vertex */
+    struct R2Cs *pm_real;                   /* the stream cs was before */
+    struct R2Cs pm_cs;                      /* the collecting stream */
+    struct PmWork *pm;                      /* its buffers, allocated at the first glPolygonMode */
 };
+
+struct PmWork;
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
 #define CORE_FIRST(c) ((c)->vnorm ? (c)->lit_first : (c)->first)
@@ -458,7 +478,12 @@ struct Core
 
 /* Initialise c for the stream cs, the target t and the texture heap
  * [heap_gpu, heap_gpu + heap_size) mapped at heap_cpu. Returns 0 or a GL
- * error (GL_OUT_OF_MEMORY). Nothing is emitted until the first draw. */
+ * error (GL_OUT_OF_MEMORY). Nothing is emitted until the first draw.
+ * c must be all zero bits on entry: from a zeroing allocator (MEMF_CLEAR,
+ * calloc), static storage, or cleared whole by the caller after Core_Free
+ * of the same struct. Core_Init does not clear it again (2026-11-12, the
+ * fast create; the library's struct Rgl comes MEMF_CLEAR). Host builds
+ * check every byte and stop the run if one is not zero. */
 ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
                 const struct CoreTarget *t, ULONG heap_gpu, ULONG *heap_cpu,
                 ULONG heap_size);
@@ -583,6 +608,12 @@ void Core_VertexBits(struct Core *c, ULONG x, ULONG y, ULONG z);
 void Core_Color4ub(struct Core *c, ULONG r, ULONG g, ULONG b, ULONG a);
 void Core_Color4f(struct Core *c, float r, float g, float b, float a);
 void Core_Normal3f(struct Core *c, float x, float y, float z);
+/* Called whenever a state the library's specialised hooks follow changes
+ * (lib/rgltable.c): c->vnorm (the vertices carry a normal: lighting,
+ * sphere maps; texgen.c) or c->pm_mask (polygons not filled; polymode.c).
+ * One function for every context. */
+typedef void (*CoreStateHook)(struct Core *c);
+void Core_SetStateHook(CoreStateHook fn);
 
 /* --- Client arrays (array.c) ---------------------------------------------------- */
 
@@ -649,8 +680,21 @@ struct CoreScreen
 /* Copy the target's colour buffer 1:1 to (x, y) on the screen with the 3D
  * engine (concept 6.7; Mesa r200_blit): flush the colour cache, wait for
  * the 3D engine, draw the back buffer as a texture into the screen. The
- * client's state comes back at the next draw. */
+ * client's state comes back at the next draw. With c->sync, in bands from
+ * the top down (frame.c): ahead of the beam all the way. */
 void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y);
+
+/* The synced present's bands (frame.c, 2026-11-12): a band at row a is
+ * BAND0 + a / GROW rows high (480 rows: 27 bands; 720: 32; 1080: 38; 2048:
+ * 48), at most BANDS of them. The copy stays ahead of the beam if it copies
+ * more than 1 + 1 / GROW rows while the beam shows one and starts BAND0
+ * rows' worth of copy time before the beam reaches row 0. CORE_PRESENT_DW:
+ * the present's dwords at most after its Core_Validate -- 58 of state, 14 a
+ * band (the back end's reserve holds it, lib/card.c). */
+#define CORE_PRESENT_BAND0  8
+#define CORE_PRESENT_GROW   16
+#define CORE_PRESENT_BANDS  48
+#define CORE_PRESENT_DW     (58 + 14 * CORE_PRESENT_BANDS)
 
 /* --- Queries (get.c) --------------------------------------------------------------- */
 
@@ -710,6 +754,17 @@ void Core_BlendFuncSeparate(struct Core *c, ULONG sr, ULONG dr, ULONG sa, ULONG 
 void Compat_BlendFuncReset(struct Core *c);     /* state.c: glBlendFunc after a separate one */
 void Compat_EmitBlend(struct Core *c);          /* hwstate.c: D_BLEND with blend_x */
 void Compat_Free(struct Core *c);               /* Core_Free: what compat.c allocated */
+
+/* glPolygonMode (polymode.c). The library's hooks call the ...X calls in
+ * place of the plain ones: with every polygon filled they pass the call on
+ * at once; vertex.c and array.c know nothing of it. */
+void Core_PolygonModeX(struct Core *c, ULONG face, ULONG mode);
+void Core_BeginX(struct Core *c, ULONG mode);
+void Core_EndX(struct Core *c);
+void Core_DrawArraysX(struct Core *c, ULONG mode, LONG first, LONG count);
+void Core_DrawElementsX(struct Core *c, ULONG mode, LONG count, ULONG type, const void *idx);
+void Pm_EdgeFlag(struct Core *c);               /* compat.c: glEdgeFlag inside such a glBegin */
+void Pm_Free(struct Core *c);                   /* Compat_Free */
 LONG Core_Build2DMipmaps(struct Core *c, ULONG target, LONG internal, LONG w, LONG h,
                          ULONG format, ULONG type, const void *data);   /* 0 or a GLU error */
 

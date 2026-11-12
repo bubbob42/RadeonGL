@@ -17,6 +17,7 @@ Picasso96, while the Workbench keeps running.
     @{" What you need                        " link Requirements}
     @{" Installing, and going back           " link Install}
     @{" Testing the card                     " link Test}
+    @{" Watching the card: RadeonStat        " link Monitor}
     @{" The demos                            " link Demos}
     @{" Which programs work                  " link Programs}
     @{" The screen                           " link Screen}
@@ -137,7 +138,7 @@ RadeonGL's first), then Avail FLUSH or reboot.
 @node Test "Testing the card"
 @toc Main
 @prev Install
-@next Demos
+@next Monitor
 
 @{b}Test@{ub}
 
@@ -159,9 +160,71 @@ reads it. The report goes to RAM:RadeonGL-Report.txt; please add it to
 any bug report.
 @endnode
 
-@node Demos "The demos"
+@node Monitor "Watching the card"
 @toc Main
 @prev Test
+@next Demos
+
+@{b}RadeonStat@{ub}
+
+Double-click @{b}RadeonStat@{ub} in the RadeonGL drawer. Its window on the
+Workbench shows what the Radeon is doing, and goes on showing it while
+other programs draw:
+
+@{b}Engine@{ub}
+    How busy the engine was in the last interval, as a share of many
+    samples: Busy (any part of it), 3D (the 3D pipeline), 2D (the 2D
+    engine, which Picasso96 draws the Workbench with) and Command (the
+    command processor, which reads what RadeonGL sends). Queue is the
+    most the command processor fell behind: dwords sent and not yet read.
+
+@{b}Card memory@{ub}
+    How much of the card's memory Picasso96 has handed out, how much is
+    free, and the largest free block. Screens, windows and textures all
+    come from here.
+
+@{b}Display@{ub}
+    The front screen, its size, and the refresh and pixel clock the card
+    really runs it at (measured on the card whenever another screen comes
+    to the front). Above 110 MHz it adds @{b}DVI may drop out@{ub}: see
+    @{" The screen " link Screen}.
+
+@{b}Busy history@{ub}
+    Busy over time, a column per interval, the newest on the right. Make
+    the window taller and the graph gets the room.
+
+@{b}Interval@{ub} sets how often the window changes: 0.5, 1, 2 or 5
+seconds. @{b}Pause@{ub} stops the sampling and keeps the last values.
+The close gadget or Quit in the Project menu (Right-Amiga Q) ends it.
+
+RadeonStat only reads the card. Fifty times a second it reads the
+engine's status inside a short Picasso96 lock, the way RadeonGL itself
+reaches the card. That costs little, but not nothing: close it before
+you measure frame rates.
+
+@{b}Settings@{ub}
+
+The icon's Tool Types are RadeonStat's settings (select the icon, then
+@{b}Information...@{ub} in the Icons menu). They come in parentheses,
+switched off; remove the parentheses to use one:
+
+    INTERVAL=1    seconds between updates: 0.5, 1, 2 or 5
+    LEFT=-1       where the window opens; -1: the middle of the screen
+    TOP=-1
+
+@{b}From a Shell@{ub}
+
+Started from a Shell, RadeonStat prints a line an interval instead:
+
+    RadeonStat [INTERVAL=<seconds>] [COUNT=<lines>] [LOG=<file>] [GUI]
+
+COUNT stops after that many lines (otherwise Ctrl-C ends it), LOG
+writes the lines to a file as well, and GUI opens the window instead.
+@endnode
+
+@node Demos "The demos"
+@toc Main
+@prev Monitor
 @next Programs
 
 @{b}The demos@{ub}
@@ -372,6 +435,28 @@ that is not set means the default.
     driver's setting, which also comes back when the program quits.
 
         SetEnv SAVE RadeonGLDisplayPriority high
+
+@{b}RadeonGLBuffers@{ub}  (default: what the program asks for)
+    3 shows a program on a screen of its own with three buffers: one on
+    show, one waiting, one being drawn. A finished frame never waits for
+    the beam, and nothing tears. 2 copies each frame onto the screen,
+    with vertical sync if the program turns it on. Not set means the
+    program's choice (mglChooseNumberOfBuffers); most programs ask for
+    two.
+
+        SetEnv SAVE RadeonGLBuffers 3
+
+@{b}RadeonGLFlip@{ub}  (default: pan)
+    How three buffers are shown. pan: one screen three times as tall,
+    moved to the next third (ScrollVPort). csb: Intuition switches
+    between three screen buffers (ChangeScreenBuffer). A program may set
+    it for itself as a local variable and switch while it runs (GLQuake's
+    Video Options > Buffering does). On the test machine (GLQuake demo1)
+    the copy with vertical sync was fastest: 29.8 fps at 1280 x 720
+    (panning 26.6, csb 21.6) and 22.7 at 1920 x 1080 (panning 21.9, csb
+    17.1).
+
+        SetEnv SAVE RadeonGLFlip csb
 @endnode
 
 @node Speed "Speed"
@@ -530,8 +615,7 @@ To have no log at all:
 RadeonGL answers all 205 functions of minigl.library 29.1 (a few of
 them accepted without effect, see below). Not there yet:
 
-    * Polygons drawn as lines or points (glPolygonMode), stencil and
-      accumulation buffers, line and polygon stipple, logic operations,
+    * Stencil and accumulation buffers, line and polygon stipple, logic operations,
       reading the depth buffer.
 
 Accepted but without effect: edge flags and colour-index values,
@@ -633,8 +717,8 @@ was tested on real hardware.
       minigl.library, after id Software's Quake -- the program RadeonGL
       was made and measured with.
     * Advanced Micro Devices: the R200 microcode.
-    * Martin "Mason" Merz: the Install icon, AmigaOS 3.2's installer
-      icon, used with his permission.
+    * Martin "Mason" Merz: the Install and AmigaGuide icons, AmigaOS
+      3.2's own, used with his permission.
     * ATI Technologies, VA Linux Systems, Precision Insight, The Weather
       Channel and Tungsten Graphics, Red Hat, and the authors of the Linux
       radeon and Mesa r200 drivers (among them Dave Airlie, Alex Deucher,
@@ -651,6 +735,24 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.12 (12.11.2026)
+    * three buffers on a screen of its own, for a program that asks for
+      them (mglChooseNumberOfBuffers) or for any with RadeonGLBuffers=3:
+      by panning a screen three times as tall, or by ChangeScreenBuffer
+      (RadeonGLFlip); a program may switch while it runs
+    * vertical sync without the torn triangle at the top of the screen:
+      the copy now goes down the screen ahead of the beam
+    * wireframe and points: glPolygonMode GL_LINE and GL_POINT are drawn
+      as lines and points (GLTron's Recognizer)
+    * lit vertices one at a time (glNormal3f, glVertex3f) are faster:
+      GLTron's timedemo about 10% faster
+    * a context opens in 26 ms instead of 146 ms and closes in 6 ms
+      instead of 15
+    * RadeonGLHeapMax sizes a window's texture heap either way: GLQuake in
+      a window keeps its textures
+    * RadeonGL's own window uses smart refresh, as MiniGL's does
+    * GLQuake as fast as with 0.11
 
 0.11 (8.11.2026)
     * all 205 functions of minigl.library 29.1

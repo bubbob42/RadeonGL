@@ -12,7 +12,8 @@
  *
  * Simplifications, on purpose: nearest-texel sampling at level 0 (or the
  * level the triangle's size suggests), no mip filtering between levels,
- * no lines or points wider than one pixel, no guard band. Pixels are
+ * no lines or points wider than one pixel, lines without the diamond rule
+ * at their ends, no guard band. Pixels are
  * centred (VTX_PIX_CENTER_OGL), the fill rule is top-left.
  */
 
@@ -40,6 +41,7 @@ struct Sim
     /* statistics */
     ULONG tris, pixels, culled, unsupported;
     ULONG points;                   /* point primitives drawn (r200view) */
+    ULONG lines;                    /* line segments drawn */
 };
 
 void Sim_Init(struct Sim *s, ULONG *vram, ULONG vram_gpu, ULONG vram_size,

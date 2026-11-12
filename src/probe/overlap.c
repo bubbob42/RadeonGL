@@ -830,6 +830,7 @@ static void Run(struct Ctx *c, BOOL no2d)
     /* the scene's stream, once, in fast RAM; the checker before the CP */
     R2Cs_InitBuffer(&bcs, c->buf, STREAM_DW, 1UL);
     env.alloc = EnvAlloc;
+    env.alloc_raw = NULL;
     env.free = EnvFree;
     env.wait_idle = EnvIdle;
     env.env = NULL;

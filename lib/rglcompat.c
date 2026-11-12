@@ -34,6 +34,25 @@ static GLboolean propose_close_desktop;
 /* A context's core, with what only the library knows set in it: a window
  * or bitmap context has one buffer (GL_DOUBLEBUFFER, the default draw and
  * read buffers) */
+/* Two of MiniGL's calls moved here from rgl.c (2026-11-12, see the note
+ * there): the code in front of GLQuake's hot hooks keeps its size */
+void Hook_MGLDrawMultitexBuffer(GLcontext context, GLenum BSrc, GLenum BDst, GLenum TexEnv)
+{
+    /* the fake-multitexture flush; with real multitexture GLQuake still
+     * calls it once a frame. Nothing is buffered here, so nothing to do
+     * (MiniGLV3D's side effect on unit 1's texenv is not copied). */
+    (void) context;
+    (void) BSrc;
+    (void) BDst;
+    (void) TexEnv;
+}
+
+void Hook_MGLLockMode(GLcontext context, GLenum lockMode)
+{
+    if (context != NULL)
+        ((struct Rgl *) context)->core.lock_mode = lockMode;
+}
+
 static void Sync(struct Core *c)
 {
     c->single_buffer = (((struct Rgl *) c)->kind != CARD_KIND_SCREEN) ? 1UL : 0UL;

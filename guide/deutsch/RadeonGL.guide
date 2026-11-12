@@ -17,6 +17,7 @@ Befehlsprozessor der Radeon, während die Workbench weiterläuft.
     @{" Was Sie brauchen                      " link Requirements}
     @{" Installieren und zurück               " link Install}
     @{" Die Karte testen                      " link Test}
+    @{" Der Karte zusehen: RadeonStat         " link Monitor}
     @{" Die Demos                             " link Demos}
     @{" Welche Programme laufen               " link Programs}
     @{" Der Bildschirm                        " link Screen}
@@ -144,7 +145,7 @@ Benennen Sie LIBS:minigl.library.old wieder in LIBS:minigl.library um
 @node Test "Die Karte testen"
 @toc Main
 @prev Install
-@next Demos
+@next Monitor
 
 @{b}Test@{ub}
 
@@ -169,9 +170,77 @@ in RAM:RadeonGL-Report.txt; bitte legen Sie ihn jedem Fehlerbericht
 bei.
 @endnode
 
-@node Demos "Die Demos"
+@node Monitor "Der Karte zusehen"
 @toc Main
 @prev Test
+@next Demos
+
+@{b}RadeonStat@{ub}
+
+Doppelklicken Sie @{b}RadeonStat@{ub} in der RadeonGL-Schublade. Sein
+Fenster auf der Workbench zeigt, was die Radeon gerade tut, und zeigt es
+weiter, während andere Programme zeichnen:
+
+@{b}Engine@{ub}
+    Wie beschäftigt die Engine im letzten Intervall war, als Anteil vieler
+    Stichproben: Busy (irgendein Teil von ihr), 3D (die 3D-Pipeline), 2D
+    (die 2D-Engine, mit der Picasso96 die Workbench zeichnet) und Command
+    (der Befehlsprozessor, der liest, was RadeonGL schickt). Queue ist der
+    größte Rückstand des Befehlsprozessors: geschickte, noch nicht
+    gelesene Dwords.
+
+@{b}Card memory@{ub}
+    Wie viel vom Kartenspeicher Picasso96 vergeben hat, wie viel frei ist
+    und der größte freie Block. Bildschirme, Fenster und Texturen kommen
+    alle von hier.
+
+@{b}Display@{ub}
+    Der vordere Bildschirm, seine Größe und die Bildwiederholrate und der
+    Pixeltakt, mit denen die Karte ihn wirklich zeigt (auf der Karte
+    gemessen, sobald ein anderer Bildschirm nach vorn kommt). Über 110 MHz
+    steht dahinter @{b}DVI may drop out@{ub}: siehe
+    @{" Der Bildschirm " link Screen}.
+
+@{b}Busy history@{ub}
+    Busy über die Zeit, eine Säule je Intervall, die neueste rechts. Ein
+    höheres Fenster gibt der Grafik mehr Platz.
+
+@{b}Interval@{ub} stellt ein, wie oft sich das Fenster ändert: alle 0,5,
+1, 2 oder 5 Sekunden. @{b}Pause@{ub} hält die Messung an und lässt die
+letzten Werte stehen. Das Schließsymbol oder Quit im Menü Project
+(Rechte Amiga-Taste + Q) beendet es.
+
+RadeonStat liest die Karte nur. Fünfzigmal in der Sekunde liest es den
+Status der Engine in einer kurzen Picasso96-Sperre, so wie RadeonGL
+selbst an die Karte kommt. Das kostet wenig, aber nicht nichts:
+schließen Sie es, bevor Sie Bildraten messen.
+
+@{b}Einstellungen@{ub}
+
+Die Merkmale des Piktogramms sind die Einstellungen von RadeonStat
+(Piktogramm anklicken, dann @{b}Informationen...@{ub} im Menü
+@{b}Piktogramm@{ub}). Sie stehen in Klammern, also abgeschaltet;
+entfernen Sie die Klammern, um eines zu verwenden:
+
+    INTERVAL=1    Sekunden zwischen den Anzeigen: 0.5, 1, 2 oder 5
+    LEFT=-1       wo das Fenster aufgeht; -1: die Mitte des Bildschirms
+    TOP=-1
+
+@{b}Aus einer Shell@{ub}
+
+Aus einer Shell gestartet, schreibt RadeonStat stattdessen eine Zeile je
+Intervall:
+
+    RadeonStat [INTERVAL=<Sekunden>] [COUNT=<Zeilen>] [LOG=<Datei>] [GUI]
+
+COUNT hört nach so vielen Zeilen auf (sonst beendet Ctrl-C es), LOG
+schreibt die Zeilen auch in eine Datei, und GUI öffnet stattdessen das
+Fenster.
+@endnode
+
+@node Demos "Die Demos"
+@toc Main
+@prev Monitor
 @next Programs
 
 @{b}Die Demos@{ub}
@@ -399,6 +468,29 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Programm endet.
 
         SetEnv SAVE RadeonGLDisplayPriority high
+
+@{b}RadeonGLBuffers@{ub}  (Vorgabe: was das Programm wünscht)
+    3 zeigt ein Programm auf einem eigenen Bildschirm mit drei Puffern:
+    einer wird gezeigt, einer wartet, einer wird gezeichnet. Ein fertiges
+    Bild wartet nie auf den Strahl, und nichts reißt. 2 kopiert jedes
+    Bild auf den Bildschirm, mit vertikaler Synchronisation, wenn das
+    Programm sie einschaltet. Nicht gesetzt gilt die Wahl des Programms
+    (mglChooseNumberOfBuffers); die meisten Programme wünschen zwei.
+
+        SetEnv SAVE RadeonGLBuffers 3
+
+@{b}RadeonGLFlip@{ub}  (Vorgabe: pan)
+    Wie drei Puffer gezeigt werden. pan: ein Bildschirm, dreimal so hoch,
+    der zum nächsten Drittel verschoben wird (ScrollVPort). csb:
+    Intuition wechselt zwischen drei Bildschirmpuffern
+    (ChangeScreenBuffer). Ein Programm darf die Variable lokal für sich
+    setzen und während des Laufs umschalten (so macht es GLQuakes Video
+    Options > Buffering). Auf dem Testrechner (GLQuake demo1) war das
+    Kopieren mit vertikaler Synchronisation am schnellsten: 29,8 Bilder
+    pro Sekunde bei 1280 x 720 (pan 26,6, csb 21,6) und 22,7 bei
+    1920 x 1080 (pan 21,9, csb 17,1).
+
+        SetEnv SAVE RadeonGLFlip csb
 @endnode
 
 @node Speed "Geschwindigkeit"
@@ -568,8 +660,7 @@ Für gar kein Protokoll:
 RadeonGL beantwortet alle 205 Funktionen der minigl.library 29.1
 (einige davon ohne Wirkung, siehe unten). Noch nicht da:
 
-    * Polygone als Linien oder Punkte (glPolygonMode), Stencil- und
-      Akkumulationspuffer, Linien- und Flächenmuster, logische
+    * Stencil- und Akkumulationspuffer, Linien- und Flächenmuster, logische
       Verknüpfungen, den Tiefenpuffer lesen.
 
 Angenommen, aber ohne Wirkung: Kantenmarken und Farbindex-Werte,
@@ -677,8 +768,9 @@ Hardware getestet.
       minigl.library, nach Quake von id Software -- das Programm, mit
       dem RadeonGL entwickelt und gemessen wurde.
     * Advanced Micro Devices: der R200-Mikrocode.
-    * Martin "Mason" Merz: das Install-Piktogramm, das Installer-
-      Piktogramm von AmigaOS 3.2, mit seiner Erlaubnis verwendet.
+    * Martin "Mason" Merz: die Piktogramme für Install und die
+      AmigaGuide-Hilfe, die von AmigaOS 3.2, mit seiner Erlaubnis
+      verwendet.
     * ATI Technologies, VA Linux Systems, Precision Insight, The Weather
       Channel und Tungsten Graphics, Red Hat und die Autoren der Treiber
       radeon (Linux) und r200 (Mesa) (darunter Dave Airlie, Alex Deucher,
@@ -695,6 +787,26 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.12 (12.11.2026)
+    * drei Puffer auf einem eigenen Bildschirm, für ein Programm, das sie
+      wünscht (mglChooseNumberOfBuffers), oder für jedes mit
+      RadeonGLBuffers=3: durch Verschieben eines dreimal so hohen
+      Bildschirms oder mit ChangeScreenBuffer (RadeonGLFlip); ein
+      Programm darf während des Laufs umschalten
+    * vertikale Synchronisation ohne das gerissene Dreieck oben im Bild:
+      die Kopie läuft jetzt dem Strahl voraus den Bildschirm hinunter
+    * Drahtgitter und Punkte: glPolygonMode GL_LINE und GL_POINT werden
+      als Linien und Punkte gezeichnet (der Recognizer in GLTron)
+    * beleuchtete Eckpunkte einzeln (glNormal3f, glVertex3f) sind
+      schneller: das Timedemo von GLTron etwa 10% schneller
+    * ein Kontext öffnet sich in 26 ms statt 146 ms und schließt sich in
+      6 ms statt 15
+    * RadeonGLHeapMax bemisst den Texturspeicher eines Fensters in beide
+      Richtungen: GLQuake im Fenster behält seine Texturen
+    * das eigene Fenster von RadeonGL nutzt Smart Refresh, wie das der
+      MiniGL
+    * GLQuake so schnell wie mit 0.11
 
 0.11 (8.11.2026)
     * alle 205 Funktionen der minigl.library 29.1

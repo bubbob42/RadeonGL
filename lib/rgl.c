@@ -59,6 +59,7 @@
 #include "r200reg.h"
 #include "nullcard.h"
 #include "card.h"
+#include "cardflip.h"
 #include "trapcatch.h"
 #include "vtxfast.h"
 #include "../src/RadeonGL_rev.h"
@@ -87,6 +88,7 @@ const char Back_IdString[] =
 #define DUMP_MAGIC  0x5232444dUL    /* 'R2DM' */
 
 #include "rglint.h"
+#include "rgltable.h"
 
 GLcontext Rgl_CurrentContext = 0;
 struct Rgl *rgl_list = NULL;            /* every context, newest first (W3; rglcompat.c reads it) */
@@ -103,6 +105,14 @@ static APTR EnvAlloc(APTR env, ULONG size)
 {
     (void) env;
     return AllocVec(size, MEMF_ANY | MEMF_CLEAR);
+}
+
+/* The upload cache's mirror (core.h CoreEnv alloc_raw): not zeroed, 2 MB
+ * cleared cost ~90 ms of every create on the A4000D (2026-11-12) */
+static APTR EnvAllocRaw(APTR env, ULONG size)
+{
+    (void) env;
+    return AllocVec(size, MEMF_ANY);
 }
 
 static void EnvFree(APTR env, APTR mem, ULONG size)
@@ -184,21 +194,75 @@ static void Busy(void)
 
 /* --- The log ------------------------------------------------------------------------- */
 
-static ULONG StrLen(const char *s)
+/* The log goes out through one buffer: one Write() per LOG_BUF bytes
+ * instead of one per string, each a packet to the file system (2026-11-12,
+ * the fast create: ~150 Writes cost ~9 ms of every delete). Static: only
+ * WriteLog() and Refused() use it, both inside Busy() (rgl_busy), so never
+ * two tasks at once; not in struct Rgl. Put() stays a function of its own:
+ * an inlined one grew rgl.o by 2.5 KB and moved the hot code behind it. */
+#define LOG_BUF 4096
+
+struct LogOut
 {
+    BPTR fh;
     ULONG n;
+    UBYTE b[LOG_BUF];
+};
 
-    for (n = 0; s[n] != 0; n++)
-        ;
-    return n;
-}
+static struct LogOut log_out;
 
-static void Put(BPTR f, const char *s)
+/* The log file, or NULL: no file, or NIL: (fh_Type NULL; also "*" with no
+ * console), where nothing written would arrive */
+static struct LogOut *LogOpen(const struct Rgl *r)
 {
-    Write(f, (APTR) s, (LONG) StrLen(s));
+    BPTR fh;
+    struct FileHandle *h;
+
+    fh = Open((STRPTR) r->log, MODE_NEWFILE);
+    if (fh == 0)
+        return NULL;
+    h = BADDR(fh);
+    if (h->fh_Type == NULL)
+    {
+        Close(fh);
+        return NULL;
+    }
+    log_out.fh = fh;
+    log_out.n = 0;
+    return &log_out;
 }
 
-static void PutU(BPTR f, ULONG v)
+static void LogFlush(struct LogOut *f)
+{
+    if (f->n != 0)
+        (void) Write(f->fh, f->b, (LONG) f->n);
+    f->n = 0;
+}
+
+static void LogClose(struct LogOut *f)
+{
+    LogFlush(f);
+    Close(f->fh);
+    f->fh = 0;
+}
+
+static void Put(struct LogOut *f, const char *s)
+{
+    while (*s != 0)
+    {
+        if (f->n == LOG_BUF)
+            LogFlush(f);
+        f->b[f->n++] = (UBYTE) *s++;
+    }
+}
+
+/* Put for the log lines of other files (cardflip.c) */
+void Rgl_LogPut(struct LogOut *f, const char *s)
+{
+    Put(f, s);
+}
+
+static void PutU(struct LogOut *f, ULONG v)
 {
     char b[12];
     int i;
@@ -214,7 +278,7 @@ static void PutU(BPTR f, ULONG v)
 }
 
 /* The upload cache's line in both logs. */
-static void PutCache(BPTR f, const struct Core *c)
+static void PutCache(struct LogOut *f, const struct Core *c)
 {
     Put(f, "upload cache: ");
     if (!c->ucache_on)
@@ -243,7 +307,7 @@ static void PutCache(BPTR f, const struct Core *c)
     Put(f, "\n");
 }
 
-static void PutX(BPTR f, ULONG v)
+static void PutX(struct LogOut *f, ULONG v)
 {
     char b[11];
     int i;
@@ -256,7 +320,7 @@ static void PutX(BPTR f, ULONG v)
     Put(f, b);
 }
 
-static void PutSlots(struct Rgl *r, BPTR f)
+static void PutSlots(struct Rgl *r, struct LogOut *f)
 {
     ULONG i;
 
@@ -270,7 +334,7 @@ static void PutSlots(struct Rgl *r, BPTR f)
     Put(f, "\n");
 }
 
-static void WriteCardLog(struct Rgl *r, BPTR f)
+static void WriteCardLog(struct Rgl *r, struct LogOut *f)
 {
     struct Card *k;
     const char *name;
@@ -315,6 +379,7 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
         PutU(f, k->vsync_lines); Put(f, " lines)");
     }
     Put(f, ", with no CRTC running: "); PutU(f, k->vsync_off); Put(f, "\n");
+    CardFlip_Log(f, k);                 /* triple buffering (cardflip.c) */
     Put(f, "frames dropped: "); PutU(f, k->dropped); Put(f, " (bitmaps moved "); PutU(f, k->moved);
     Put(f, ", off the board "); PutU(f, k->offboard); Put(f, ")\n");
     Put(f, "frames not drawn, the GL screen behind another: "); PutU(f, k->hidden); Put(f, "\n");
@@ -450,15 +515,15 @@ static void WriteCardLog(struct Rgl *r, BPTR f)
 static void Refused(struct Rgl *r, const char *why)
 {
     struct EasyStruct es;
-    BPTR f;
+    struct LogOut *f;
 
-    f = Open((STRPTR) r->log, MODE_NEWFILE);
-    if (f != 0)
+    f = LogOpen(r);
+    if (f != NULL)
     {
         Put(f, "RadeonGL: the Radeon cannot be used: ");
         Put(f, why);
         Put(f, "\n");
-        Close(f);
+        LogClose(f);
     }
     if (r->kind != CARD_KIND_SCREEN)
         return;
@@ -472,16 +537,16 @@ static void Refused(struct Rgl *r, const char *why)
 
 static void WriteLog(struct Rgl *r)
 {
-    BPTR f;
+    struct LogOut *f;
     const char *name;
 
-    f = Open((STRPTR) r->log, MODE_NEWFILE);
-    if (f == 0)
+    f = LogOpen(r);
+    if (f == NULL)
         return;
     if (r->real)
     {
         WriteCardLog(r, f);
-        Close(f);
+        LogClose(f);
         return;
     }
     Put(f, "RadeonGL null card\n");
@@ -534,7 +599,7 @@ static void WriteLog(struct Rgl *r)
         PutU(f, r->card.rec_lost); Put(f, " packets lost\n");
     }
     PutSlots(r, f);
-    Close(f);
+    LogClose(f);
 }
 
 /* --- Context ------------------------------------------------------------------------- */
@@ -1004,9 +1069,12 @@ static void *CreateContext(const struct Ask *a)
     }
 
     env.alloc = EnvAlloc;
+    env.alloc_raw = EnvAllocRaw;
     env.free = EnvFree;
     env.wait_idle = EnvIdle;
     env.env = r;
+    /* r->core is all zero (Core_Init's promise, core.h): AllocVec
+     * MEMF_CLEAR above, untouched until here */
     if (Core_Init(&r->core, r->real ? &r->rad.cs : &r->ring.cs, &env, &t,
                   r->real ? r->rad.heap_gpu : HEAP_GPU, r->real ? NULL : r->heap_mem,
                   r->real ? r->rad.heap_size : r->heap_size) != GL_NO_ERROR)
@@ -1219,7 +1287,11 @@ GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height
     if (rgl == NULL || width <= 0 || height <= 0 || width > 2048 || height > 2048
         || IN_BEGIN(&rgl->core))
         return GL_FALSE;
-    if (rgl->real && (ULONG) width == rgl->rad.width && (ULONG) height == rgl->rad.height)
+    /* the same size: nothing to do -- unless the program changed its
+     * buffering wish (2026-11-12: GLQuake's Buffering item), then the GL
+     * screen opens again the new way */
+    if (rgl->real && (ULONG) width == rgl->rad.width && (ULONG) height == rgl->rad.height
+        && !(rgl->rad.kind == CARD_KIND_SCREEN && CardFlip_Changed(&rgl->rad)))
         return GL_TRUE;
     hidden = (BOOL) (rgl->ptr_blank != NULL);
     PointerBack(rgl);                   /* its window goes */
@@ -1269,16 +1341,12 @@ GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height
 }
 
 /* MiniGL's extras: stored or harmless */
-void Hook_MGLDrawMultitexBuffer(GLcontext context, GLenum BSrc, GLenum BDst, GLenum TexEnv)
-{
-    /* the fake-multitexture flush; with real multitexture GLQuake still
-     * calls it once a frame. Nothing is buffered here, so nothing to do
-     * (MiniGLV3D's side effect on unit 1's texenv is not copied). */
-    (void) context;
-    (void) BSrc;
-    (void) BDst;
-    (void) TexEnv;
-}
+/* mglDrawMultitexBuffer and mglLockMode live in rglcompat.c since
+ * 2026-11-12: triple buffering's log line (WriteCardLog, cardflip.c) grew
+ * this file's code by as much as the two take away, so GLQuake's
+ * glBegin/glVertex hooks below and everything linked after this object
+ * keep their places (the 68060 punishes moved hot code;
+ * tools/hot_layout.py). */
 
 void Hook_MGLMinTriArea(GLcontext context, GLfloat area)
 {
@@ -1292,13 +1360,6 @@ void Hook_MGLSetZOffset(GLcontext context, GLfloat offset)
     (void) context;
     if (rgl != NULL)
         Core_SetZOffset(&rgl->core, offset);
-}
-
-void Hook_MGLLockMode(GLcontext context, GLenum lockMode)
-{
-    (void) context;
-    if (rgl != NULL)
-        rgl->core.lock_mode = lockMode;
 }
 
 void Hook_MGLEnableSync(GLcontext context, GLboolean enable)
@@ -1333,7 +1394,8 @@ void Hook_MGLSetPointer(GLcontext context)
 
 void Hook_mglChooseGuardBand(GLboolean flag) { (void) flag; }
 void Hook_mglChooseMtexBufferSize(int size) { (void) size; }
-void Hook_mglChooseNumberOfBuffers(int number) { (void) number; }
+/* mglChooseNumberOfBuffers lives in cardflip.c (triple buffering,
+ * 2026-11-12) */
 void Hook_mglChoosePixelDepth(int depth) { choose_depth = (depth > 16) ? 32UL : 16UL; }
 void Hook_mglChooseTextureBufferSize(int size) { (void) size; }
 void Hook_mglChooseVertexBufferSize(int size) { (void) size; }
@@ -1577,7 +1639,7 @@ void Hook_GLColorMask(GLcontext context, GLboolean red, GLboolean green, GLboole
 }
 
 void Hook_GLPolygonOffset(GLcontext context, GLfloat factor, GLfloat units) { (void) context; GUARD; Core_PolygonOffset(C, factor, units); }
-void Hook_GLPolygonMode(GLcontext context, GLenum face, GLenum mode) { (void) context; GUARD; Core_PolygonMode(C, face, mode); NOTE("glPolygonMode", mode); }
+void Hook_GLPolygonMode(GLcontext context, GLenum face, GLenum mode) { (void) context; GUARD; Rgltab_PolygonMode(C, face, mode); NOTE("glPolygonMode", mode); }
 void Hook_GLPointSize(GLcontext context, GLfloat size) { (void) context; GUARD; Core_PointSize(C, size); NOTE("glPointSize", 0); }
 void Hook_GLHint(GLcontext context, GLenum target, GLenum mode) { (void) context; GUARD; Core_Hint(C, target, mode); NOTE("glHint", target); }
 

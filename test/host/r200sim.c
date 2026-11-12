@@ -635,6 +635,47 @@ static void Point(struct Sim *s, struct V p)
             Frag(s, x, y, p.z, p.col, p.st);
 }
 
+/* A line one pixel wide (2026-11-11, for glPolygonMode's edges): one
+ * fragment per step along the longer axis, at the pixel the step's centre
+ * falls in, colour and coordinates interpolated. Not the chip's diamond
+ * rule at the ends: tests look at pixels away from the endpoints. A line
+ * with an end behind the eye is not drawn (no clipping). */
+static void Line(struct Sim *s, struct V a, struct V b)
+{
+    ULONG tl = REG(s, R_RE_TOP_LEFT), br = REG(s, R_RE_WIDTH_HEIGHT);
+    struct V m;
+    float dx, dy, len, t;
+    LONG i, n, x, y;
+
+    s->lines++;
+    if (REG(s, R_SE_VAP_CNTL) & R_VAP_TCL_ENABLE)
+    {
+        if (a.w <= 0 || b.w <= 0 || a.z < -a.w || b.z < -b.w)
+            return;
+    }
+    ToWindow(s, &a);
+    ToWindow(s, &b);
+    dx = b.x - a.x;
+    dy = b.y - a.y;
+    len = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy) ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+    n = (LONG) (len + 0.5f);
+    if (n < 1)
+        n = 1;
+    for (i = 0; i < n; i++)
+    {
+        t = ((float) i + 0.5f) / (float) n;
+        Lerp(&m, &a, &b, t);
+        x = (LONG) m.x;
+        y = (LONG) m.y;
+        if (m.x < 0 || m.y < 0)
+            continue;
+        if (x < (LONG) (tl & 0xffff) || y < (LONG) (tl >> 16)
+            || x > (LONG) (br & 0xffff) || y > (LONG) (br >> 16))
+            continue;
+        Frag(s, x, y, m.z, m.col, m.st);
+    }
+}
+
 /* SE_TCL_OUTPUT_VTX_COMP_SEL picks the outputs TCL COMPUTES: the lit colour
  * (OUTPUT_COLOR_0) and transformed texture coordinates (OUTPUT_TEX_n). The
  * sim passes the vertex's colour and coordinates through, which is what the
@@ -709,8 +750,16 @@ static void DrawPrim(struct Sim *s, ULONG prim, struct V *v, ULONG n)
             for (i = 0; i < n; i++)
                 Point(s, v[i]);
             break;
+        case R_VF_PRIM_LINES:
+            for (i = 0; i + 1 < n; i += 2)
+                Line(s, v[i], v[i + 1]);
+            break;
+        case R_VF_PRIM_LINE_STRIP:
+            for (i = 0; i + 1 < n; i++)
+                Line(s, v[i], v[i + 1]);
+            break;
         default:
-            s->unsupported++;   /* lines: not drawn */
+            s->unsupported++;
             break;
     }
 }

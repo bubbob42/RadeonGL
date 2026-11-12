@@ -1,4 +1,4 @@
-; GLBenchNull -- GLBench through the RadeonGL minigl.library on the null
+; GLCostNull -- GLCost through the RadeonGL minigl.library on the null
 ; card (FS-UAE has no Radeon): every test must run and print its cost, GL
 ; error 0. The figures are the emulator's, not the A4000D's.
 ; Needs: gmake glsmoke.
@@ -10,9 +10,9 @@ CPU >>DEV:Test/auto.log
 Avail >NIL: FLUSH
 Assign LIBS: DEV:GLSmoke/Libs ADD
 SetEnv RadeonGLCheck 0
-DEV:GLSmoke/GLBench >>DEV:Test/auto.log
+DEV:GLSmoke/GLCost >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
-DEV:GLSmoke/GLBench ONLY=locked SCALE=5 PROFILE=DEV:Test/prof-locked.bin >>DEV:Test/auto.log
+DEV:GLSmoke/GLCost ONLY=locked SCALE=5 PROFILE=DEV:Test/prof-locked.bin >>DEV:Test/auto.log
 Echo "rc=$RC" >>DEV:Test/auto.log
 UnSetEnv RadeonGLCheck
 Assign LIBS: DEV:GLSmoke/Libs REMOVE

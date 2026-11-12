@@ -3,6 +3,10 @@
  */
 
 #include <stddef.h>
+#if !defined(__mc68000__) && !defined(__SASC)
+#include <stdio.h>      /* host builds: Core_Init's check of the caller's promise */
+#include <stdlib.h>
+#endif
 
 #include "core.h"
 #include "coreint.h"
@@ -20,14 +24,27 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
                 const struct CoreTarget *t, ULONG heap_gpu, ULONG *heap_cpu,
                 ULONG heap_size)
 {
-    UBYTE *p;
+#if !defined(__mc68000__) && !defined(__SASC)
+    const UBYTE *p;
+#endif
     ULONG i;
     ULONG u;
 
-    /* the whole struct, not a field list that rots */
-    p = (UBYTE *) c;
+    /* c is all zero bits already (core.h): the library's struct Rgl comes
+     * MEMF_CLEAR, so a second clear of these 72 KB only cost time
+     * (2026-11-12, the fast create). Host builds check the promise, the
+     * whole struct, and stop at the first breach: a test that reuses a
+     * core clears it whole after Core_Free. */
+#if !defined(__mc68000__) && !defined(__SASC)
+    p = (const UBYTE *) c;
     for (i = 0; i < sizeof(*c); i++)
-        p[i] = 0;
+        if (p[i] != 0)
+        {
+            fprintf(stderr, "Core_Init: struct Core not zero at byte %lu (core.h)\n",
+                    (unsigned long) i);
+            abort();
+        }
+#endif
     c->cs = cs;
     c->env = *env;
     c->target = *t;
@@ -177,7 +194,18 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
              * RadeonGLMove16) */
             if (c->ushadow == NULL)
             {
-                c->ushadow_mem = c->env.alloc(c->env.env, c->ucache_size + 16);
+                /* not zeroed (2026-11-12, the fast create): every reader --
+                 * the GPU through an entry, the checker's Peek, a hit --
+                 * reads only bytes the cached draw that made the entry
+                 * wrote (array.c UInsert after the packing); the unwritten
+                 * 32-byte tails and gaps the flush copies land where no
+                 * entry points. Precondition: called before any cached
+                 * draw, with the cache empty (the library calls it once,
+                 * right after Core_Init, rgl.c) */
+                if (c->env.alloc_raw != NULL)
+                    c->ushadow_mem = c->env.alloc_raw(c->env.env, c->ucache_size + 16);
+                else
+                    c->ushadow_mem = c->env.alloc(c->env.env, c->ucache_size + 16);
                 if (c->ushadow_mem != NULL)
                     c->ushadow = (ULONG *) ((UBYTE *) c->ushadow_mem
                                  + ((16UL - ((ULONG) ((size_t) (const void *) c->ushadow_mem & 15))) & 15UL));

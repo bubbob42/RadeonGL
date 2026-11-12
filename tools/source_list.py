@@ -7,7 +7,7 @@ aminet archive". What git tracks (and what it would track: new files not
 ignored), as far as it exists and builds the library, the tools, the demos
 and the Installer:
 
-    the Makefile, LICENSE, README.md, .vamosrc.in, lib/ src/ demos/
+    the Makefile, LICENSE, README.md, .vamosrc.in, lib/ src/ demos/ glbench/
     install/ guide/ tools/ test/ glsmoke/ icons/ catalogs/ glquake-bench/
     fsuae/*.in,
     sdk/minigl-29.1 (the MiniGL SDK: Hyperion licence) and
@@ -35,7 +35,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FILES = ("Makefile", "LICENSE", "README.md", ".vamosrc.in")
-DIRS = ("lib/", "src/", "demos/", "install/", "guide/", "tools/", "test/", "glsmoke/",
+DIRS = ("lib/", "src/", "demos/", "glbench/", "install/", "guide/", "tools/", "test/", "glsmoke/",
         "icons/", "catalogs/", "glquake-bench/", "sdk/minigl-29.1/", "sdk/radeon-firmware/")
 
 

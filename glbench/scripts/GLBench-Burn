@@ -1,0 +1,16 @@
+FailAt 21
+Stack 100000
+Echo "GLBench Burn: Pelt for ten minutes, the picture checked"
+Echo "every 250 frames. Esc ends it sooner. The result also goes"
+Echo "to RAM:GLBench-Result.txt."
+CPU CHECK 68881 >NIL:
+If WARN
+  Echo "GLBench needs a 68881, a 68882 or a 68040/68060 FPU."
+  Quit 20
+EndIf
+CPU CHECK 68040 >NIL:
+If WARN
+  C/GLBench030 BURN=10
+Else
+  C/GLBench BURN=10
+EndIf

@@ -1,5 +1,5 @@
 /*
- * bench_core.c -- GLBench's core patterns on the host, for a native
+ * bench_core.c -- GLCost's core patterns on the host, for a native
  * profiler (macOS: sample). The core writes into a command buffer that is
  * discarded when full, as the Radeon back end's buffer is copied away
  * (the bus left out); the stream goes into a staging buffer. Relative
@@ -91,6 +91,7 @@ static void Setup(void)
     t.depth_gpu = 0x00200000UL;
     t.depth_pitch = 320;
     e.alloc = HostAlloc;
+    e.alloc_raw = NULL;
     e.free = HostFree;
     e.wait_idle = HostIdle;
     e.env = NULL;

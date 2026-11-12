@@ -79,6 +79,8 @@ void  Fog_Forget(struct Core *c);
 void  Fog_Emit(struct Core *c);
 /* c->vnorm from lighting and the sphere maps (texgen.c) */
 void  Core_UpdateVnorm(struct Core *c);
+/* Core_SetStateHook's function, or NULL (texgen.c) */
+extern CoreStateHook core_state_hook;
 /* The x_ fields from lighting, fog, texgen, line width (light.c) */
 void  Core_Extras(struct Core *c);
 /* Validate's rare part: lighting, texgen, fog (light.c); d back, with

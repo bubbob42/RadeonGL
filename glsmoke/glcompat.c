@@ -3,7 +3,8 @@
  * the texture environments GL_BLEND (with the environment colour) and
  * RGBA GL_DECAL, gluPerspective and gluLookAt, glArrayElement and
  * glMultiDrawArrays, texture uploads with GL_UNPACK_ALIGNMENT 1 and float
- * texels, glReadPixels in other types, and the glGet answers 29.1 gives.
+ * texels, glReadPixels in other types, and the glGet answers 29.1 gives;
+ * since 2026-11-11 glPolygonMode (GL_LINE and GL_POINT, culling first).
  * Each picture case draws into a frame of 128 x 128, reads pixels back and
  * compares them with what GL 1.1 says, worked out by hand below.
  *
@@ -35,7 +36,7 @@
 #define TEMPLATE "DEPTH/K/N,VERBOSE/S"
 #define S 128                   /* the frame: S x S */
 
-const char ver[] = "$VER: GLCompat 0.1 (08.11.2026)";
+const char ver[] = "$VER: GLCompat 0.2 (11.11.2026)";
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
 struct Library *P96Base;
@@ -686,6 +687,157 @@ static void ListCases(void)
 
 /* --- reading back, queries ------------------------------------------------------------- */
 
+/* --- glPolygonMode (2026-11-11) ------------------------------------------------------ */
+
+#ifndef GL_RGL_STATIC_ARRAYS_HINT
+#define GL_RGL_STATIC_ARRAYS_HINT  0x52474c01UL     /* RadeonGL: arrays never change */
+#endif
+#ifndef GL_RGL_STATIC_INDICES_HINT
+#define GL_RGL_STATIC_INDICES_HINT 0x52474c02UL     /* ... index lists either */
+#endif
+
+/* a line one pixel wide at (x, y) or beside it: where exactly the chip puts
+ * a line's pixels is not the point here */
+static void WantNear(const char *what, LONG x, LONG y, float r, float g, float b)
+{
+    ULONG px;
+    LONG dx, dy;
+    LONG wr, wg, wb;
+
+    wr = (LONG) (r * 255.0f + 0.5f);
+    wg = (LONG) (g * 255.0f + 0.5f);
+    wb = (LONG) (b * 255.0f + 0.5f);
+    for (dy = -1; dy <= 1; dy++)
+        for (dx = -1; dx <= 1; dx++)
+        {
+            px = p96ReadPixel(&rp, (UWORD) (x + dx), (UWORD) (y + dy));
+            if (Diff((LONG) ((px >> 16) & 0xff), wr) <= tol && Diff((LONG) ((px >> 8) & 0xff), wg) <= tol
+                && Diff((LONG) (px & 0xff), wb) <= tol)
+            {
+                Count(TRUE);
+                Printf("PASS %s\n", (LONG) what);
+                return;
+            }
+        }
+    Count(FALSE);
+    Printf("FAIL %-50s nothing near %ld %ld is %ld %ld %ld\n", (LONG) what, x, y, wr, wg, wb);
+}
+
+/* a square with corners at half pixels; front: counter-clockwise on the
+ * window (Ortho's y points down, so clockwise in these numbers) */
+static void PmSquare(GLfloat x, GLfloat y, GLfloat d, BOOL front)
+{
+    glVertex3f(x, y, 0.0f);
+    if (front)
+    {
+        glVertex3f(x, y + d, 0.0f);
+        glVertex3f(x + d, y + d, 0.0f);
+        glVertex3f(x + d, y, 0.0f);
+    }
+    else
+    {
+        glVertex3f(x + d, y, 0.0f);
+        glVertex3f(x + d, y + d, 0.0f);
+        glVertex3f(x, y + d, 0.0f);
+    }
+}
+
+static void PolyModeCases(void)
+{
+    static GLfloat v[8 * 3];
+    static const GLushort ix[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+    GLint iv[2];
+    int i;
+
+    Ortho();
+
+    /* P1. GL_LINE: the outline only -- 0.11 drew it filled (GLTron's Recognizer) */
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    glGetIntegerv(GL_POLYGON_MODE, iv);
+    WantInt("glGet GL_POLYGON_MODE front", (LONG) iv[0], (LONG) GL_LINE);
+    WantInt("glGet GL_POLYGON_MODE back", (LONG) iv[1], (LONG) GL_LINE);
+    Begin();
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glBegin(GL_QUADS);
+    PmSquare(8.5f, 8.5f, 48.0f, TRUE);
+    glEnd();
+    /* P2. culled before the mode: a back-facing square leaves no edge */
+    glEnable(GL_CULL_FACE);
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glBegin(GL_QUADS);
+    PmSquare(72.5f, 8.5f, 48.0f, FALSE);
+    PmSquare(72.5f, 72.5f, 48.0f, TRUE);
+    glEnd();
+    glDisable(GL_CULL_FACE);
+    Show();
+    Want("GL_LINE: inside the outline untouched", 32, 32, 0, 0, 0);
+    Want("GL_LINE: no diagonal", 20, 20, 0, 0, 0);
+    Want("GL_LINE: no diagonal (2)", 44, 44, 0, 0, 0);
+    WantNear("GL_LINE: the top edge", 32, 8, 1, 0, 0);
+    WantNear("GL_LINE: the right edge", 56, 32, 1, 0, 0);
+    Want("GL_LINE + cull: the back square's top edge gone", 96, 8, 0, 0, 0);
+    Want("GL_LINE + cull: the back square's left edge gone", 72, 32, 0, 0, 0);
+    WantNear("GL_LINE + cull: the front square's edge", 96, 72, 0, 1, 0);
+    Want("GL_LINE + cull: inside the front square", 96, 96, 0, 0, 0);
+
+    /* P3. GLTron's way: glDrawElements(GL_QUADS) in a lock, static hints, culling */
+    for (i = 0; i < 2; i++)
+    {
+        /* square 0 front at x 8.5, square 1 back at x 72.5 (y 72.5 .. 120.5) */
+        GLfloat x = (i == 0) ? 8.5f : 72.5f;
+        v[i * 12 + 0] = x;         v[i * 12 + 1] = 72.5f;
+        v[i * 12 + 3] = i ? x + 48.0f : x;  v[i * 12 + 4] = i ? 72.5f : 120.5f;
+        v[i * 12 + 6] = x + 48.0f; v[i * 12 + 7] = 120.5f;
+        v[i * 12 + 9] = i ? x : x + 48.0f;  v[i * 12 + 10] = i ? 120.5f : 72.5f;
+        v[i * 12 + 2] = v[i * 12 + 5] = v[i * 12 + 8] = v[i * 12 + 11] = 0.0f;
+    }
+    glVertexPointer(3, GL_FLOAT, 0, (void *) v);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glHint(GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    glHint(GL_RGL_STATIC_INDICES_HINT, GL_NICEST);
+    glEnable(GL_CULL_FACE);
+    Begin();
+    glColor3f(0.0f, 0.0f, 1.0f);
+    glLockArrays(0, 8);
+    glDrawElements(GL_QUADS, 8, GL_UNSIGNED_SHORT, (void *) ix);
+    glUnlockArrays();
+    Show();
+    WantNear("glDrawElements GL_LINE: the edge", 32, 72, 0, 0, 1);
+    Want("glDrawElements GL_LINE: inside", 32, 96, 0, 0, 0);
+    Want("glDrawElements GL_LINE: back square culled", 96, 72, 0, 0, 0);
+
+    /* P4. GL_FILL again: the same draw fills */
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    Begin();
+    glLockArrays(0, 8);
+    glDrawElements(GL_QUADS, 8, GL_UNSIGNED_SHORT, (void *) ix);
+    glUnlockArrays();
+    Show();
+    Want("glDrawElements GL_FILL: filled again", 32, 96, 0, 0, 1);
+    Want("glDrawElements GL_FILL: back square culled", 96, 96, 0, 0, 0);
+    glDisable(GL_CULL_FACE);
+    glHint(GL_RGL_STATIC_ARRAYS_HINT, GL_FASTEST);
+    glHint(GL_RGL_STATIC_INDICES_HINT, GL_FASTEST);
+    glDisableClientState(GL_VERTEX_ARRAY);
+
+    /* P5. GL_POINT: the corners only */
+    glPolygonMode(GL_FRONT_AND_BACK, GL_POINT);
+    glPointSize(3.0f);
+    Begin();
+    glColor3f(1.0f, 1.0f, 0.0f);
+    glBegin(GL_TRIANGLES);
+    glVertex3f(16.5f, 16.5f, 0.0f);
+    glVertex3f(16.5f, 112.5f, 0.0f);
+    glVertex3f(112.5f, 112.5f, 0.0f);
+    glEnd();
+    Show();
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    glPointSize(1.0f);
+    WantNear("GL_POINT: a corner", 16, 16, 1, 1, 0);
+    Want("GL_POINT: an edge's middle", 16, 64, 0, 0, 0);
+    Want("GL_POINT: inside", 40, 88, 0, 0, 0);
+}
+
 static void QueryCases(void)
 {
     GLfloat f[4 * 4 * 2];           /* two rows of four RGBA pixels */
@@ -862,6 +1014,7 @@ int main(void)
     PaletteCases();
     ListCases();
     QueryCases();
+    PolyModeCases();
     mglDeleteContext();
     LoopCase();
     Printf("GLCompat: %ld passed, %ld failed\n", passed, failed);

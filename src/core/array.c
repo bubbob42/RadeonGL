@@ -708,8 +708,14 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
     ULONG col;
     ULONG k;
 
-    /* lit (normals): never one of GLQuake's layouts */
-    if (c->vnorm)
+    /* lit (normals), or no texture unit on: never one of GLQuake's layouts.
+     * 2026-11-12, units 0 (GLTron's cycle shadows and outlines: unlit,
+     * untextured, 5.8 draws and ~85 KB packed into the stream a frame):
+     * the general key below took only GLQuake's two layouts. Four bytes
+     * in the object, the code around unchanged (a key for every other
+     * layout at the end instead re-allocated Core_DrawElements' registers,
+     * -148 bytes). */
+    if (c->vnorm || units == 0)
         return c->static_arrays ? Core_StaticKey(c, first, lcount, units, h) : 0;
     if (c->no_fast || !c->cs->swap || c->va.type != GL_FLOAT || c->va.size != 3)
         return 0;

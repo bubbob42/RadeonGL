@@ -1,0 +1,193 @@
+@database "GLBench.guide"
+@$VER: GLBench.guide 0.1 (8.11.2026)
+@(c) 2026 Marcus Gerards
+@author Marcus Gerards
+@wordwrap
+
+@node Main "GLBench"
+
+@{b}GLBench 0.1@{ub} -- a stress benchmark for minigl.library
+
+GLBench draws seven scenes, each leaning on another part of the 3D card,
+and gives the card a score. Five of them keep their shapes on the card
+and leave it the work; two measure the bus between the Amiga and the card. Together the scenes use every feature
+RadeonGL, the minigl.library for the ATI Radeon 8500 to 9250, offers.
+Burn runs one scene for ten minutes and checks all the while that the
+picture stays right.
+
+    @{" Running it                           " link Running}
+    @{" The seven scenes                     " link Scenes}
+    @{" The score                            " link Score}
+    @{" Burn                                 " link Burn}
+    @{" From a Shell                         " link Shell}
+    @{" What you need                        " link Requirements}
+    @{" History                              " link History}
+@endnode
+
+@node Running "Running it"
+@toc Main
+@next Scenes
+
+@{b}Running it@{ub}
+
+Double-click @{b}GLBench@{ub}. It opens a 640 x 480 screen and draws the
+seven scenes in turn, 400 frames each: two to three minutes on a 68060
+with a Radeon 9200. A line at the bottom shows the scene, the frame and
+the frames a second. Esc ends the run, the space bar skips a scene (a
+skipped scene gets no score).
+
+At the end the result stays on the screen for a minute, or until a key:
+each scene's frames a second, and the score. The same table goes to the
+window GLBench was started from and to @{b}RAM:GLBench-Result.txt@{ub},
+with the machine, the library and the screen mode.
+
+Every scene draws its frames by number, not by the clock: each frame
+moves the picture on by the same step, so every machine draws the same
+frames, and the figures compare.
+@endnode
+
+@node Scenes "The seven scenes"
+@toc Main
+@prev Running
+@next Score
+
+@{b}The seven scenes@{ub}
+
+@{b}1 Pelt@{ub}
+    A furred ring turning in a breeze: the ring drawn 20 times, each a
+    little larger, the strands let through by the alpha test, blended,
+    from two textures at once. It presses on the fill rate: the burner.
+
+@{b}2 Lanterns@{ub}
+    Eight coloured lanterns swinging in front of a waving banner, in fog.
+    The banner's wave is computed once and kept on the card. Local lights,
+    spot lights and a directional one, both sides of the banner lit, the
+    lit pass added over an ambient one. It presses on the card's transform
+    and lighting.
+
+@{b}3 Chrome@{ub}
+    Chrome bodies on plinths circling over a striped floor: a sphere, a
+    ring and a vase kept on the card, mirrored with a sphere map; plinths,
+    labels and a floating sphere from display lists. Texture coordinate
+    generation, display lists, polygon offset.
+
+@{b}4 Embers@{ub}
+    A storm of soft glowing sparks with trails, the screen cut in four,
+    each quarter blending another way: added, subtracted, the darker, the
+    brighter. Blending, points in three sizes, wide lines.
+
+@{b}5 Plasma@{ub}
+    A wall of twelve tiles: a plasma sent to the card every frame, a
+    palette that turns, every texture format and every way a texture
+    meets the colour beneath it. Texture uploads.
+
+@{b}6 Swarm@{ub}
+    A flock of 1920 darts round cubes and dodecahedra, kept on the card in
+    eight groups that turn at their own pace. The last third is drawn
+    twice, through a red and a cyan mask, for red/cyan glasses. Geometry:
+    the card transforms and lights 23,040 corners a frame.
+
+@{b}7 Mirror@{ub}
+    A picture that falls into itself: every frame is read back from the
+    card and drawn again, smaller and turned. The bus, both ways.
+@endnode
+
+@node Score "The score"
+@toc Main
+@prev Scenes
+@next Burn
+
+@{b}The score@{ub}
+
+Each scene's frames a second are set against a reference machine's: an
+A4000 with a 68060 and a Radeon 9200 behind a Mediator, at 640 x 480 x 16.
+The score is the geometric mean of the seven ratios, times 1000. So the
+reference machine scores 1000, a machine twice as fast in every scene
+2000, and one slow scene cannot hide behind a fast one.
+
+The score compares only at the same screen size and depth: the log
+prints the mode. Without all seven scenes in full, the score is marked
+"not comparable".
+
+In version 0.1 the reference figures are provisional (the score says
+so); they will be measured on the reference machine.
+
+The table also gives million primitives a second (triangles, lines and
+points) and, for Plasma and Mirror, the megabytes a second they move over
+the bus themselves.
+@endnode
+
+@node Burn "Burn"
+@toc Main
+@prev Score
+@next Shell
+
+@{b}Burn@{ub}
+
+Double-click @{b}GLBench-Burn@{ub}. It draws Pelt for ten minutes. Every
+250 frames it draws one fixed frame, reads the middle of it back and
+compares it with the first time: a card that runs too hot, or a bus that
+loses data, shows up here as a picture error, with its frame number.
+At the end: the frames a second on average, the slowest and the fastest
+five seconds, the checks and the errors. Esc ends it sooner.
+
+The Radeon has no temperature sensor, and GLBench reads none. Mirror's
+frames depend on the ones before, so Burn cannot check it.
+@endnode
+
+@node Shell "From a Shell"
+@toc Main
+@prev Burn
+@next Requirements
+
+@{b}From a Shell@{ub}
+
+    GLBench [SCENE=<n,...>] [FRAMES=<n>] [BURN=<minutes>] [SHELLS=<n>]
+            [WIDTH=<w>] [HEIGHT=<h>] [DEPTH=16|32] [WINDOW]
+            [LEFT=<x>] [TOP=<y>] [NOHUD] [HOLD=<s>] [LOG=<file>]
+            [SHOT=<file>] [SHOTS=<drawer>]
+
+SCENE        the scenes to run, numbers or names: SCENE=1,3 or
+             SCENE=pelt,chrome (all seven)
+FRAMES       frames a scene (400)
+BURN         Burn for so many minutes; BURN=0 until Esc. The scene is the
+             first of SCENE (Pelt)
+SHELLS       Pelt's shells, 1 to 64 (20)
+WIDTH, HEIGHT, DEPTH   the screen (640 x 480 x 16)
+WINDOW       in a window on the Workbench instead, at LEFT, TOP
+NOHUD        no line at the bottom
+HOLD         seconds the result stays on the screen (60; 0 not at all)
+LOG          the result file (RAM:GLBench-Result.txt)
+SHOT         the result screen as a PPM picture
+SHOTS        a drawer for a PPM picture of every scene's middle frame
+
+C/GLBench is for the 68040 and 68060, C/GLBench030 for the 68020 and
+68030 with a 68881 or 68882; the two icons choose by themselves.
+Return codes: 0 done; 5 done, with a GL error or a picture error; 20
+could not run.
+@endnode
+
+@node Requirements "What you need"
+@toc Main
+@prev Shell
+@next History
+
+@{b}What you need@{ub}
+
+- A minigl.library 29.1. GLBench is made for RadeonGL (0.12 or later
+  recommended) and uses its static-array extension when the library
+  names it; with another minigl.library it runs without it.
+- A 68020 or better with an FPU (68881, 68882, or the 68040's or
+  68060's own).
+- AmigaOS 3.1 or later.
+@endnode
+
+@node History "History"
+@toc Main
+@prev Requirements
+
+@{b}History@{ub}
+
+0.1 (8.11.2026)
+    * first version: seven scenes, the score, Burn with picture checks
+@endnode

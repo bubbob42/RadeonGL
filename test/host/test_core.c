@@ -14,6 +14,8 @@
 #include "r200reg.h"
 #include "simcp.h"
 #include "vtxfast.h"
+#include "vtxlit.h"
+#include "gtframe.h"
 
 #define W_          640
 #define H_          480
@@ -36,6 +38,20 @@ static APTR HostAlloc(APTR env, ULONG size)
 {
     (void) env;
     return calloc(1, size);
+}
+
+/* CoreEnv alloc_raw: the bytes are not zeroed in the library either, so
+ * fill them with a pattern no draw writes: an index 0xa5a5 lies past every
+ * lock, so the checker and SameAsGl refuse a read of an unwritten byte */
+static APTR HostAllocRaw(APTR env, ULONG size)
+{
+    APTR p;
+
+    (void) env;
+    p = malloc(size);
+    if (p != NULL)
+        memset(p, 0xa5, size);
+    return p;
 }
 
 static void HostFree(APTR env, APTR mem, ULONG size)
@@ -68,6 +84,7 @@ static void Target(struct CoreTarget *t)
 static void Env(struct CoreEnv *e)
 {
     e->alloc = HostAlloc;
+    e->alloc_raw = HostAllocRaw;
     e->free = HostFree;
     e->wait_idle = HostIdle;
     e->env = NULL;
@@ -79,6 +96,7 @@ static void Fresh(ULONG swap)
     struct CoreEnv e;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
     R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, swap);
     Target(&t);
     Env(&e);
@@ -683,6 +701,156 @@ static void test_lit_locked(void)
     check_from = 0;
     CHECK_INT(Checked(&st), R2CE_OK);
     Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+}
+
+/* The last LOAD_VBPNTR in the stream: the vertices' address (0: none) */
+static ULONG LastVbGpu(void)
+{
+    ULONG n, i, h, found;
+
+    n = (ULONG) (cs.ptr - stream);
+    found = 0;
+    for (i = 0; i < n; i += (R2_PKT_TYPE(h) == 2) ? 1 : 2 + R2_PKT_COUNT(h))
+    {
+        h = V(i);
+        if (R2_PKT_TYPE(h) == 3 && R2_PKT3_OPCODE(h) == R2_OP_3D_LOAD_VBPNTR)
+            found = i;
+    }
+    return found ? V(found + 3) : 0;
+}
+
+static void UsDraw(const UWORD *idx, ULONG n)
+{
+    Core_LockArrays(&core, 0, 4);
+    Core_DrawElements(&core, GL_TRIANGLES, (LONG) n, GL_UNSIGNED_SHORT, idx);
+    Core_UnlockArrays(&core);
+}
+
+/* Unlit, untextured draws from locked arrays under the static hint
+ * (2026-11-12, GLTron's cycle shadows: lighting off, the normal array left
+ * on, no colour or texture array, the current colour): kept in the upload
+ * cache by address (array.c VertexKey, units 0), x y z and the colour as
+ * the stream would carry them; a new colour is a new key. Without the
+ * hint, or with a texture unit on in a layout GLQuake does not use, the
+ * vertices go into the stream every draw, as before. */
+static void test_unlit_static_locked(void)
+{
+    struct R2ChkState st;
+    static const float pos[12] = { -1, -1, -5, 1, -1, -5, 1, 1, -5, -1, 1, -5 };
+    static const float nrm[12] = { 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1 };
+    static const float tc[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+    static const UWORD idx[6] = { 0, 1, 2, 0, 2, 3 };
+    static const UBYTE texel[4] = { 255, 255, 255, 255 };
+    ULONG hits0, ups0, gpu, i, k, col, pass;
+
+    for (pass = 0; pass < 2; pass++)
+    {
+        /* pass 1: without the normal array */
+        Fresh(1);
+        Core_Viewport(&core, 0, 0, W_, H_);
+        Core_MatrixMode(&core, GL_PROJECTION);
+        Core_LoadIdentity(&core);
+        Core_Frustum(&core, -1, 1, -1, 1, 1, 100);
+        Core_MatrixMode(&core, GL_MODELVIEW);
+        Core_LoadIdentity(&core);
+        Core_VertexPointer(&core, 3, GL_FLOAT, 0, pos);
+        Core_NormalPointer(&core, GL_FLOAT, 0, nrm);
+        Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+        Core_EnableClientState(&core, GL_NORMAL_ARRAY, pass == 0);
+        Core_Color4ub(&core, 0, 0, 0, 255);
+        CHECK_INT(core.vnorm, 0);
+
+        /* no hint: the indices hit, the vertices are packed again */
+        UsDraw(idx, 6);
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        UsDraw(idx, 6);
+        CHECK_INT(core.stat_uc_hits, hits0 + 1);
+
+        /* the static hint: one miss, then both hit and nothing is written */
+        Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+        Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_NICEST);
+        UsDraw(idx, 6);
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        ups0 = core.stat_uc_written;
+        UsDraw(idx, 6);
+        CHECK_INT(core.stat_uc_hits, hits0 + 2);
+        CHECK_INT(core.stat_uc_written, ups0);
+        gpu = LastVbGpu();
+        CHECK(gpu != 0);
+        col = core.cur_color;
+        for (i = 0; i < 4; i++)
+        {
+            /* x y z, the colour: 4 dwords a vertex */
+            for (k = 0; k < 3; k++)
+                CHECK_HEX(HeapV(gpu + i * 16 + k * 4), R2Cs_FloatBits(pos[i * 3 + k]));
+            CHECK_HEX(HeapV(gpu + i * 16 + 12), col);
+        }
+
+        /* a new current colour: a new key, the new colour in the vertices */
+        Core_Color4ub(&core, 10, 20, 30, 128);
+        CHECK(core.cur_color != col);
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        UsDraw(idx, 6);
+        CHECK_INT(core.stat_uc_hits, hits0 + 1);    /* the indices only */
+        gpu = LastVbGpu();
+        CHECK_HEX(HeapV(gpu + 3 * 16 + 12), core.cur_color);
+        CHECK_HEX(HeapV(gpu + 3 * 16 + 8), R2Cs_FloatBits(-5.0f));
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        UsDraw(idx, 6);
+        CHECK_INT(core.stat_uc_hits, hits0 + 2);
+
+        /* a texture unit on, no texture array: not GLQuake's layouts and
+         * not units 0 -- still packed every draw */
+        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, 4, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel);
+        Core_Enable(&core, GL_TEXTURE_2D, 1);
+        Core_TexCoordPointer(&core, 2, GL_FLOAT, 0, tc);
+        UsDraw(idx, 6);
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        UsDraw(idx, 6);
+        CHECK_INT(core.stat_uc_hits, hits0 + 1);
+        Core_Enable(&core, GL_TEXTURE_2D, 0);
+
+        /* GL_FASTEST forgets the keys -- the static indices' too (one
+         * generation): both new, then both hit again */
+        Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_FASTEST);
+        Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        UsDraw(idx, 6);
+        CHECK_INT(core.stat_uc_hits, hits0);
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        UsDraw(idx, 6);
+        CHECK_INT(core.stat_uc_hits, hits0 + 2);
+
+        /* polygon mode GL_LINE (GLTron's Recognizer outline): the edge list
+         * is keyed by its bytes, the vertices by address -- both hit */
+        Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+        Core_LockArrays(&core, 0, 4);
+        Core_DrawElementsX(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+        Core_UnlockArrays(&core);
+        Core_GpuIdle(&core);
+        hits0 = core.stat_uc_hits;
+        ups0 = core.stat_uc_written;
+        Core_LockArrays(&core, 0, 4);
+        Core_DrawElementsX(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+        Core_UnlockArrays(&core);
+        CHECK_INT(core.stat_uc_hits, hits0 + 2);
+        CHECK_INT(core.stat_uc_written, ups0);
+        Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_FILL);
+
+        Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+        Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_DONT_CARE);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        check_from = 0;
+        CHECK_INT(Checked(&st), R2CE_OK);
+    }
 }
 
 /* Texgen and texture matrices (texgen.c): the registers, the planes'
@@ -2994,6 +3162,185 @@ static void test_vertex_fast(void)
     CHECK_INT(core.vfast, 0);
 }
 
+/* 2026-11-12, lib/rgltable.c: with lighting on, the lit glVertex/glNormal
+ * (vtxlit.h) put exactly Core_Normal3f + Core_VertexBits' dwords into the
+ * stream -- every unit combination, fans and polygons (the first vertex),
+ * strips and triangles long enough to split, the unswapped stream (never
+ * taken), and polygon mode GL_LINE (the private stream, polymode.c).
+ * GLTron's explosion fragments: GL_TRIANGLES, glNormal3fv + glVertex3f. */
+#define VL_MAX 32768
+static ULONG vl_out[2][VL_MAX];
+
+static ULONG VlDraw(ULONG fast, ULONG pm, ULONG mode, ULONG nv, ULONG base, ULONG *out)
+{
+    ULONG i;
+    ULONG start;
+    ULONG n;
+    ULONG x, y, z;
+    ULONG a, b, d;
+    float fx, fy, fz;
+
+    start = (ULONG) (cs.ptr - stream);
+    if (pm)
+        Core_BeginX(&core, mode);
+    else
+        Core_Begin(&core, mode);
+    for (i = 0; i < nv; i++)
+    {
+        Core_Color4ub(&core, i & 255, (i * 3) & 255, 9, 200);
+        Core_TexCoord2f(&core, (float) i * 0.25f, 1.0f - (float) i);
+        Core_MultiTexCoord2f(&core, GL_TEXTURE1_ARB, (float) i * 0.5f, 3.0f);
+        fx = (float) (i % 3) * 0.6f;
+        fy = 0.8f - (float) (i % 7) * 0.1f;
+        fz = (float) (i + base) * -0.001f;
+        a = R2_FBITS(fx);
+        b = R2_FBITS(fy);
+        d = R2_FBITS(fz);
+        if (fast)
+            CORE_NORMAL_BITS(&core, a, b, d);
+        else
+            Core_Normal3f(&core, fx, fy, fz);
+        fx = (float) ((i * 37) % 200) * 0.01f - 1.0f;
+        fy = (float) ((i * 53) % 190) * 0.01f - 0.9f;
+        fz = -2.0f - (float) (i % 5) * 0.125f;
+        x = R2_FBITS(fx);
+        y = R2_FBITS(fy);
+        z = R2_FBITS(fz);
+        if (fast)
+            CORE_VERTEX_LIT(&core, x, y, z);
+        else
+            Core_VertexBits(&core, x, y, z);
+    }
+    if (pm)
+        Core_EndX(&core);
+    else
+        Core_End(&core);
+    n = (ULONG) (cs.ptr - stream) - start;
+    for (i = 0; i < n && i < VL_MAX; i++)
+        out[i] = stream[start + i];
+    return n;
+}
+
+static void test_vertex_lit(void)
+{
+    static UBYTE pix[16 * 16 * 3];
+    static const ULONG modes[] = { GL_TRIANGLES, GL_TRIANGLE_FAN, GL_POLYGON, GL_TRIANGLE_STRIP,
+                                   GL_QUADS, GL_LINE_LOOP };
+    static const ULONG counts[] = { 1, 3, 5, 255, 256, 257, 700 };
+    ULONG swap, units, pm, m, k, na, nb, bad, fasts, lit;
+
+    bad = 0;
+    fasts = 0;
+    lit = 0;
+    for (swap = 0; swap < 2; swap++)
+        for (units = 0; units < 4; units++)
+            for (pm = 0; pm < 2; pm++)
+                for (m = 0; m < sizeof(modes) / sizeof(modes[0]); m++)
+                    for (k = 0; k < sizeof(counts) / sizeof(counts[0]); k++)
+                    {
+                        if (pm && counts[k] > 300)
+                            continue;       /* the private buffer: long ones in test_polygon_mode */
+                        Fresh(swap);
+                        Core_ActiveTexture(&core, GL_TEXTURE1_ARB);
+                        Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+                        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB,
+                                        GL_UNSIGNED_BYTE, pix);
+                        Core_Enable(&core, GL_TEXTURE_2D, (units & 2) ? 1 : 0);
+                        Core_ActiveTexture(&core, GL_TEXTURE0_ARB);
+                        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+                        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 16, 16, 0, GL_RGB,
+                                        GL_UNSIGNED_BYTE, pix);
+                        Core_Enable(&core, GL_TEXTURE_2D, (units & 1) ? 1 : 0);
+                        Core_Enable(&core, GL_LIGHTING, 1);
+                        Core_Enable(&core, GL_LIGHT0, 1);
+                        if (pm)
+                            Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+                        if (core.vnorm)
+                            lit++;
+                        (void) VlDraw(0, pm, modes[m], 3, 1000, vl_out[0]);     /* the state goes out */
+                        na = VlDraw(0, pm, modes[m], counts[k], 0, vl_out[0]);
+                        (void) VlDraw(0, pm, modes[m], 3, 2000, vl_out[1]);
+                        nb = VlDraw(1, pm, modes[m], counts[k], 0, vl_out[1]);
+                        if (core.cs->swap)
+                            fasts++;
+                        if (na != nb || na > VL_MAX || memcmp(vl_out[0], vl_out[1], na * 4) != 0
+                            || Core_GetError(&core) != GL_NO_ERROR)
+                        {
+                            if (bad < 8)
+                                printf("  vertex lit: swap %lu units %lu pm %lu mode %lu n %lu: %lu vs %lu dwords\n",
+                                       (unsigned long) swap, (unsigned long) units, (unsigned long) pm,
+                                       (unsigned long) modes[m], (unsigned long) counts[k],
+                                       (unsigned long) na, (unsigned long) nb);
+                            bad++;
+                        }
+                    }
+    CHECK_INT(bad, 0);
+    CHECK(fasts > 0);
+    CHECK(lit > 0);
+    /* outside glBegin: nothing, as Core_VertexBits; unlit: the unlit
+     * record (Core_VertexBits' own), never a lit one */
+    Fresh(1);
+    Core_Enable(&core, GL_LIGHTING, 1);
+    na = (ULONG) (cs.ptr - stream);
+    {
+        ULONG x = 1, y = 2, z = 3;
+        CORE_VERTEX_LIT(&core, x, y, z);
+    }
+    CHECK_INT((ULONG) (cs.ptr - stream), na);
+    Fresh(1);
+    (void) VlDraw(0, 0, GL_TRIANGLES, 3, 1000, vl_out[0]);
+    na = VlDraw(0, 0, GL_TRIANGLES, 30, 0, vl_out[0]);
+    nb = VlDraw(1, 0, GL_TRIANGLES, 30, 0, vl_out[1]);
+    CHECK(na == nb && memcmp(vl_out[0], vl_out[1], na * 4) == 0);
+}
+
+/* 2026-11-12: Core_SetStateHook's function hears every change of vnorm
+ * (lighting, sphere maps) and pm_mask (glPolygonMode) -- the library's
+ * task table follows them (lib/rgltable.c) -- and nothing else */
+static ULONG sh_calls;
+static ULONG sh_vnorm;
+static ULONG sh_pm;
+
+static void ShCount(struct Core *c)
+{
+    sh_calls++;
+    sh_vnorm = c->vnorm;
+    sh_pm = c->pm_mask;
+}
+
+static void test_state_hook(void)
+{
+    Fresh(1);
+    sh_calls = 0;
+    Core_SetStateHook(ShCount);
+    Core_Enable(&core, GL_LIGHTING, 1);
+    CHECK_INT(sh_calls, 1);
+    CHECK_INT(sh_vnorm, 1);
+    Core_Enable(&core, GL_LIGHTING, 1);             /* no change */
+    Core_Enable(&core, GL_LIGHT0, 1);
+    CHECK_INT(sh_calls, 1);
+    Core_PolygonModeX(&core, GL_FRONT, GL_LINE);
+    CHECK_INT(sh_calls, 2);
+    CHECK(sh_pm != 0);
+    Core_PolygonModeX(&core, GL_BACK, GL_POINT);    /* still not filled: no change */
+    CHECK_INT(sh_calls, 2);
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_FILL);
+    CHECK_INT(sh_calls, 3);
+    CHECK_INT(sh_pm, 0);
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, 0x1234);    /* an error: no change */
+    CHECK_INT(sh_calls, 3);
+    Core_Enable(&core, GL_LIGHTING, 0);
+    CHECK_INT(sh_calls, 4);
+    CHECK_INT(sh_vnorm, 0);
+    Core_TexGeni(&core, GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+    Core_TexGeni(&core, GL_T, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
+    Core_TexGenEnable(&core, GL_TEXTURE_GEN_S, 1);  /* a sphere map: normals */
+    CHECK_INT(sh_vnorm, core.vnorm);
+    CHECK(sh_calls >= 4);
+    Core_SetStateHook(NULL);
+    (void) Core_GetError(&core);
+}
+
 /* GLQuake's two interleaved layouts, hashed as one block (array.c
  * OneBlock): its models (x y z, s t w, A R G B in 28 bytes) and its world
  * batches (x y z, s t, s t: 7 floats). A repeat is a hit; a change the
@@ -4151,6 +4498,67 @@ static void test_ucache_staged(void)
     vram_now = NULL;
 }
 
+/* 2026-11-12, the fast create: the mirror is not zeroed (CoreEnv alloc_raw;
+ * here HostAllocRaw fills it with 0xa5). Sizes that leave unwritten bytes
+ * behind every entry -- 1501 vertices of 24 bytes (36024, rounded to 36032)
+ * and 93 indices (47 dwords, the last one half padding; 188 bytes rounded to
+ * 192) -- so the flush copies never-written bytes into video RAM; a draw
+ * that read one would take index 0xa5a5, past every lock, and fail the
+ * checker or the picture. MEASURED: skipping the last index dword's write
+ * fails here (3 checks), with this pattern and with a zeroed mirror alike
+ * (index 0 draws the wrong vertex). */
+static UWORD uc_odd[30][93];
+
+/* uc_idx's first 93 indices, the last one the lock's LAST vertex: the 24
+ * bytes right before its block's unwritten tail are drawn too */
+static void UcDrawOdd(ULONG d, ULONG first, ULONG count)
+{
+    ULONG i;
+
+    for (i = 0; i < 92; i++)
+        uc_odd[d][i] = uc_idx[d][i];
+    uc_odd[d][92] = (UWORD) (first + count - 1);
+    Core_LockArrays(&core, (LONG) first, (LONG) count);
+    Core_DrawElements(&core, GL_TRIANGLES, 93, GL_UNSIGNED_SHORT, uc_odd[d]);
+    Core_UnlockArrays(&core);
+}
+
+static void test_ucache_staged_tails(void)
+{
+    ULONG d;
+    ULONG i;
+    ULONG n;
+    ULONG frame;
+
+    UcSetup();
+    memset(&vram[core.ucache_off / 4], 0x55, core.ucache_size);
+    vram_now = vram;
+    vram_begins = 0;
+    Core_SetVram(&core, HostVramBegin, HostVramEnd, staging);
+    CHECK_INT(core.ustaged, 1);
+    CHECK_INT(core.ushadow[0], 0xa5a5a5a5UL);      /* the raw allocator, not a cleared one */
+    for (frame = 0; frame < 3; frame++)
+    {
+        collect_from = (ULONG) (cs.ptr - stream);
+        n = 0;
+        for (d = 0; d < 30; d++)
+        {
+            UcDrawOdd(d, d * 250, 1501);
+            for (i = 0; i < 93; i++)
+                uc_all[n++] = uc_odd[d][i];
+        }
+        HostFlushStaged();
+        CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+        Core_GpuIdle(&core);
+    }
+    collect_from = 0;
+    CHECK_INT(vram_begins, 0);
+    CHECK_INT(core.stat_lock_draws, 90);
+    CHECK(core.stat_uc_hits > 0 && core.stat_uc_misses > 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    vram_now = NULL;
+}
+
 static void test_frames_through_ring(void)
 {
     struct SimCp sim;
@@ -4166,6 +4574,7 @@ static void test_frames_through_ring(void)
     ULONG seq;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
     Cfg(&cfg);
     SimCp_Init(&sim, ring_mem, ring_shadow, RING_DW, 1, FENCE_REG, 0, 300, &cfg);
     CHECK_INT(R2Ring_Init(&ring, ring_mem, 0x01000000UL, RING_DW, &sim.hw, 1, FENCE_REG, 100000),
@@ -4295,6 +4704,685 @@ static void test_present(void)
     CHECK_INT(Checked(&st), R2CE_OK);
 }
 
+/* --- glPolygonMode (polymode.c, 2026-11-11) ------------------------------------- */
+
+/* vertices of every 3D_DRAW_IMMD_2 and 3D_DRAW_INDX_2 in the stream drawn as
+ * R200 primitive prim (indexed: the indices) */
+static ULONG ImmdVerts(ULONG prim)
+{
+    ULONG n;
+    ULONG i;
+    ULONG h;
+    ULONG len;
+    ULONG cntl;
+    ULONG total;
+
+    n = (ULONG) (cs.ptr - stream);
+    total = 0;
+    for (i = 0; i < n; i += len)
+    {
+        h = V(i);
+        len = (R2_PKT_TYPE(h) == 2) ? 1 : (R2_PKT_TYPE(h) == 1) ? 3 : R2_PKT_COUNT(h) + 2;
+        if (R2_PKT_TYPE(h) == 3 && (R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_IMMD_2
+                                    || R2_PKT3_OPCODE(h) == R2_OP_3D_DRAW_INDX_2))
+        {
+            cntl = V(i + 1);
+            if ((cntl & R_VF_PRIM_MASK) == prim)
+                total += cntl >> 16;
+        }
+    }
+    return total;
+}
+
+/* an axis-aligned square at (x, y), side d: counter-clockwise (front) or not */
+static void PmSquare(float x, float y, float d, ULONG ccw)
+{
+    Core_Vertex3f(&core, x, y, 0.0f);
+    if (ccw)
+    {
+        Core_Vertex3f(&core, x + d, y, 0.0f);
+        Core_Vertex3f(&core, x + d, y + d, 0.0f);
+        Core_Vertex3f(&core, x, y + d, 0.0f);
+    }
+    else
+    {
+        Core_Vertex3f(&core, x, y + d, 0.0f);
+        Core_Vertex3f(&core, x + d, y + d, 0.0f);
+        Core_Vertex3f(&core, x + d, y, 0.0f);
+    }
+}
+
+static void PmOrtho(void)
+{
+    Core_MatrixMode(&core, GL_PROJECTION);
+    Core_LoadIdentity(&core);
+    Core_Ortho(&core, 0, W_, 0, H_, -10, 10);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Core_LoadIdentity(&core);
+}
+
+static void test_polygon_mode(void)
+{
+    static ULONG fill_stream[4096];
+    static float va[8 * 3];
+    static const UWORD qidx[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+    struct R2ChkState st;
+    LONG got[2];
+    ULONG fill_n;
+    ULONG i;
+    ULONG k;
+    ULONG x;
+    ULONG y;
+    ULONG z;
+    float a;
+
+    /* GL_FILL: the wrappers pass the calls on, the stream is the same dwords */
+    Fresh(1);
+    PmOrtho();
+    Core_Begin(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);
+    Core_End(&core);
+    fill_n = (ULONG) (cs.ptr - stream);
+    CHECK(fill_n <= 4096);
+    memcpy(fill_stream, stream, fill_n * 4);
+    Fresh(1);
+    PmOrtho();
+    Core_BeginX(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);
+    Core_EndX(&core);
+    CHECK_INT((ULONG) (cs.ptr - stream), fill_n);
+    CHECK(memcmp(fill_stream, stream, fill_n * 4) == 0);
+
+    /* glGet answers front and back */
+    Core_GetIntegervX(&core, GL_POLYGON_MODE, got);
+    CHECK_HEX((ULONG) got[0], GL_FILL);
+    CHECK_HEX((ULONG) got[1], GL_FILL);
+    Core_PolygonModeX(&core, GL_FRONT, GL_LINE);
+    Core_GetIntegervX(&core, GL_POLYGON_MODE, got);
+    CHECK_HEX((ULONG) got[0], GL_LINE);
+    CHECK_HEX((ULONG) got[1], GL_FILL);
+    Core_PolygonModeX(&core, GL_BACK, GL_POINT);
+    Core_GetIntegervX(&core, GL_POLYGON_MODE, got);
+    CHECK_HEX((ULONG) got[0], GL_LINE);
+    CHECK_HEX((ULONG) got[1], GL_POINT);
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, 0x1234);
+    CHECK_HEX(Core_GetError(&core), GL_INVALID_ENUM);
+
+    /* GL_LINE: two quads, four edges each, no diagonal, no triangles */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_BeginX(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);
+    PmSquare(40, 10, 20, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 16);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_QUADS) + ImmdVerts(R_VF_PRIM_TRIANGLES), 0);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK(core.cs == &cs);
+    CHECK_HEX(Core_GetError(&core), GL_NO_ERROR);
+
+    /* culling happens before the polygon mode: the clockwise one is gone */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_Enable(&core, GL_CULL_FACE, 1);
+    Core_BeginX(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);
+    PmSquare(40, 10, 20, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 8);
+    Core_CullFace(&core, GL_FRONT);
+    Core_BeginX(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 8);          /* front culled: nothing more */
+    Core_FrontFace(&core, GL_CW);
+    Core_BeginX(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);                            /* counter-clockwise = back now */
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 16);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* front GL_LINE, back GL_FILL, no culling: one outline, one filled square */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT, GL_LINE);
+    Core_BeginX(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);
+    PmSquare(40, 10, 20, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 8);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_TRIANGLES), 6);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* GL_POINT: a triangle's three corners */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_POINT);
+    Core_BeginX(&core, GL_TRIANGLES);
+    Core_Vertex3f(&core, 10, 10, 0); Core_Vertex3f(&core, 30, 10, 0); Core_Vertex3f(&core, 20, 30, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_POINTS), 3);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_TRIANGLES), 0);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* edge flags: a square of two triangles, the diagonal flagged off both times */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_BeginX(&core, GL_TRIANGLES);
+    Core_EdgeFlag(&core, 1);
+    Core_Vertex3f(&core, 10, 10, 0); Core_Vertex3f(&core, 30, 10, 0);
+    Core_EdgeFlag(&core, 0);
+    Core_Vertex3f(&core, 30, 30, 0);
+    Core_Vertex3f(&core, 10, 10, 0);
+    Core_EdgeFlag(&core, 1);
+    Core_Vertex3f(&core, 30, 30, 0); Core_Vertex3f(&core, 10, 30, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 8);
+    /* in GL_POINT the vertex with a flag off is not drawn: 4 of 6 */
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_POINT);
+    Core_BeginX(&core, GL_TRIANGLES);
+    Core_EdgeFlag(&core, 1);
+    Core_Vertex3f(&core, 10, 10, 0); Core_Vertex3f(&core, 30, 10, 0);
+    Core_EdgeFlag(&core, 0);
+    Core_Vertex3f(&core, 30, 30, 0);
+    Core_Vertex3f(&core, 10, 10, 0);
+    Core_EdgeFlag(&core, 1);
+    Core_Vertex3f(&core, 30, 30, 0); Core_Vertex3f(&core, 10, 30, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_POINTS), 4);
+    Core_EdgeFlag(&core, 1);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* strips and fans: every triangle's three edges (GL ignores edge flags
+     * there); a quad strip's quads without their diagonals */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_BeginX(&core, GL_TRIANGLE_STRIP);
+    Core_Vertex3f(&core, 10, 10, 0); Core_Vertex3f(&core, 10, 30, 0);
+    Core_Vertex3f(&core, 30, 10, 0); Core_Vertex3f(&core, 30, 30, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 12);
+    Core_BeginX(&core, GL_TRIANGLE_FAN);
+    Core_Vertex3f(&core, 20, 20, 0); Core_Vertex3f(&core, 30, 20, 0);
+    Core_Vertex3f(&core, 20, 30, 0); Core_Vertex3f(&core, 10, 20, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 24);
+    Core_BeginX(&core, GL_QUAD_STRIP);
+    Core_Vertex3f(&core, 10, 10, 0); Core_Vertex3f(&core, 10, 30, 0);
+    Core_Vertex3f(&core, 30, 10, 0); Core_Vertex3f(&core, 30, 30, 0);
+    Core_Vertex3f(&core, 50, 10, 0); Core_Vertex3f(&core, 50, 30, 0);
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 40);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* a polygon of 400 vertices, split by vertex.c: 400 edges, the closing
+     * one included, no chord where it was split */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_Enable(&core, GL_CULL_FACE, 1);
+    Core_BeginX(&core, GL_POLYGON);
+    for (i = 0; i < 400; i++)
+    {
+        a = 360.0f * (float) i / 400.0f;
+        Core_Vertex3f(&core, 160.0f + 100.0f * Core_Cos(a), 120.0f + 100.0f * Core_Sin(a), 0.0f);
+    }
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 800);
+    CHECK(core.stat_splits >= 1);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* 3000 vertices: the private buffer fills and is drawn several times */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_BeginX(&core, GL_TRIANGLES);
+    for (i = 0; i < 1000; i++)
+    {
+        x = 10 + (i % 25) * 10;
+        y = 10 + (i / 25) * 5;
+        Core_Vertex3f(&core, (float) x, (float) y, 0); Core_Vertex3f(&core, (float) x + 8, (float) y, 0);
+        Core_Vertex3f(&core, (float) x, (float) y + 4, 0);
+    }
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 6000);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* the fast glVertex (vtxfast.h) writes into the private buffer the same way */
+    Fresh(1);
+    PmOrtho();
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_BeginX(&core, GL_QUADS);
+    for (i = 0; i < 300; i++)
+    {
+        for (k = 0; k < 4; k++)
+        {
+            a = (float) (10 + (i % 30) * 10 + ((k == 1 || k == 2) ? 8 : 0));
+            x = R2_FBITS(a);
+            a = (float) (10 + (i / 30) * 10 + ((k >= 2) ? 8 : 0));
+            y = R2_FBITS(a);
+            a = 0.0f;
+            z = R2_FBITS(a);
+            CORE_VERTEX_FAST(&core, x, y, z);
+        }
+    }
+    Core_EndX(&core);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 300 * 8);
+    CHECK_INT(Checked(&st), R2CE_OK);
+
+    /* GLTron's Recognizer: glDrawElements(GL_QUADS, GL_UNSIGNED_SHORT) inside
+     * glLockArraysEXT under the static hints, culling on: one outline */
+    Fresh(1);
+    PmOrtho();
+    for (i = 0; i < 2; i++)
+    {
+        /* quad 0 counter-clockwise, quad 1 clockwise */
+        va[i * 12 + 0] = 10.0f + 40.0f * (float) i; va[i * 12 + 1] = 10.0f;
+        va[i * 12 + 3] = i ? 10.0f + 40.0f * (float) i : 30.0f; va[i * 12 + 4] = i ? 30.0f : 10.0f;
+        va[i * 12 + 6] = 30.0f + 40.0f * (float) i; va[i * 12 + 7] = 30.0f;
+        va[i * 12 + 9] = i ? 30.0f + 40.0f * (float) i : 10.0f; va[i * 12 + 10] = i ? 10.0f : 30.0f;
+        va[i * 12 + 2] = va[i * 12 + 5] = va[i * 12 + 8] = va[i * 12 + 11] = 0.0f;
+    }
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, va);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_NICEST);
+    Core_Enable(&core, GL_CULL_FACE, 1);
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_LockArrays(&core, 0, 8);
+    k = core.stat_lock_draws;
+    Core_DrawElementsX(&core, GL_QUADS, 8, GL_UNSIGNED_SHORT, qidx);
+    /* the static arrays' way: one locked GL_LINES draw of the front quad's edges */
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 8);
+    CHECK_INT(core.stat_lock_draws, k + 1);
+    /* filled again: the locked path as before */
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_FILL);
+    Core_DrawElementsX(&core, GL_QUADS, 8, GL_UNSIGNED_SHORT, qidx);
+    CHECK_INT(core.stat_lock_draws, k + 2);
+    /* without the static hints: the glArrayElement way, the same edges */
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_DONT_CARE);
+    Core_DrawElementsX(&core, GL_QUADS, 8, GL_UNSIGNED_SHORT, qidx);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 16);
+    CHECK_INT(core.stat_lock_draws, k + 2);
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_NICEST);
+    Core_UnlockArrays(&core);
+    /* glDrawArrays the same way */
+    Core_DrawArraysX(&core, GL_QUADS, 0, 8);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 24);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 0);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_FASTEST);
+    Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_FASTEST);
+
+    /* the real stream drops the frame while the outline is drawn: its state
+     * goes ahead of the lines again */
+    Fresh(1);
+    PmOrtho();
+    cs.need = DropNeed;
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_BeginX(&core, GL_QUADS);
+    PmSquare(10, 10, 20, 1);
+    PmSquare(40, 10, 20, 1);
+    cs.end = cs.ptr + 4;            /* room for none of the lines */
+    drops = 0;
+    drop_next = 1;
+    Core_EndX(&core);
+    CHECK_INT(drops, 1);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 16);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    /* ... and in the middle of a long primitive (the private buffer drawn
+     * from vertex.c's split) */
+    Fresh(1);
+    PmOrtho();
+    cs.need = DropNeed;
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_LINE);
+    Core_BeginX(&core, GL_TRIANGLE_STRIP);
+    for (i = 0; i < 4000; i++)
+    {
+        if (i == 2500)
+        {
+            cs.end = cs.ptr + 4;
+            drops = 0;
+            drop_next = 1;
+        }
+        Core_Vertex3f(&core, (float) (i % 300), (float) (i & 1) * 10.0f + (float) (i / 300) * 20.0f, 0.0f);
+        if (i == 2499)
+            k = (ULONG) (cs.ptr - stream);      /* drawn before: a part already */
+    }
+    CHECK(k > 0);
+    Core_EndX(&core);
+    CHECK_INT(drops, 1);
+    CHECK(ImmdVerts(R_VF_PRIM_LINES) > 0);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    cs.need = NULL;
+    CHECK(core.cs == &cs);
+}
+
+/* GLTron's frames, the outline filled (polygon mode never set, as 0.11
+ * drew it) and in GL_LINE: outside the outline's own draw the two streams
+ * must be the same packets (2026-11-11: the A/B on the A4000D dithered every
+ * pixel differently -- glArrayElement had left the current normal at the
+ * outline's last vertex, and the lit wall after it took that one). Array
+ * and index addresses are masked: the filled outline goes through the
+ * upload cache, the lines do not. */
+static ULONG *gt_norm_a;
+static ULONG *gt_norm_b;
+
+/* stream s[0..n) without the windows [from[f], to[f]), addresses masked,
+ * into out; returns the dwords written */
+static ULONG GtNormal(const ULONG *s, ULONG n, const ULONG *from, const ULONG *to, ULONG nw,
+                      ULONG *out)
+{
+    ULONG i;
+    ULONG k;
+    ULONG h;
+    ULONG len;
+    ULONG w;
+    ULONG o;
+    ULONG mask;
+
+    o = 0;
+    for (i = 0; i < n; i += len)
+    {
+        h = cs.swap ? R2Cs_Swap32(s[i]) : s[i];
+        len = (R2_PKT_TYPE(h) == 2) ? 1 : (R2_PKT_TYPE(h) == 1) ? 3 : R2_PKT_COUNT(h) + 2;
+        for (w = 0; w < nw; w++)
+            if (i >= from[w] && i < to[w])
+                break;
+        if (w < nw)
+            continue;
+        mask = (R2_PKT_TYPE(h) == 3 && (R2_PKT3_OPCODE(h) == R2_OP_3D_LOAD_VBPNTR
+                                        || R2_PKT3_OPCODE(h) == R2_OP_INDX_BUFFER));
+        for (k = 0; k < len && i + k < n; k++)
+            out[o++] = (mask && k > 0) ? 0 : s[i + k];
+    }
+    return o;
+}
+
+static void test_polymode_frames(void)
+{
+    static ULONG ref[400000];
+    struct R2ChkState st;
+    ULONG *a;
+    ULONG *b;
+    ULONG rfrom[3], rto[3], pfrom[3], pto[3];
+    ULONG rn;
+    ULONG pn;
+    ULONG na;
+    ULONG nb;
+    ULONG f;
+    ULONG i;
+
+    gt_norm_a = (ULONG *) calloc(400000, 4);
+    gt_norm_b = (ULONG *) calloc(400000, 4);
+    CHECK(gt_norm_a != NULL && gt_norm_b != NULL);
+    if (gt_norm_a == NULL || gt_norm_b == NULL)
+        return;
+    Fresh(1);
+    GtSetup(&core);
+    for (f = 0; f < 3; f++)
+    {
+        GtFrame(&core, f, 0, &a, &b);
+        rfrom[f] = (ULONG) (a - stream);
+        rto[f] = (ULONG) (b - stream);
+    }
+    rn = (ULONG) (cs.ptr - stream);
+    memcpy(ref, stream, rn * 4);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 0);
+
+    Fresh(1);
+    GtSetup(&core);
+    for (f = 0; f < 3; f++)
+    {
+        GtFrame(&core, f, GL_LINE, &a, &b);
+        pfrom[f] = (ULONG) (a - stream);
+        pto[f] = (ULONG) (b - stream);
+    }
+    pn = (ULONG) (cs.ptr - stream);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(ImmdVerts(R_VF_PRIM_LINES), 3 * 2 * 8);  /* two front quads a frame */
+
+    /* before the first outline: the very same dwords */
+    CHECK_INT(pfrom[0], rfrom[0]);
+    CHECK(memcmp(ref, stream, rfrom[0] * 4) == 0);
+    na = GtNormal(ref, rn, rfrom, rto, 3, gt_norm_a);
+    nb = GtNormal(stream, pn, pfrom, pto, 3, gt_norm_b);
+    CHECK_INT(nb, na);
+    for (i = 0; i < na && i < nb && gt_norm_a[i] == gt_norm_b[i]; i++)
+        ;
+    if (i < na || i < nb)
+    {
+        ULONG k;
+
+        printf("  polymode frames: the streams part at normalised dword %lu of %lu\n",
+               (unsigned long) i, (unsigned long) na);
+        for (k = (i > 6 ? i - 6 : 0); k < i + 6 && k < na && k < nb; k++)
+            printf("    %5lu %08lx %08lx%s\n", (unsigned long) k,
+                   (unsigned long) (cs.swap ? R2Cs_Swap32(gt_norm_a[k]) : gt_norm_a[k]),
+                   (unsigned long) (cs.swap ? R2Cs_Swap32(gt_norm_b[k]) : gt_norm_b[k]),
+                   gt_norm_a[k] != gt_norm_b[k] ? "  <" : "");
+    }
+    CHECK(i == na && na == nb);
+    free(gt_norm_a);
+    free(gt_norm_b);
+}
+
+/* The static arrays' way (polymode.c Static: area forms, lines drawn by
+ * the card) decides culling and the face as the glArrayElement way does:
+ * a ball of quads, triangles and one polygon seen from many sides, both
+ * front faces, back and front culling, GL_LINE and GL_POINT. */
+static void test_polymode_static(void)
+{
+    static float bv[81 * 3];
+    static UWORD qi[64 * 4];
+    static UWORD ti[64 * 6];
+    static UWORD pi[8];
+    struct R2ChkState st;
+    ULONG i;
+    ULONG j;
+    ULONG v;
+    ULONG cfg;
+    ULONG n0;
+    ULONG n1;
+    ULONG n2;
+    ULONG mism;
+    ULONG prim;
+    float th;
+    float ph;
+
+    /* a 9 x 9 grid of points on a ball, quads facing out (counter-clockwise
+     * from outside), the same as triangle pairs, and one octagon */
+    for (j = 0; j < 9; j++)
+        for (i = 0; i < 9; i++)
+        {
+            th = 20.0f + 140.0f * (float) j / 8.0f;
+            ph = 360.0f * (float) i / 8.0f;
+            bv[(j * 9 + i) * 3 + 0] = Core_Sin(th) * Core_Cos(ph);
+            bv[(j * 9 + i) * 3 + 1] = Core_Sin(th) * Core_Sin(ph);
+            bv[(j * 9 + i) * 3 + 2] = Core_Cos(th);
+        }
+    for (j = 0; j < 8; j++)
+        for (i = 0; i < 8; i++)
+        {
+            v = j * 9 + i;
+            qi[(j * 8 + i) * 4 + 0] = (UWORD) v;
+            qi[(j * 8 + i) * 4 + 1] = (UWORD) (v + 9);
+            qi[(j * 8 + i) * 4 + 2] = (UWORD) (v + 10);
+            qi[(j * 8 + i) * 4 + 3] = (UWORD) (v + 1);
+            ti[(j * 8 + i) * 6 + 0] = (UWORD) v;
+            ti[(j * 8 + i) * 6 + 1] = (UWORD) (v + 9);
+            ti[(j * 8 + i) * 6 + 2] = (UWORD) (v + 10);
+            ti[(j * 8 + i) * 6 + 3] = (UWORD) v;
+            ti[(j * 8 + i) * 6 + 4] = (UWORD) (v + 10);
+            ti[(j * 8 + i) * 6 + 5] = (UWORD) (v + 1);
+        }
+    for (i = 0; i < 8; i++)
+        pi[i] = (UWORD) (4 * 9 + i);        /* the equator, one way round */
+
+    Fresh(1);
+    Core_MatrixMode(&core, GL_PROJECTION);
+    Core_LoadIdentity(&core);
+    Core_Frustum(&core, -1.0, 1.0, -0.75, 0.75, 1.0, 50.0);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, bv);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    mism = 0;
+    for (cfg = 0; cfg < 48; cfg++)
+    {
+        Core_LoadIdentity(&core);
+        Core_Translatef(&core, 0.3f * (float) (cfg % 3) - 0.3f, 0.0f, -4.0f);
+        Core_Rotatef(&core, 37.0f * (float) cfg + 11.0f, 1.0f, 0.7f, 0.2f);
+        Core_Enable(&core, GL_CULL_FACE, (cfg & 4) ? 0 : 1);
+        Core_CullFace(&core, (cfg & 8) ? GL_FRONT : GL_BACK);
+        Core_FrontFace(&core, (cfg & 16) ? GL_CW : GL_CCW);
+        Core_PolygonModeX(&core, GL_FRONT_AND_BACK, (cfg & 32) ? GL_POINT : GL_LINE);
+        prim = (cfg & 32) ? R_VF_PRIM_POINTS : R_VF_PRIM_LINES;
+        Core_LockArrays(&core, 0, 81);
+        for (i = 0; i < 3; i++)
+        {
+            /* the static arrays' way, then the glArrayElement way */
+            n0 = ImmdVerts(prim);
+            Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_NICEST);
+            if (i == 0) Core_DrawElementsX(&core, GL_QUADS, 64 * 4, GL_UNSIGNED_SHORT, qi);
+            if (i == 1) Core_DrawElementsX(&core, GL_TRIANGLES, 64 * 6, GL_UNSIGNED_SHORT, ti);
+            if (i == 2) Core_DrawElementsX(&core, GL_POLYGON, 8, GL_UNSIGNED_SHORT, pi);
+            n1 = ImmdVerts(prim);
+            Core_Hint(&core, GL_RGL_STATIC_INDICES_HINT, GL_DONT_CARE);
+            if (i == 0) Core_DrawElementsX(&core, GL_QUADS, 64 * 4, GL_UNSIGNED_SHORT, qi);
+            if (i == 1) Core_DrawElementsX(&core, GL_TRIANGLES, 64 * 6, GL_UNSIGNED_SHORT, ti);
+            if (i == 2) Core_DrawElementsX(&core, GL_POLYGON, 8, GL_UNSIGNED_SHORT, pi);
+            n2 = ImmdVerts(prim);
+            if (n1 - n0 != n2 - n1)
+            {
+                mism++;
+                printf("  static way: cfg %lu kind %lu: %lu against %lu\n", (unsigned long) cfg,
+                       (unsigned long) i, (unsigned long) (n1 - n0), (unsigned long) (n2 - n1));
+            }
+        }
+        Core_UnlockArrays(&core);
+        if (cs.ptr - stream > 300000)
+        {
+            CHECK_INT(Checked(&st), R2CE_OK);
+            cs.ptr = stream;                /* room again; the state goes ahead anew */
+            Core_Forget(&core);
+        }
+    }
+    CHECK_INT(mism, 0);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    Core_PolygonModeX(&core, GL_FRONT_AND_BACK, GL_FILL);
+    Core_Enable(&core, GL_CULL_FACE, 0);
+    Core_FrontFace(&core, GL_CCW);
+    Core_CullFace(&core, GL_BACK);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 0);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+}
+
+/* The synced present (2026-11-12): bands from the top down, edge to edge,
+ * each with its own t range, the band heights growing; the present's own
+ * dwords as CORE_PRESENT_DW counts them. */
+static ULONG PresentBands(ULONG from, LONG x, LONG y, ULONG w, ULONG h)
+{
+    ULONG n, i, h0, len, cntl, bands, top, bot, last_h, want;
+    float fx0, fx1, s1, ta;
+    n = (ULONG) (cs.ptr - stream);
+    bands = 0;
+    top = (ULONG) y;
+    last_h = 0;
+    fx0 = (float) x;
+    fx1 = (float) (x + (LONG) w);
+    s1 = (float) w / (float) W_;
+    ta = 0.0f;
+    for (i = from; i < n; i += len)
+    {
+        h0 = V(i);
+        len = (R2_PKT_TYPE(h0) == 2) ? 1 : (R2_PKT_TYPE(h0) == 1) ? 3 : R2_PKT_COUNT(h0) + 2;
+        if (R2_PKT_TYPE(h0) != 3 || R2_PKT3_OPCODE(h0) != R2_OP_3D_DRAW_IMMD_2)
+            continue;
+        cntl = V(i + 1);
+        CHECK_HEX(cntl & R_VF_PRIM_MASK, R_VF_PRIM_RECT_LIST);
+        CHECK_INT(cntl >> 16, 3);
+        CHECK_INT(len, 14);
+        /* v0 bottom-left, v1 bottom-right, v2 top-right: x y s t each */
+        bot = (ULONG) F(V(i + 3));
+        CHECK(F(V(i + 2)) == fx0 && F(V(i + 6)) == fx1 && F(V(i + 10)) == fx1);
+        CHECK(F(V(i + 7)) == F(V(i + 3)));
+        CHECK(F(V(i + 11)) == (float) top);             /* the last band's bottom */
+        CHECK(bot > top && (float) bot == F(V(i + 3)));
+        CHECK(F(V(i + 4)) == 0.0f && F(V(i + 8)) == s1 && F(V(i + 12)) == s1);
+        CHECK(F(V(i + 13)) == ta);                      /* the same bits as the last bottom */
+        want = (ULONG) (top - (ULONG) y);
+        CHECK(V(i + 5) == R2Cs_FloatBits((float) (bot - (ULONG) y) / (float) H_));
+        CHECK(V(i + 9) == V(i + 5));
+        if (bot != (ULONG) y + h)
+        {
+            CHECK_INT(bot - top, CORE_PRESENT_BAND0 + want / CORE_PRESENT_GROW);
+            CHECK(bot - top >= last_h);                 /* growing down the screen */
+        }
+        last_h = bot - top;
+        ta = F(V(i + 5));
+        top = bot;
+        bands++;
+    }
+    CHECK_INT(top, (ULONG) y + h);                      /* down to the last row */
+    CHECK(bands <= CORE_PRESENT_BANDS);
+    return bands;
+}
+
+static void test_present_bands(void)
+{
+    struct CoreScreen scr;
+    struct R2ChkState st;
+    ULONG from;
+    ULONG bands;
+
+    Fresh(1);
+    Core_Clear(&core, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    Draw1();
+    scr.gpu = SCREEN_GPU;
+    scr.pitch = 1024;
+    scr.format = R_COLOR_FORMAT_ARGB8888;
+    scr.width = 1024;
+    scr.height = 768;
+    /* without vertical sync: one rectangle, as before */
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 192, 144);
+    CHECK_INT(PresentBands(from, 192, 144, W_, H_), 1);
+    /* with it: 480 rows in 27 bands of 8, 8, 9 ... 35 rows and the rest */
+    core.sync = 1;
+    Draw1();
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 192, 144);
+    bands = PresentBands(from, 192, 144, W_, H_);
+    CHECK_INT(bands, 27);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(st.draws, 1 + 1 + 1 + 1 + 27);            /* clear, triangle, copy, triangle, bands */
+    printf("  synced present: %lu bands, %lu dwords after the state (CORE_PRESENT_DW %lu)\n",
+           (unsigned long) bands, (unsigned long) ((ULONG) (cs.ptr - stream) - from),
+           (unsigned long) CORE_PRESENT_DW);
+    /* the present's own dwords: a clean state, so its Core_Validate adds none */
+    Draw1();
+    Core_Validate(&core);
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 192, 144);
+    CHECK_INT((ULONG) (cs.ptr - stream) - from, 58 + 14 * 27);
+    /* clipped: 320 x 200 of the frame, 200 rows: 16 bands */
+    scr.width = 320;
+    scr.height = 200;
+    Draw1();
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 0, 0);
+    CHECK_INT(PresentBands(from, 0, 0, 320, 200), 16);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    core.sync = 0;
+}
+
 int main(void)
 {
     struct CoreTarget t;
@@ -4308,6 +5396,7 @@ int main(void)
     test_lighting();
     test_texgen();
     test_lit_locked();
+    test_unlit_static_locked();
     test_compat();
     test_tex32();
     test_textures();
@@ -4317,6 +5406,8 @@ int main(void)
     test_shadow_equivalence();
     test_vertex_bits();
     test_vertex_fast();
+    test_vertex_lit();
+    test_state_hook();
     test_vertex_fan2();
     test_matrix_versions();
     test_color4f_repeat();
@@ -4326,6 +5417,7 @@ int main(void)
     test_arrays();
     test_locked();
     test_present();
+    test_present_bands();
     test_vram_hooks();
     test_tex_rows();
     test_tex_rows8();
@@ -4339,8 +5431,12 @@ int main(void)
     test_hazard_restamp();
     test_scissor_empty();
     test_ucache_staged();
+    test_ucache_staged_tails();
     test_packfast();
     test_frames_through_ring();
+    test_polygon_mode();
+    test_polymode_frames();
+    test_polymode_static();
     (void) t;
     (void) e;
     return tk_done("test_core");

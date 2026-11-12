@@ -69,6 +69,8 @@ FEATURES
     off for speed); one Picasso96 lock a frame
   * Installer, manuals in English and German, a card test, a card report
     for bug reports, four demos
+  * RadeonStat: the card's engine load, command queue, card memory and
+    display, live in a window with a busy history (read-only)
 
 
 NOT IMPLEMENTED YET
@@ -149,6 +151,11 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.12 (12.11.2026)
+  - triple buffering (panning or ChangeScreenBuffer), vsync without
+    tearing, wireframe and points, faster lit vertices, contexts open
+    in 26 ms
 
 0.11 (8.11.2026)
   - all 205 functions of minigl.library 29.1: display lists, GLUT

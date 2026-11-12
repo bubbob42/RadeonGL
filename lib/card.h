@@ -45,7 +45,8 @@
 #define CARD_HEAP    2
 #define CARD_SCREEN  3          /* where the present copies the frame: the GL screen's bitmap,
                                  * a window context's own show bitmap (ours, own_show); a bitmap
-                                 * context's colour buffer, the program's (not ours to free) */
+                                 * context's colour buffer, the program's (not ours to free); with
+                                 * triple buffering the screen buffer the frame draws into */
 #define CARD_NBM     4
 
 /* What a context draws into (W1, docs/concept-window-contexts.md) */
@@ -71,6 +72,8 @@
 #define CARD_OK          0
 #define CARD_NOT_RADEON  1      /* no Radeon on the board P96 offers: use the null card */
 #define CARD_FAILED      2      /* a Radeon, but it cannot be used: why[] says */
+
+struct CardFlip;                /* cardflip.c */
 
 struct CardBm
 {
@@ -203,13 +206,26 @@ struct Card
     ULONG heap_way;             /* CARD_HEAP_* of the heap in use */
     ULONG heap_try_n;
     UBYTE heap_try[CARD_HEAP_TRIES]; /* (MB << 3) | (way << 1) | on the board */
+
+    /* 2026-11-12, triple buffering (lib/cardflip.c): the screen kind draws
+     * into three screen buffers, b[CARD_SCREEN] the one the frame being
+     * built draws into, and shows them in turn -- no present copy */
+    ULONG flip_on;
+    struct CardFlip *flip;      /* asked for three buffers: the state (kept over a resize) */
+    ULONG scr_intui;            /* the GL screen is Intuition's (CloseScreen, not p96CloseScreen) */
 };
 
 extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
 /* Breadcrumbs for the debug trap catcher (trapcatch.h, RGL_TRAPCATCH):
  * where the card code is, and the bitmaps' CPU addresses at the last
  * lock. Nothing in the release build. */
-#if defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
+#if defined(RGL_TRACE)
+/* The trace build (RGL_DEFS=-DRGL_TRACE, 2026-11-11, GLBench Pelt freezing
+ * the A4000D with no MuForce hit): every WHERE() becomes a line on the
+ * serial port, so the last line before a freeze names the step. */
+void Card_Trace(ULONG n, ULONG v);
+#define WHERE(n, v) Card_Trace((n), (ULONG) (v))
+#elif defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
 extern volatile ULONG rgl_where, rgl_where2, rgl_pending;
 extern volatile ULONG rgl_bm[CARD_NBM];
 #define WHERE(n, v) (rgl_where = (n), rgl_where2 = (ULONG) (v))
@@ -323,5 +339,8 @@ void Card_Release(void);
 
 /* Free everything. No file I/O (LibClose may call it under Forbid). */
 void Card_Close(struct Card *k);
+
+/* A register read (cardflip.c's beam check around ScrollVPort; reads only) */
+ULONG Card_ReadReg(struct Card *k, ULONG reg);
 
 #endif /* RADEONGL_CARD_H */

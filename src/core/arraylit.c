@@ -9,7 +9,9 @@
  * (MEASURED 2026-11-08; the same layout effect as lib/rgllight.c's the
  * night before). The Makefile links this module last. A static key for
  * unlit layouts GLQuake does not use as well (VertexKey's fall-through)
- * grew the inlined VertexKey and was 0.7% slow again: lit only.
+ * grew the inlined VertexKey and was 0.7% slow again (measured with vsync
+ * on, 2026-11-08): lit only. Since 2026-11-12 also unlit draws with no
+ * texture unit on (GLTron's shadows), through VertexKey's first test.
  */
 #include "core.h"
 #include "coreint.h"

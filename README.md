@@ -72,12 +72,19 @@ needs.
   MiniGL's own main loop with its key, mouse and idle callbacks.
 - **Fragments:** blending, alpha test, depth test with every function,
   depth mask, polygon offset and `mglSetZOffset`, back-face culling,
-  scissor, colour mask, flat and smooth shading, point size.
+  scissor, colour mask, flat and smooth shading, point size; polygons drawn
+  as lines or points (`glPolygonMode`).
 - **MiniGL 29.1 contexts:** a Picasso96 screen of its own, 16 or 32 bit, up
-  to 2048 x 2048, double buffered, with MiniGL's lock modes; every mode of the
-  card (`mglGetSupportedScreenModes`), a context in a chosen mode, the size
+  to 2048 x 2048, with MiniGL's lock modes; every mode of the card
+  (`mglGetSupportedScreenModes`), a context in a chosen mode, the size
   switched while the program runs (`mglResizeContext`), vertical sync
-  (`mglEnableSync`).
+  without tearing (`mglEnableSync`: the copy goes down the screen ahead of
+  the beam).
+- **Two or three buffers:** two copied onto the screen, or three
+  (`mglChooseNumberOfBuffers(3)` or `RadeonGLBuffers=3`) shown by panning a
+  screen three times as tall or by Intuition's `ChangeScreenBuffer`
+  (`RadeonGLFlip=csb`); a program may switch while it runs (GLQuake's
+  Video Options > Buffering).
 - **Windows and bitmaps:** a context in the program's window
   (`mglCreateContextFromWindow`), in a window of its own on the default
   public screen (`mglChooseWindowMode`), or drawing straight into the
@@ -94,14 +101,25 @@ needs.
   a card report for bug reports and four demos (`demos/`), and Trio, which
   runs three of them at once, each a program of its own in a window of its
   own on the Workbench, placed by `mglCreateContext`'s coordinates.
+- **GLBench** (its own archive, `glbench/`): a stress benchmark in seven
+  scenes that together use every feature above -- fur shells, eight
+  lights, sphere maps and display lists, all five blend equations, every
+  texture format and environment, a flock of a thousand darts, read-back
+  feedback -- with a score against a reference machine, and Burn: ten
+  minutes of one scene with a picture check every 250 frames.
+- **RadeonStat:** what the card is doing, in a window on the Workbench
+  (from its icon) or a line a second (from a Shell): how busy the engine,
+  the 3D pipeline, the 2D engine and the command processor are, the
+  command queue, the card memory Picasso96 has handed out, the front
+  screen's measured refresh and pixel clock, and a busy history graph.
+  Read-only; its settings are the icon's Tool Types (`src/probe/rstat*.c`).
 
 ## Not implemented yet
 
 RadeonGL answers all 205 functions of `minigl.library` 29.1 (a few
 accepted without effect). Not there yet:
 
-- Polygons drawn as lines or points (`glPolygonMode`), stencil and
-  accumulation buffers, line and polygon stipple, logic operations,
+- Stencil and accumulation buffers, line and polygon stipple, logic operations,
   reading the depth buffer.
 - Generic 32-bit textures (`GL_RGBA`, 4) are stored with 16 bits -- ask
   for `GL_RGBA8` or `GL_RGB8` to keep 8 bits.
@@ -137,6 +155,24 @@ mean of three runs at different load addresses. Frames a second:
 | demo1 | 33.0 | 32.2 | 31.1 |
 | demo2 | 29.6 | | 28.4 |
 | demo3 | 28.6 | | 25.4 |
+
+**1920 x 1080** (11 November 2026): GLQuake 1.3 and RadeonGL 0.11 as above,
+but each figure one run at one load address, not the mean of three, and not
+after a fresh boot. Picasso96's 1920 x 1080 modes ran at 50 Hz with reduced
+blanking (115 MHz pixel clock). Frames a second:
+
+| Demo | 16 bit | 32 bit |
+|---|---:|---:|
+| demo1 | 28.6 | 21.8 |
+| demo2 | 25.7 | |
+| demo3 | 23.6 | |
+
+GLQuake's `-bpp 15` opens the same 16-bit screen (R5G6B5) on the Radeon. The
+32-bit figure is a single run earlier that evening in the same mode. The test
+machine's monitor (DVI) blacked out briefly several times during the 16-bit
+runs, but not during the 32-bit one, at the same pixel clock; the series was
+stopped there. That machine's 5 V supply sags under heavy load (under
+investigation), so these blackouts are not taken as RadeonGL's.
 
 GLQuake 1.3 brings back the textures under water: 1.2 drew those surfaces
 from misread vertices (a compiler fault). demo2 in 1.3: 29.8 fps at
@@ -211,7 +247,9 @@ fetched from Aminet:
 |---|---|
 | `gmake rgl-lib` | `dist/Libs/RadeonGL/minigl.library` |
 | `gmake demos` | `dist/Demos/`: Spinner, Glow, Landscape, Showcase, Trio |
-| `gmake glsmoke probes` | GLSmoke (the card test), R200Info and the other probes |
+| `gmake glsmoke probes` | GLSmoke (the card test), R200Info, RadeonStat and the other probes |
+| `gmake glbench` | `dist/GLBench/C/`: GLBench, the stress benchmark (seven scenes, a score, Burn), and its 68030 build |
+| `gmake glbench-archive` | `dist/GLBench.lha` and its Aminet readme: GLBench's own archive |
 | `gmake test` | the host tests (the core, the packet layer, the R200 simulator) |
 | `gmake autotest T=<name>` | one FS-UAE test from `test/auto` (the head of each test says what it checks) |
 | `gmake release-stage release-archive release-aminet release-drawer` | the release package: `dist/RadeonGL.lha`, the Aminet pair (copied to `release/`), `DEV:Release` |
@@ -273,8 +311,8 @@ was tested on real hardware.
 - **Frank Wille, Steffen Häuser and Dennis Boon:** GLQuake for
   `minigl.library`, after id Software's Quake.
 - **Advanced Micro Devices:** the R200 microcode.
-- **Martin "Mason" Merz:** the Install icon, AmigaOS 3.2's installer icon,
-  used with his permission.
+- **Martin "Mason" Merz:** the Install and AmigaGuide icons, AmigaOS 3.2's
+  own, used with his permission.
 - **ATI Technologies, VA Linux Systems, Precision Insight, The Weather
   Channel and Tungsten Graphics, Red Hat**, and the authors of the Linux
   radeon and Mesa r200 drivers (among them Dave Airlie, Alex Deucher,

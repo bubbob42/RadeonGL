@@ -1,0 +1,97 @@
+; GLBenchSmoke -- GLBench (glbench/, `gmake glbench rgl-lib`) through the
+; RadeonGL minigl.library from DEV:Libs/RadeonGL on the null card (no
+; Radeon in the emulator), the packet checker on. Each scene alone, 40
+; frames, its frame 30 recorded (RadeonGLDump: DEV:Test/glb-<n>.r2d) for
+; build/host/r200view; each must end with rc 0, no GL error in its log,
+; "checker errors: 0" in the library's log, and no slot called but not
+; implemented. Then the whole bench (30 frames a scene, the result screen
+; 2 s, saved with SHOT=: black on the null card) and a one-minute Burn of
+; Pelt with its picture checks (the null card reads zeros: no errors).
+;   gmake glbench rgl-lib && gmake autotest T=GLBenchSmoke
+; LIMIT 600
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Stack 100000
+Avail >NIL: FLUSH
+Set gb DEV:GLBench/C/GLBench
+Set glib DEV:Libs/RadeonGL
+Version $gb FULL >>DEV:Test/auto.log
+Version $glib/minigl.library FULL >>DEV:Test/auto.log
+Assign LIBS: $glib ADD
+Delete >NIL: DEV:Test/glb-#? QUIET
+
+Echo "=== 1 Pelt ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-1-lib.log
+SetEnv RadeonGLDump 30
+SetEnv RadeonGLDumpFile DEV:Test/glb-1.r2d
+$gb SCENE=1 FRAMES=40 HOLD=0 LOG=DEV:Test/glb-1.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-1-lib.log >>DEV:Test/auto.log
+
+Echo "=== 2 Lanterns ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-2-lib.log
+SetEnv RadeonGLDumpFile DEV:Test/glb-2.r2d
+$gb SCENE=2 FRAMES=40 HOLD=0 LOG=DEV:Test/glb-2.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-2-lib.log >>DEV:Test/auto.log
+
+Echo "=== 3 Chrome ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-3-lib.log
+SetEnv RadeonGLDumpFile DEV:Test/glb-3.r2d
+$gb SCENE=3 FRAMES=40 HOLD=0 LOG=DEV:Test/glb-3.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-3-lib.log >>DEV:Test/auto.log
+
+Echo "=== 4 Embers ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-4-lib.log
+SetEnv RadeonGLDumpFile DEV:Test/glb-4.r2d
+$gb SCENE=4 FRAMES=40 HOLD=0 LOG=DEV:Test/glb-4.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-4-lib.log >>DEV:Test/auto.log
+
+Echo "=== 5 Plasma ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-5-lib.log
+SetEnv RadeonGLDumpFile DEV:Test/glb-5.r2d
+$gb SCENE=5 FRAMES=40 HOLD=0 LOG=DEV:Test/glb-5.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-5-lib.log >>DEV:Test/auto.log
+
+Echo "=== 6 Swarm ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-6-lib.log
+SetEnv RadeonGLDumpFile DEV:Test/glb-6.r2d
+$gb SCENE=6 FRAMES=40 HOLD=0 LOG=DEV:Test/glb-6.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-6-lib.log >>DEV:Test/auto.log
+
+Echo "=== 7 Mirror ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-7-lib.log
+SetEnv RadeonGLDumpFile DEV:Test/glb-7.r2d
+$gb SCENE=7 FRAMES=40 HOLD=0 LOG=DEV:Test/glb-7.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-7-lib.log >>DEV:Test/auto.log
+
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo "=== the whole bench, 30 frames a scene ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-all-lib.log
+$gb FRAMES=30 HOLD=2 LOG=DEV:Test/glb-all.txt SHOT=DEV:Test/glb-result.ppm >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-all-lib.log >>DEV:Test/auto.log
+List DEV:Test/glb-result.ppm LFORMAT "result shot %l bytes" >>DEV:Test/auto.log
+
+Echo "=== Burn, one minute ===" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glb-burn-lib.log
+$gb BURN=1 LOG=DEV:Test/glb-burn.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Type DEV:Test/glb-burn-lib.log >>DEV:Test/auto.log
+
+Echo "=== a scene that does not exist ===" >>DEV:Test/auto.log
+$gb SCENE=lava >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+
+Assign LIBS: $glib REMOVE
+UnSetEnv RadeonGLLog
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
