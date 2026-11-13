@@ -155,7 +155,7 @@ HISTORY
 0.14 (13.11.2026)
   - panning (three buffers) 21-40% faster, its task now below the
     program: faster than vsync and tear-free; RadeonGLFlip=csbnowait for
-    tests
+    tests; faster 32-bit texture uploads, GL_BGRA 0xAARRGGBB words
 
 0.13 (13.11.2026)
   - public port "RadeonGL" (is anything drawing?), GL_ARB_multitexture
