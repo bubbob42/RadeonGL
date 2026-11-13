@@ -21,4 +21,7 @@ void Back_Init(void);
  * mglDeleteContext) is freed here, under Forbid -- no file I/O. */
 void Back_ClientGone(struct Task *task);
 
+/* From LibExpunge, before the bases close: no client is left. */
+void Back_Expunge(void);
+
 #endif /* RADEONGL_BACKEND_H */

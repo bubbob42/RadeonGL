@@ -5177,6 +5177,68 @@ static void test_polymode_frames(void)
  * the card) decides culling and the face as the glArrayElement way does:
  * a ball of quads, triangles and one polygon seen from many sides, both
  * front faces, back and front culling, GL_LINE and GL_POINT. */
+/* Doom 64 EX/EX+'s FindExtension, as the Doom 64 session read it: start
+ * moves on only after a whole-token match, so a hit inside another word is
+ * found again forever. Returns 1 found, 0 not found, -1 the loop hangs. */
+static int ExPlusFind(const char *ext, const char *name)
+{
+    const char *start;
+    const char *where;
+    const char *term;
+    int loops;
+
+    start = ext;
+    for (loops = 0; loops < 100; loops++)
+    {
+        where = strstr(start, name);
+        if (where == NULL)
+            return 0;
+        term = where + strlen(name);
+        if (where == start || where[-1] == ' ')
+        {
+            if (*term == ' ' || *term == '\0')
+                return 1;
+            start = term;
+        }
+    }
+    return -1;
+}
+
+/* Whole-token search, the usual client check. */
+static int TokenFind(const char *ext, const char *name)
+{
+    const char *p;
+    ULONG n;
+
+    n = strlen(name);
+    for (p = strstr(ext, name); p != NULL; p = strstr(p + 1, name))
+        if ((p == ext || p[-1] == ' ') && (p[n] == ' ' || p[n] == '\0'))
+            return 1;
+    return 0;
+}
+
+static void test_extension_tokens(void)
+{
+    static const char ext[] = CORE_EXTENSIONS RGL_PALETTE_EXTENSIONS;
+
+    CHECK_INT(ExPlusFind(ext, "GL_ARB_multitexture"), 1);
+    CHECK_INT(ExPlusFind(ext, "GL_EXT_texture_env_add"), 1);
+    CHECK_INT(ExPlusFind(ext, "GL_EXT_compiled_vertex_array"), 1);
+    CHECK_INT(ExPlusFind(ext, "GL_ARB_texture_env_combine"), 0);
+    /* the 0.12 string: the hang the token order cures */
+    CHECK_INT(ExPlusFind("GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array", "GL_ARB_multitexture"), -1);
+    CHECK_INT(TokenFind(ext, "GL_ARB_multitexture"), 1);
+    CHECK_INT(TokenFind(ext, "GL_MGL_ARB_multitexture"), 1);
+    CHECK_INT(TokenFind(ext, "GL_EXT_texture_env_add"), 1);
+    CHECK_INT(TokenFind(ext, "GL_RGL_static_arrays"), 1);
+    CHECK_INT(TokenFind(ext, "GL_RGL_resize_error"), 1);
+    CHECK_INT(TokenFind(ext, "GL_EXT_shared_texture_palette"), 1);
+    /* GLQuake's test: strstr with the trailing blank */
+    CHECK(strstr(ext, "GL_MGL_ARB_multitexture ") != NULL);
+    CHECK(ext[0] != ' ' && ext[strlen(ext) - 1] != ' ');
+    CHECK(strstr(ext, "  ") == NULL);
+}
+
 static void test_polymode_static(void)
 {
     static float bv[81 * 3];
@@ -5437,6 +5499,7 @@ int main(void)
     test_polygon_mode();
     test_polymode_frames();
     test_polymode_static();
+    test_extension_tokens();
     (void) t;
     (void) e;
     return tk_done("test_core");

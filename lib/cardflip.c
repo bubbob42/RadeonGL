@@ -794,6 +794,12 @@ static void CsbOpen(struct Card *k, struct CardFlip *f)
         FlipWhy(f, "the GL screen is not Intuition's");
         return;
     }
+    /* a live switch from panning: CloseGLScreen left the pan helper
+     * running, and a helper takes the ports only as it starts (FlipTask):
+     * a new one, which adopts them (2026-11-13; before, the GL task kept
+     * collecting the SafeMessages after such a switch) */
+    if (f->helper != NULL && !f->adopted)
+        StopHelper(f);
     f->adopted = 0;
     f->hsig = -1;
     f->sport = CreateMsgPort();

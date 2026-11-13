@@ -42,11 +42,12 @@ needs.
 - **Transformation and rasterising on the Radeon:** the full float matrix
   stack (`glFrustum`, `glOrtho`, `glRotatef`, `glTranslatef`, `glScalef`,
   push, pop, load, multiply), viewport, depth range.
-- **Textures:** two units (multitexture), RGB565, ARGB4444, ARGB8888 (for
+- **Textures:** two units (multitexture: `GL_ARB_multitexture`, also
+  under MiniGL's name `GL_MGL_ARB_multitexture`), RGB565, ARGB4444, ARGB8888 (for
   `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
   the card's memory (up to 16 MB), nearest, linear and mipmap filters,
   repeat and clamp, the environments MODULATE, REPLACE, DECAL, BLEND and
-  ADD, `glTexSubImage2D` updates.
+  ADD (`GL_EXT_texture_env_add`), `glTexSubImage2D` updates.
 - **Lighting on the Radeon's TCL:** `glLight`, `glMaterial`,
   `glLightModel` (ambient, local viewer, two-sided), `glColorMaterial`,
   `GL_NORMALIZE`; eight lights, directional, local and spot, with
@@ -95,6 +96,13 @@ needs.
   a bitmap) and its own dispatch table; they take turns on the Radeon flush
   by flush. While more than one draws, each waits for its frame and sends
   its whole state again; one program alone runs exactly as before.
+- **"Is anything drawing?":** a public port named `RadeonGL`
+  (`lib/rglport.h`) tells other programs how many contexts draw on the
+  Radeon, how many of them are games on a screen of their own, and when the
+  last command list went to the card. Read it under `Forbid()` and copy
+  what you need before `Permit()`; no port means RadeonGL is not loaded.
+  A program that shares the card can stay off it while a game runs.
+  `RglPort` (`src/probe/rglport.c`) shows it.
 - **Safety:** every command list is checked before the Radeon runs it
   (`RadeonGLCheck=0` turns it off for speed).
 - **The package:** an Installer, manuals in English and German, a card test,

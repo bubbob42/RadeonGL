@@ -1073,6 +1073,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     }
     k->in_flush = 1;
     k->flushes++;
+    Port_Flushed();                 /* the public port: someone draws (rglport.c) */
     e = R2_OK;
     scr_ok = FALSE;
     if (k->flip_on)

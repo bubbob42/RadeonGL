@@ -25,6 +25,9 @@
 #include "r200reg.h"
 #include "arrayfetch.h"
 
+/* GL_EXTENSIONS for Core_GetString (get.c): kept here, behind the hot code. */
+const char Core_Extensions[] = CORE_EXTENSIONS;
+
 /* GL's defaults for the state compat.c adds (Fog_Defaults calls it at
  * Core_Init; the rest of that state starts zeroed) */
 void Compat_Defaults(struct Core *c)

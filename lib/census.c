@@ -229,6 +229,10 @@ static const char *const cen_MatrixNames[] =
 const char Back_IdString[] =
     "$VER: minigl.library 29.1 (02.11.2026) RadeonGL census (draws nothing), dispatch ABI 5\r\n";
 
+void Back_Expunge(void)
+{
+}
+
 void Back_Init(void)
 {
     ULONG i;

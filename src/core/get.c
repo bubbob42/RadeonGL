@@ -157,6 +157,13 @@ void Core_GetIntegerv(struct Core *c, ULONG pname, LONG *out)
     }
 }
 
+/* The space 0.12's GL_EXTENSIONS literal took here (156 bytes, in the code
+ * hunk in front of frame.c and array.c): kept, so the hot array and emit
+ * code stays where the 0.12 A/B measured it (tools/hot_layout.py). The
+ * string itself lives in compat.c now. Remove it with the next accepted
+ * layout change (then gmake hot-layout-ref). */
+const char Core_GetPad[156] = "layout pad";
+
 const char *Core_GetString(struct Core *c, ULONG name)
 {
     switch (name)
@@ -165,9 +172,10 @@ const char *Core_GetString(struct Core *c, ULONG name)
         case GL_RENDERER:   return "RadeonGL R200 (ATI Radeon 9200)";
         case GL_VERSION:    return "1.1";
         case GL_EXTENSIONS:
-            /* MiniGLV3D's spelling, so clients take the same paths
-             * (GLQuake finds GL_ARB_multitexture inside GL_MGL_...) */
-            return CORE_EXTENSIONS;     /* the library adds 29.1's palette names (rglcompat.c) */
+            /* compat.c holds it: a literal here sits in front of the hot
+             * array code, so every new name moved it (hot_layout.py).
+             * The library answers with Rglc_Extensions (rglcompat.c). */
+            return Core_Extensions;
     }
     Core_Error(c, GL_INVALID_ENUM);
     return NULL;

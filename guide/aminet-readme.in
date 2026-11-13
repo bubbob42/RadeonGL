@@ -152,6 +152,10 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.13 (13.11.2026)
+  - public port "RadeonGL" (is anything drawing?), GL_ARB_multitexture
+    named on its own, GL_EXT_texture_env_add, a ChangeScreenBuffer fix
+
 0.12 (12.11.2026)
   - triple buffering (panning or ChangeScreenBuffer), vsync without
     tearing, wireframe and points, faster lit vertices, contexts open

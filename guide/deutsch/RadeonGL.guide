@@ -788,6 +788,20 @@ Hardware getestet.
 
 @{b}Versionen@{ub}
 
+0.13 (13.11.2026)
+    * ein öffentlicher Port namens "RadeonGL" sagt anderen Programmen, ob
+      etwas auf der Radeon zeichnet: wie viele Kontexte, wie viele davon
+      Spiele auf einem eigenen Bildschirm, und wann die letzte
+      Befehlsliste zur Karte ging (lib/rglport.h und als Beispiel
+      src/probe/rglport.c in den Quellen)
+    * die Liste der Erweiterungen nennt GL_ARB_multitexture für sich
+      allein (Doom 64 EX blieb mit der alten beim Start hängen) und
+      GL_EXT_texture_env_add
+    * ein Programm, das während des Laufs vom Verschieben auf
+      ChangeScreenBuffer umschaltet: der Hilfs-Task nimmt die
+      Puffer-Nachrichten wieder an
+    * GLQuake so schnell wie mit 0.12
+
 0.12 (12.11.2026)
     * drei Puffer auf einem eigenen Bildschirm, für ein Programm, das sie
       wünscht (mglChooseNumberOfBuffers), oder für jedes mit

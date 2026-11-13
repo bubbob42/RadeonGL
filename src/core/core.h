@@ -743,9 +743,16 @@ void Core_TexMemStat(struct Core *c, LONG *current, LONG *peak);
 void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const void *p);
 /* GL_EXTENSIONS (get.c); the library appends RGL_PALETTE_EXTENSIONS. MiniGLV3D's
  * spelling, so clients take the same paths (GLQuake finds GL_ARB_multitexture
- * inside GL_MGL_...) */
-#define CORE_EXTENSIONS "GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array GL_MGL_packed_pixels " \
+ * inside GL_MGL_...). The standalone GL_ARB_multitexture comes FIRST: Doom 64
+ * EX/EX+'s FindExtension restarts its strstr at the same spot after a hit
+ * inside another word, so with GL_MGL_ARB_multitexture first it hangs at GL
+ * init (a host simulation: standalone first OK, after it still a hang).
+ * GL_EXT_texture_env_add: GL_ADD is implemented (hwstate.c) and accepted. */
+#define CORE_EXTENSIONS "GL_ARB_multitexture GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array " \
+                        "GL_MGL_packed_pixels GL_EXT_texture_env_add " \
                         "GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag GL_RGL_resize_error"
+extern const char Core_Extensions[];            /* compat.c: CORE_EXTENSIONS, linked late */
+extern const char Core_GetPad[];                /* get.c: keeps the hot code in place */
 #define RGL_PALETTE_EXTENSIONS " GL_EXT_color_table GL_EXT_paletted_texture GL_EXT_shared_texture_palette"
 void Core_ColorTable(struct Core *c, ULONG target, ULONG internal, LONG width, ULONG format,
                      ULONG type, const void *data);

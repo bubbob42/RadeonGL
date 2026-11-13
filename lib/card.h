@@ -343,4 +343,7 @@ void Card_Close(struct Card *k);
 /* A register read (cardflip.c's beam check around ScrollVPort; reads only) */
 ULONG Card_ReadReg(struct Card *k, ULONG reg);
 
+/* rglport.c: every flush to the Radeon, for the public port (rglport.h) */
+void Port_Flushed(void);
+
 #endif /* RADEONGL_CARD_H */

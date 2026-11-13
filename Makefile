@@ -774,6 +774,12 @@ dist/Probe/C/RomDump: build/probe/romdump.o
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# RglPort prints RadeonGL's public port (lib/rglport.h, Herald's R3)
+build/probe/rglport.o: PROBE_CFLAGS += -Ilib
+dist/Probe/C/RglPort: build/probe/rglport.o build/probe/eclock.o
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 # CxBreak quits the Blanker / DPMSManager commodities before a test
 dist/Probe/C/CxBreak: build/probe/cxbreak.o
 	@mkdir -p dist/Probe/C
@@ -890,6 +896,11 @@ dist/Probe/C/RomDump_sasc: build/probe-sasc/romdump.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+build/probe-sasc/rglport.o: PROBE_SC_IDIRS += IDIR=proj:lib/
+dist/Probe/C/RglPort_sasc: build/probe-sasc/rglport.o build/probe-sasc/eclock.o | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 dist/Probe/C/CxBreak_sasc: build/probe-sasc/cxbreak.o | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -923,7 +934,8 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
         dist/Probe/C/ExecMap_sasc dist/Probe/C/MemBench_sasc dist/Probe/C/MemMap dist/Probe/C/MemMap_sasc \
         dist/Probe/C/RomDump dist/Probe/C/RomDump_sasc dist/Probe/C/VramProbe dist/Probe/C/VramProbe_sasc \
         dist/Probe/C/VoltLog dist/Probe/C/VoltLog_sasc \
-        dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc dist/Probe/C/RadeonStat dist/Probe/C/RadeonStat_sasc
+        dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc dist/Probe/C/RadeonStat dist/Probe/C/RadeonStat_sasc \
+        dist/Probe/C/RglPort dist/Probe/C/RglPort_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -1135,14 +1147,20 @@ CORE_LATE  := light texgen fog arraylit compat polymode
 # runtime.o sit in front of the pad and moved by rgl.o's change.
 # 2026-11-12, triple buffering merged (card.c, rgl.c grew 1772 bytes in
 # front of the pad; cardflip.o is linked last): 3364 - 1772.
-RGL_DISPATCH_PAD := 1592
+# 2026-11-13: the delete log moved out of rgl.o into rgllog.o (linked
+# behind the hot code: a new log line no longer moves anything): rgl.o
+# -8920; the public port (rglport.o, late) adds 36 bytes of calls in
+# rgl.o and card.o: 1592 + 8920 - 36. Everything from rgl_dispatch.o on
+# stays at 0.12's places; rgl.o's hooks and card.o (CardFlush, ToVram)
+# moved: a GLQuake A/B is due before this layout is accepted.
+RGL_DISPATCH_PAD := 10476
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
               $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES))) \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_LATE))) \
               build/rgl/rgllight.o build/rgl/rglread.o build/rgl/rglcompat.o build/rgl/rgldlist.o build/rgl/rglglut.o \
-              build/rgl/rgltable.o build/rgl/cardflip.o
+              build/rgl/rgltable.o build/rgl/cardflip.o build/rgl/rgllog.o build/rgl/rglport.o
 
 build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c lib/cardflip.c Makefile
 	@mkdir -p build/rgl
@@ -1150,7 +1168,7 @@ build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dis
 	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' --pad $(RGL_DISPATCH_PAD) \
 	    --include rgl.h --hooks $(RGL_HOOKS)
 
-build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
+build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rglport.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
                src/RadeonGL_rev.h
 	@mkdir -p build/rgl
 	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@

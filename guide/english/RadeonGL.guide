@@ -736,6 +736,18 @@ was tested on real hardware.
 
 @{b}History@{ub}
 
+0.13 (13.11.2026)
+    * a public port named "RadeonGL" tells other programs whether anything
+      draws on the Radeon: how many contexts, how many of them games on a
+      screen of their own, and when the last command list went to the
+      card (lib/rglport.h, and src/probe/rglport.c as an example reader,
+      in the source)
+    * the extension string names GL_ARB_multitexture on its own (Doom 64
+      EX hung at its start on the old one) and GL_EXT_texture_env_add
+    * a program that switches from panning to ChangeScreenBuffer while it
+      runs: the helper task takes the buffer messages again
+    * GLQuake as fast as with 0.12
+
 0.12 (12.11.2026)
     * three buffers on a screen of its own, for a program that asks for
       them (mglChooseNumberOfBuffers) or for any with RadeonGLBuffers=3:
