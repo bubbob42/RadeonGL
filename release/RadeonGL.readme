@@ -2,7 +2,7 @@ Short:        minigl.library for R200 Radeons on P96
 Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
 Author:       marcus.gerards@googlemail.com (Marcus Gerards)
 Type:         driver/video
-Version:      0.13
+Version:      0.14
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
@@ -12,7 +12,7 @@ Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
               AmigaOS 3.1+ (tested on 3.2).
 Kurz:         minigl.library fuer R200-Radeons an P96
 
-RadeonGL 0.13  --  13.11.2026
+RadeonGL 0.14  --  13.11.2026
 
 
 WHAT IT IS
@@ -151,6 +151,11 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.14 (13.11.2026)
+  - panning (three buffers) 21-40% faster, its task now below the
+    program: faster than vsync and tear-free; RadeonGLFlip=csbnowait for
+    tests
 
 0.13 (13.11.2026)
   - public port "RadeonGL" (is anything drawing?), GL_ARB_multitexture

@@ -44,6 +44,7 @@ struct CardFlip
     volatile ULONG pan_to;      /* the third the next pan shows */
     volatile ULONG quit;        /* the helper is to end */
     volatile ULONG alive;       /* the helper runs */
+    LONG helper_pri;            /* its priority against the GL task's (RadeonGLHelperPri; default -1 panning, +1 csb) */
 
     /* 2026-11-12, the corrected ChangeScreenBuffer way (RadeonGLFlip=csb;
      * docs/p96-changescreenbuffer-audit.md): an Intuition screen in the

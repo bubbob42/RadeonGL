@@ -42,6 +42,12 @@
  * and goes on; the helper's return from ScrollVPort marks the third it left
  * as off the display (no fixed wait). Without the helper (it did not start)
  * the pan runs in the game's task, the left third safe 20 ms later.
+ * 2026-11-13: the helper now runs ONE BELOW the game while panning
+ * (RadeonGLHelperPri, EnvHelperPri): ScrollVPort's wait spins until the
+ * card's engine has finished the frame, and above the game that spin came
+ * out of the game's time. Below it, the pan happens while the game waits:
+ * 32.1 fps at 1280 x 720 (vsync copy 29.9, the copy without vsync 32.2),
+ * 30.6 at 1920 x 1080 (22.4, 28.7). ChangeScreenBuffer keeps one above.
  *
  * RadeonGLFlip=csb (2026-11-12): the corrected ChangeScreenBuffer way, to
  * be measured against the panning on the card -- the NDK's documented
@@ -71,6 +77,21 @@
  *  - every buffer's address at every lock is compared with its last one:
  *    the log says whether Picasso96 moved a screen buffer (unmeasured: the
  *    first version's "moves" were its own buffer-0 aliasing).
+ *
+ * 2026-11-13, RadeonGLFlip=csbnowait, pipelined (Tim's Balls scheme,
+ * measured with docs/hw/a4000d/CsbBench PIPE): Radeon.card returns from
+ * ChangeScreenBuffer at the blank where the switch took effect and sends
+ * both messages a refresh later. Waiting for them (the DispMessage gate
+ * above, and the helper's SafeMessage wait) made every switch cost two
+ * refreshes: 30 a second at most. csbnowait counts a switch done when its
+ * call returned; the next may follow at once, while the buffer it left
+ * waits for its SafeMessage (cardflip_sm.h pipe). A DBufInfo is still never
+ * reused with a message out. CsbBench, nothing drawn: 60.1 switches a
+ * second at 1280 x 720 against 30.0.
+ * UNSAFE (Thomas Richter, Picasso96, 2026-11-13): calling ChangeVPBitMap
+ * again before the last DispMessage came is outside graphics.doc's
+ * contract and not safe on Picasso96. So it is never the default: only a
+ * program or user that asks for csbnowait gets it; csb keeps the gate.
  *
  * The cost: a frame is shown one flush later than the copy showed it.
  * RadeonGLBuffers=2 keeps the copy path for a program that asked for three
@@ -167,7 +188,7 @@ static ULONG EnvBuffers(void)
     return 0;
 }
 
-/* RadeonGLFlip: "csb" ChangeScreenBuffer, else the panning */
+/* RadeonGLFlip: "csb" (or "csbnowait") ChangeScreenBuffer, else the panning */
 static ULONG EnvFlip(void)
 {
     char flag[8];
@@ -176,6 +197,18 @@ static ULONG EnvFlip(void)
         && (flag[0] == 'c' || flag[0] == 'C'))
         return CARD_FLIP_CSB;
     return CARD_FLIP_PAN;
+}
+
+/* RadeonGLFlip=csbnowait: ChangeScreenBuffer without waiting for the
+ * DispMessage (pipelined; UNSAFE on Picasso96, above); csb: the gate */
+static ULONG EnvCsbPipe(void)
+{
+    char flag[12];
+
+    if (GetVar((STRPTR) "RadeonGLFlip", (STRPTR) flag, sizeof(flag), 0) > 3
+        && (flag[0] == 'c' || flag[0] == 'C') && (flag[3] == 'n' || flag[3] == 'N'))
+        return 1;
+    return 0;
 }
 
 /* The program's wish now (2026-11-12, GLQuake's Buffering item switches it
@@ -371,6 +404,17 @@ static BOOL CsbShow(struct CardFlip *f, ULONG i)
     for (n = 0; n < 100 && !f->quit; n++)
     {
         CollectDisp(f);
+        if (f->sm.pipe)
+        {
+            /* pipelined: only buffer i's own DBufInfo must be home */
+            CollectSafe(f);
+            if (!f->safe_out[i] && !f->disp_out[i])
+                break;
+            if (n == 0)
+                f->disp_waits++;
+            Delay(1);
+            continue;
+        }
         prev = f->last_shown;
         if ((prev == NONE || !f->disp_out[prev]) && !f->safe_out[i] && !f->disp_out[i])
             break;
@@ -408,8 +452,33 @@ static BOOL CsbShow(struct CardFlip *f, ULONG i)
  * the old BitMap") */
 static void CsbExpire(struct CardFlip *f)
 {
+    ULONG p;
+
     if (!f->adopted)
         CollectSafe(f);             /* else the helper takes the messages */
+    if (f->sm.pipe)
+    {
+        if (!f->adopted)
+            CollectDisp(f);
+        /* the switch in flight: its call returned (or was given up) */
+        if (f->sm.inflight && f->done == f->asked)
+        {
+            if (!f->csb_ok)
+            {
+                FlipSm_Unshow(&f->sm);
+                f->given_up++;
+            }
+            else
+                FlipSm_Done(&f->sm);
+        }
+        /* each left buffer: safe once the switch away from it is done and
+         * that switch's SafeMessage came */
+        for (p = 0; p < CARD_FLIP_N; p++)
+            if ((f->sm.pend & (1UL << p)) != 0 && !(p == f->sm.leave && f->sm.inflight)
+                && f->sm.freed_by[p] < CARD_FLIP_N && !f->safe_out[f->sm.freed_by[p]])
+                FlipSm_SafeBuf(&f->sm, p);
+        return;
+    }
     if (f->sm.leave == NONE || f->done != f->asked)
         return;
     if (!f->csb_ok)
@@ -444,7 +513,7 @@ static void CsbWaitSafe(struct Card *k, struct CardFlip *f)
     for (n = 0; n < 50; n++)
     {
         CsbExpire(f);
-        if (f->sm.leave == NONE)
+        if (!FlipSm_MustWait(&f->sm))
             break;
         t->tr_node.io_Command = TR_ADDREQUEST;
         t->tr_time.tv_secs = 0;
@@ -453,7 +522,7 @@ static void CsbWaitSafe(struct Card *k, struct CardFlip *f)
         while (CheckIO((struct IORequest *) t) == NULL)
         {
             CsbExpire(f);
-            if (f->sm.leave == NONE)
+            if (!FlipSm_MustWait(&f->sm))
                 break;
             (void) Wait(mask);
         }
@@ -461,9 +530,12 @@ static void CsbWaitSafe(struct Card *k, struct CardFlip *f)
             AbortIO((struct IORequest *) t);
         WaitIO((struct IORequest *) t);
     }
-    if (f->sm.leave != NONE)
+    if (FlipSm_MustWait(&f->sm))
     {
-        FlipSm_Safe(&f->sm);
+        if (f->sm.pipe)
+            FlipSm_SafeBuf(&f->sm, f->sm.draw);
+        else
+            FlipSm_Safe(&f->sm);
         f->safe_forced++;
     }
     us = FlipUs(FlipTicks() - t0);
@@ -563,9 +635,9 @@ static void FlipTask(void)
             {
                 i = f->pan_to;
                 ok = CsbShow(f, i);         /* times itself */
-                if (ok && f->adopted)
+                if (ok && f->adopted && !f->sm.pipe)
                     HelperSafe(f, i);       /* done = switched AND the left buffer safe */
-                f->csb_ok = ok ? 1UL : 0UL;
+                f->csb_ok = ok ? 1UL : 0UL; /* pipe: done = the call returned */
             }
             else
             {
@@ -581,13 +653,57 @@ static void FlipTask(void)
             Signal(f->owner, 1UL << f->sig);
         }
         if (!f->quit)
-            (void) Wait(SIGBREAKF_CTRL_F | SIGBREAKF_CTRL_C);
+        {
+            if (f->mode == CARD_FLIP_CSB && f->sm.pipe && f->adopted)
+            {
+                /* pipelined: the messages come while the helper idles; it
+                 * takes them and wakes the GL task (CsbWaitSafe) */
+                (void) Wait(SIGBREAKF_CTRL_F | SIGBREAKF_CTRL_C | (1UL << f->hsig));
+                CollectSafe(f);
+                CollectDisp(f);
+                Signal(f->owner, 1UL << f->sig);
+            }
+            else
+                (void) Wait(SIGBREAKF_CTRL_F | SIGBREAKF_CTRL_C);
+        }
     }
     if (f->mode == CARD_FLIP_CSB)
         GiveBack(f);
     Forbid();                       /* gone before the owner frees f */
     f->alive = 0;
     Signal(f->owner, 1UL << f->sig);
+}
+
+/* RadeonGLHelperPri: the helper's priority against the GL task's, -9..9.
+ * 2026-11-13: ChangeScreenBuffer spins ~6 ms a call (CsbBench CPU) and
+ * ScrollVPort waits, spinning, for the card's engine to finish the frame
+ * (6.9 ms at 1280 x 720, 15 ms at 1920 x 1080); a helper above the game
+ * takes that from the game, one below it only gets the game's waits.
+ * MEASURED (tb_fps6.log, GLQuake demo1): panning at -1 32.1 fps at
+ * 1280 x 720 and 30.6 at 1920 x 1080 (+1: 26.6 and 21.9; the copy without
+ * vsync 32.2 and 28.7), its ScrollVPort 0.4 ms; ChangeScreenBuffer at -1
+ * 16.3 and 14.5 (+1: 21.6 and 17.0: its calls start late and miss blanks).
+ * So the default: -1 panning, +1 ChangeScreenBuffer. */
+static LONG EnvHelperPri(LONG dflt)
+{
+    char v[8];
+    LONG n;
+    LONG sign;
+    int i;
+
+    if (GetVar((STRPTR) "RadeonGLHelperPri", (STRPTR) v, sizeof(v), 0) <= 0)
+        return dflt;
+    i = 0;
+    sign = 1;
+    if (v[0] == '-' || v[0] == '+')
+    {
+        sign = (v[0] == '-') ? -1 : 1;
+        i = 1;
+    }
+    if (v[i] < '0' || v[i] > '9')
+        return dflt;
+    n = v[i] - '0';
+    return sign * n;
 }
 
 /* The helper and the owner's signal, once per context (the GL task) */
@@ -607,7 +723,8 @@ static void StartHelper(struct CardFlip *f)
     f->done = 0;
     t[0].ti_Tag = NP_Entry;     t[0].ti_Data = (ULONG) FlipTask;
     t[1].ti_Tag = NP_Name;      t[1].ti_Data = (ULONG) "RadeonGL triple buffering";
-    t[2].ti_Tag = NP_Priority;  t[2].ti_Data = (ULONG) (LONG) (f->owner->tc_Node.ln_Pri + 1);
+    f->helper_pri = EnvHelperPri((f->mode == CARD_FLIP_CSB) ? 1 : -1);
+    t[2].ti_Tag = NP_Priority;  t[2].ti_Data = (ULONG) (LONG) (f->owner->tc_Node.ln_Pri + f->helper_pri);
     t[3].ti_Tag = NP_StackSize; t[3].ti_Data = 8192;
     t[4].ti_Tag = NP_Output;    t[4].ti_Data = 0;
     t[5].ti_Tag = TAG_DONE;     t[5].ti_Data = 0;
@@ -692,6 +809,10 @@ BOOL CardFlip_Changed(struct Card *k)
         w = (k->flip != NULL) ? k->flip->want : 2;
     want = (w == 3) ? EnvFlip() : 0;
     now = (k->flip != NULL && k->flip_on) ? k->flip->mode : 0;
+    /* csb and csbnowait differ too: the screen reopens (the bookkeeping
+     * starts over in the other way) */
+    if (want == CARD_FLIP_CSB && now == CARD_FLIP_CSB && EnvCsbPipe() != k->flip->sm.pipe)
+        return TRUE;
     return (BOOL) (want != now);
 }
 
@@ -883,6 +1004,7 @@ static void CsbOpen(struct Card *k, struct CardFlip *f)
     f->panel = 0;                   /* card.c TargetAt: the buffer's own address */
     k->pitch = rows / k->bpp;
     FlipSm_Init(&f->sm);            /* buffer 0 shown (installed: no switch, no message) */
+    f->sm.pipe = EnvCsbPipe();
     f->last_shown = 0;
     f->presented = 0;
     f->why[0] = 0;
@@ -1044,14 +1166,21 @@ void CardFlip_Log(struct LogOut *f, struct Card *k)
     }
     if (fl->mode == CARD_FLIP_CSB)
     {
-        LogPut(f, fl->helper != NULL ? "on, ChangeScreenBuffer on an Intuition screen (in a helper task); switches "
-                                     : "on, ChangeScreenBuffer on an Intuition screen (in the GL task); switches ");
+        LogPut(f, fl->helper != NULL ? "on, ChangeScreenBuffer on an Intuition screen (in a helper task at the game's priority "
+                                     : "on, ChangeScreenBuffer on an Intuition screen (in the GL task, ");
+        if (fl->helper != NULL)
+        {
+            LogPut(f, fl->helper_pri < 0 ? "-" : "+");
+            LogU(f, (ULONG) (fl->helper_pri < 0 ? -fl->helper_pri : fl->helper_pri));
+            LogPut(f, ", ");
+        }
+        LogPut(f, fl->sm.pipe ? "csbnowait: no DispMessage wait, unsafe); switches " : "waiting for the DispMessage); switches ");
         LogU(f, fl->switches);
         LogPut(f, " (given up ");
         LogU(f, fl->given_up);
         LogPut(f, ", refused and tried again ");
         LogU(f, fl->retries);
-        LogPut(f, ", waited for the last DispMessage ");
+        LogPut(f, fl->sm.pipe ? ", waited for the buffer's own messages " : ", waited for the last DispMessage ");
         LogU(f, fl->disp_waits);
         LogPut(f, "); ChangeScreenBuffer us: max ");
         LogU(f, fl->call_us_max);
@@ -1075,7 +1204,7 @@ void CardFlip_Log(struct LogOut *f, struct Card *k)
         LogU(f, fl->hsafe_us_max);
         LogPut(f, ", mean ");
         LogU(f, fl->hsafe_n != 0 ? fl->hsafe_us_sum / fl->hsafe_n : 0UL);
-        LogPut(f, fl->hsafe_n != 0 ? ")" : "; none: the GL task took the messages)");
+        LogPut(f, fl->hsafe_n != 0 ? ")" : (fl->sm.pipe ? "; none: pipelined)" : "; none: the GL task took the messages)"));
         LogPut(f, "\n  buffer addresses changed between locks: ");
         LogU(f, fl->moved[0]);
         LogPut(f, " ");
@@ -1091,8 +1220,14 @@ void CardFlip_Log(struct LogOut *f, struct Card *k)
         LogPut(f, "\n");
         return;
     }
-    LogPut(f, fl->helper != NULL ? "on, panning a screen three times as tall (in a helper task); switches "
+    LogPut(f, fl->helper != NULL ? "on, panning a screen three times as tall (in a helper task at the game's priority "
                                  : "on, panning a screen three times as tall (in the GL task); switches ");
+    if (fl->helper != NULL)
+    {
+        LogPut(f, fl->helper_pri < 0 ? "-" : "+");
+        LogU(f, (ULONG) (fl->helper_pri < 0 ? -fl->helper_pri : fl->helper_pri));
+        LogPut(f, "); switches ");
+    }
     LogU(f, fl->switches);
     LogPut(f, "; ScrollVPort us: max ");
     LogU(f, fl->call_us_max);
@@ -1260,6 +1395,7 @@ void CardFlip_After(struct Card *k)
         {
             f->csb_ok = 1;
             FlipSm_Shown(&f->sm);
+            FlipSm_Done(&f->sm);    /* pipe: the call returned (a no-op without) */
             f->switches++;
         }
         else

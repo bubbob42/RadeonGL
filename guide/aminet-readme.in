@@ -152,6 +152,11 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.14 (13.11.2026)
+  - panning (three buffers) 21-40% faster, its task now below the
+    program: faster than vsync and tear-free; RadeonGLFlip=csbnowait for
+    tests
+
 0.13 (13.11.2026)
   - public port "RadeonGL" (is anything drawing?), GL_ARB_multitexture
     named on its own, GL_EXT_texture_env_add, a ChangeScreenBuffer fix

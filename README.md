@@ -10,6 +10,21 @@ while the Workbench keeps running. It is a `minigl.library` 29.1 with the
 dispatch interface (ABI 5) of the current MiniGL SDK, so programs built
 with that SDK open it like any other `minigl.library` 29.
 
+## Contents
+
+- [Download](#download)
+- [Features](#features)
+- [Contexts](#contexts): the four kinds, each frame, input, size, ending and
+  restarting, several at once, watching from outside
+- [Not implemented yet](#not-implemented-yet)
+- [GLQuake benchmarks](#glquake-benchmarks)
+- [Requirements](#requirements)
+- [Building](#building)
+- [Layout](#layout)
+- [Licence](#licence)
+- [Made with AI](#made-with-ai)
+- [Credits](#credits)
+
 ## Download
 
 The binary release is in [`release/`](release): `RadeonGL.lha`, the
@@ -84,8 +99,12 @@ needs.
 - **Two or three buffers:** two copied onto the screen, or three
   (`mglChooseNumberOfBuffers(3)` or `RadeonGLBuffers=3`) shown by panning a
   screen three times as tall or by Intuition's `ChangeScreenBuffer`
-  (`RadeonGLFlip=csb`); a program may switch while it runs (GLQuake's
-  Video Options > Display sync).
+  (`RadeonGLFlip=csb`; `csbnowait` skips the wait for each switch's
+  DispMessage: not safe on Picasso96, for tests only); a program may
+  switch while it runs (GLQuake's Video Options > Display sync). Panning
+  is the fastest way without tearing: GLQuake's demo1 at 1280 x 720 runs
+  at 32.1 fps (the copy with vertical sync 29.9, without it 32.2), at
+  1920 x 1080 at 30.6 (22.4, 28.7).
 - **Windows and bitmaps:** a context in the program's window
   (`mglCreateContextFromWindow`), in a window of its own on the default
   public screen (`mglChooseWindowMode`), or drawing straight into the
@@ -121,6 +140,84 @@ needs.
   command queue, the card memory Picasso96 has handed out, the front
   screen's measured refresh and pixel clock, and a busy history graph.
   Read-only; its settings are the icon's Tool Types (`src/probe/rstat*.c`).
+
+## Contexts
+
+How a program gets a context, draws with it, and ends it. This is MiniGL
+29.1's interface; RadeonGL's own additions are named as such.
+
+### The four kinds
+
+| Call | What the program gets |
+|---|---|
+| `mglCreateContext(x, y, w, h)` | a Picasso96 screen of its own on the Radeon, in the mode that fits w x h best (16 bit if there is one, else 32) |
+| `mglCreateContextFromID(id, &w, &h)` | the same in exactly that mode (`mglGetSupportedScreenModes` lists them; `w` and `h` come back as its size); `MGL_SM_BESTMODE` acts as `mglCreateContext`, `MGL_SM_WINDOWMODE` gives a window as in the next line |
+| `mglChooseWindowMode(GL_TRUE)`, then `mglCreateContext(x, y, w, h)` | a window of its own on the default public screen, at x, y |
+| `mglCreateContextFromWindow(window)` | drawing in the program's window: each frame is drawn on the card and copied into the inner area at `mglSwitchDisplay`; the window stays the program's |
+| `mglCreateContextFromBitMap(bitmap)` | drawing straight into the program's bitmap on the Radeon; the program shows it, and may draw into it too |
+
+A window or bitmap must be on a screen of the Radeon board in 15, 16 or
+32 bits (R5G5B5PC, R5G6B5PC, B8G8R8A8). Anything else -- another board,
+8 or 24 bits -- gets NULL and no requester; the log file says why. The
+largest context is 2048 x 2048.
+
+Before the create a program may call `mglChoosePixelDepth` (16 or 32 bit
+for a screen), `mglChooseNumberOfBuffers` (2, or 3: shown by panning or
+`ChangeScreenBuffer`, see [Features](#features)) and `mglChooseWindowMode`.
+The window choice belongs to the program that made it: it is forgotten
+when a context is deleted.
+
+### Each frame
+
+Draw, then `mglSwitchDisplay(context)`: one flush sends the frame to the
+card and shows it -- copied or switched on a screen, copied into a window,
+left in place in a bitmap. `mglEnableSync(context, GL_TRUE)` holds the
+copy until the beam has passed (no tearing). `mglLockDisplay` and
+`mglUnlockDisplay` are accepted and do nothing; `mglLockBack` is refused,
+as 29.1 does when it has no lock to hand out, with the size filled in.
+
+### Input
+
+`mglGetWindowHandle(context)` (and `mglGetInputWindowHandle`) is the window
+to take input from: the screen context's own window, or the window the
+context draws in. A resize replaces it, and `mglDeleteContext` closes it.
+
+### Changing the size
+
+`mglResizeContext(context, w, h)` opens a new screen (or back buffer) at
+the new size; textures and static arrays survive. Ask for the window again
+afterwards. `GL_FALSE` means the size stayed: `glGetString(GL_RGL_RESIZE_ERROR)`
+(`0x52474C05`, RadeonGL's extension `GL_RGL_resize_error`) says why, for
+example "not enough memory for the back buffer". The same size asked for
+again reopens the screen when the program changed its buffering (two or
+three buffers, `RadeonGLFlip`).
+
+### Ending, and starting again
+
+`mglDeleteContext(context)` frees the context with its screen or window
+and its textures. Only the task that created a context can delete it; a
+context its task never deleted goes at that task's last `CloseLibrary`.
+
+A program may delete its context and create a new one while
+`minigl.library` stays open, to restart with new settings. Its textures
+must then be uploaded again, and the old window is gone: a loop that holds
+the window across `GetMsg` while a key callback restarts the context ends
+up on a freed message port. Leave the input loop when the context changed.
+
+### Several at once
+
+Each program gets its own context and dispatch table; they take turns on
+the Radeon flush by flush (see [Features](#features)). Calls without a
+context argument use the calling task's newest context. Texture memory:
+up to 16 MB for a screen context, 8 MB for a window or bitmap context
+unless `RadeonGLHeapMax` (2 to 16) says otherwise.
+
+### Watching from outside
+
+The public port `RadeonGL` (`lib/rglport.h`, under "Is anything drawing?"
+in [Features](#features)) counts the contexts that draw on the Radeon and
+how many of them are games on a screen of their own; the counts change
+when a context is created or deleted, not at each frame.
 
 ## Not implemented yet
 

@@ -483,12 +483,24 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Wie drei Puffer gezeigt werden. pan: ein Bildschirm, dreimal so hoch,
     der zum nächsten Drittel verschoben wird (ScrollVPort). csb:
     Intuition wechselt zwischen drei Bildschirmpuffern
-    (ChangeScreenBuffer). Ein Programm darf die Variable lokal für sich
+    (ChangeScreenBuffer). csbnowait: dasselbe, ohne vor dem nächsten
+    Wechsel auf die DispMessage des letzten zu warten. Laut dem Betreuer
+    von Picasso96 ist das nicht sicher, und in GLQuake war es nicht
+    schneller (21,6 und 17,0 Bilder pro Sekunde wie csb); es ist für
+    Tests da und wird nie von selbst gewählt. Ein Programm darf die Variable lokal für sich
     setzen und während des Laufs umschalten (so macht es GLQuakes Video
-    Options > Display sync). Auf dem Testrechner (GLQuake demo1) war das
-    Kopieren mit vertikaler Synchronisation am schnellsten: 29,8 Bilder
-    pro Sekunde bei 1280 x 720 (pan 26,6, csb 21,6) und 22,7 bei
-    1920 x 1080 (pan 21,9, csb 17,1).
+    Options > Display sync). Auf dem Testrechner (GLQuake demo1) war pan
+    der schnellste Weg ohne Zerreißen: 32,1 Bilder pro Sekunde bei
+    1280 x 720 (Kopieren mit vertikaler Synchronisation 29,9, csb 21,6;
+    Kopieren ohne Synchronisation, das zerreißt, 32,2) und 30,6 bei
+    1920 x 1080 (22,4, 17,0; 28,7).
+
+@{b}RadeonGLHelperPri@{ub}  (Vorgabe: -1 für pan, +1 für csb)
+    Die Priorität des Tasks, der die drei Puffer zeigt, gegenüber der des
+    Programms. pan wartet, bis die Karte das Bild fertig hat; unterhalb
+    des Programms kostet dieses Warten das Programm nichts (oberhalb war
+    pan 26,6 Bilder pro Sekunde statt 32,1). ChangeScreenBuffer läuft
+    oberhalb am besten.
 
         SetEnv SAVE RadeonGLFlip csb
 @endnode
@@ -787,6 +799,20 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.14 (13.11.2026)
+    * drei Puffer durch Verschieben (der vorgegebene Weg) sind viel
+      schneller: Der Task, der verschiebt, läuft jetzt unterhalb des
+      Programms, sein Warten auf die Karte kostet das Programm also
+      nichts. GLQuake demo1: 32,1 Bilder pro Sekunde bei 1280 x 720
+      (0.13: 26,6) und 30,6 bei 1920 x 1080 (0.13: 21,9), schneller als
+      das Kopieren mit vertikaler Synchronisation (29,9 und 22,4) und ohne
+      Zerreißen; RadeonGLHelperPri setzt die Priorität dieses Tasks
+    * RadeonGLFlip=csbnowait: ChangeScreenBuffer, ohne auf die
+      DispMessage jedes Wechsels zu warten, nur für Tests (laut dem
+      Betreuer von Picasso96 nicht sicher, und GLQuake war damit nicht
+      schneller)
+    * GLQuake mit zwei Puffern so schnell wie mit 0.13
 
 0.13 (13.11.2026)
     * ein öffentlicher Port namens "RadeonGL" sagt anderen Programmen, ob

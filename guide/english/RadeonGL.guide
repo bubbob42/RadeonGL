@@ -449,12 +449,22 @@ that is not set means the default.
 @{b}RadeonGLFlip@{ub}  (default: pan)
     How three buffers are shown. pan: one screen three times as tall,
     moved to the next third (ScrollVPort). csb: Intuition switches
-    between three screen buffers (ChangeScreenBuffer). A program may set
+    between three screen buffers (ChangeScreenBuffer). csbnowait: the
+    same without waiting for each switch's DispMessage before the next
+    one. Picasso96's maintainer says that is not safe, and in GLQuake it
+    was no faster (21.6 and 17.0 fps as csb); it is there for tests and
+    is never chosen for you. A program may set
     it for itself as a local variable and switch while it runs (GLQuake's
     Video Options > Display sync does). On the test machine (GLQuake demo1)
-    the copy with vertical sync was fastest: 29.8 fps at 1280 x 720
-    (panning 26.6, csb 21.6) and 22.7 at 1920 x 1080 (panning 21.9, csb
-    17.1).
+    panning was the fastest way without tearing: 32.1 fps at 1280 x 720
+    (the copy with vertical sync 29.9, csb 21.6; the copy without sync,
+    which tears, 32.2) and 30.6 at 1920 x 1080 (22.4, 17.0; 28.7).
+
+@{b}RadeonGLHelperPri@{ub}  (default: -1 for pan, +1 for csb)
+    The priority of the task that shows the three buffers, against the
+    program's. Panning waits for the card to finish the frame; below the
+    program that wait costs the program nothing (above it, panning was
+    26.6 fps instead of 32.1). ChangeScreenBuffer works best above it.
 
         SetEnv SAVE RadeonGLFlip csb
 @endnode
@@ -735,6 +745,18 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.14 (13.11.2026)
+    * three buffers by panning (the default way) are much faster: the
+      task that pans now runs below the program, so its wait for the card
+      costs the program nothing. GLQuake demo1: 32.1 fps at 1280 x 720
+      (0.13: 26.6) and 30.6 at 1920 x 1080 (0.13: 21.9), faster than the
+      copy with vertical sync (29.9 and 22.4) and without tearing;
+      RadeonGLHelperPri sets that task's priority
+    * RadeonGLFlip=csbnowait: ChangeScreenBuffer without waiting for each
+      switch's DispMessage, for tests only (Picasso96's maintainer says
+      it is not safe, and GLQuake was no faster with it)
+    * GLQuake with two buffers as fast as with 0.13
 
 0.13 (13.11.2026)
     * a public port named "RadeonGL" tells other programs whether anything
