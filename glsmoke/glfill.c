@@ -22,6 +22,12 @@
  *   linear    GL_LINEAR filtering
  *   quarter   quads a quarter of the screen (320 x 240)
  *   clear     the clear and the swap alone
+ *   copy      the 1024 x 512 texture made as Doom64 makes it: glTexImage2D
+ *             with no pixels, then one glCopyTexSubImage2D(0, 0, 0, 0,
+ *             1024, 512) from the frame
+ *   full      10 MB of other textures resident in the heap first (Doom64
+ *             had its level's textures there, 8-11 MB)
+ *   copyfull  both
  *
  *   GLFill FRAMES/N,ONLY/K,W/N,H/N
  *
@@ -40,7 +46,7 @@
 #include <proto/timer.h>
 #include <proto/minigl.h>
 
-static const char ver[] = "$VER: GLFill 0.1 (14.11.2026)";
+static const char ver[] = "$VER: GLFill 0.2 (14.11.2026)";
 
 #define TEMPLATE "FRAMES/N,ONLY/K,W/N,H/N"
 
@@ -55,6 +61,10 @@ static ULONG clk_Freq = 709379;
 #define V_LINEAR  0x20
 #define V_QUARTER 0x40
 #define V_CLEAR   0x80
+#define V_COPY    0x100
+#define V_FULL    0x200
+
+#define NFULL 10            /* 1 MB textures (512 x 512 RGBA8) for V_FULL */
 
 struct Variant
 {
@@ -72,7 +82,10 @@ static const struct Variant variants[] = {
     { "rgb565",  V_RGB565 },
     { "linear",  V_LINEAR },
     { "quarter", V_QUARTER },
-    { "clear",   V_CLEAR }
+    { "clear",   V_CLEAR },
+    { "copy",    V_COPY },
+    { "full",    V_FULL },
+    { "copyfull", V_COPY | V_FULL }
 };
 
 #define NQUADS 12
@@ -81,7 +94,8 @@ static GLfloat qpos[4 * 2];
 static GLfloat qst[4 * 2];
 static GLubyte qcol[4 * 4];
 static GLushort qidx[6] = { 0, 1, 2, 0, 2, 3 };
-static GLuint tex_big, tex_small, tex_565;
+static GLuint tex_big, tex_small, tex_565, tex_copy;
+static GLuint tex_full[NFULL];
 static LONG sw, sh;
 
 static ULONG Now(void)
@@ -184,7 +198,7 @@ static void Frame(ULONG fl)
         return;
     w = (GLfloat) ((fl & V_QUARTER) ? sw / 2 : sw);
     h = (GLfloat) ((fl & V_QUARTER) ? sh / 2 : sh);
-    t = (fl & V_TEX256) ? tex_small : (fl & V_RGB565) ? tex_565 : tex_big;
+    t = (fl & V_COPY) ? tex_copy : (fl & V_TEX256) ? tex_small : (fl & V_RGB565) ? tex_565 : tex_big;
     /* the screen's part of the texture: as Doom64 copies 640 x 480 into
      * 1024 x 512 */
     s1 = (fl & V_TEX256) ? 1.0f : (GLfloat) sw / 1024.0f;
@@ -311,6 +325,39 @@ int main(int argc, char **argv)
     {
         if (args[1] && !SameName((const char *) args[1], variants[v].name))
             continue;
+        if (variants[v].flags & V_FULL)
+        {
+            ULONG k;
+
+            /* the level's textures: resident, each drawn once */
+            for (k = 0; k < NFULL; k++)
+                if (!MakeTex(&tex_full[k], 512, 512, GL_RGBA8))
+                    break;
+            glEnable(GL_TEXTURE_2D);
+            for (k = 0; k < NFULL; k++)
+            {
+                glBindTexture(GL_TEXTURE_2D, tex_full[k]);
+                Quad(8.0f, 8.0f, 1.0f, 1.0f, 255, 255);
+            }
+            mglSwitchDisplay();
+        }
+        if (variants[v].flags & V_COPY)
+        {
+            /* Doom64's GL_ScreenToTexture: an empty texture, one copy */
+            Frame(0);
+            glGenTextures(1, &tex_copy);
+            glBindTexture(GL_TEXTURE_2D, tex_copy);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 1024, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+            t0 = Now();
+            glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, 1024, 512);
+            glFinish();
+            ticks = Now() - t0;
+            Printf("  (the copy: %ld ms)\n", (LONG) ((double) ticks * 1000.0 / (double) clk_Freq + 0.5));
+        }
         /* two frames to settle (textures to the card), then the timed ones */
         Frame(variants[v].flags);
         mglSwitchDisplay();
@@ -330,6 +377,10 @@ int main(int argc, char **argv)
         mpx10 = us ? (ULONG) ((double) px * 10.0 / (double) us + 0.5) : 0;
         Printf("  %-9s %6ld.%01ld        %4ld.%01ld\n", (LONG) variants[v].name, (LONG) (us / 1000),
                (LONG) ((us % 1000) / 100), (LONG) (mpx10 / 10), (LONG) (mpx10 % 10));
+        if (variants[v].flags & V_COPY)
+            glDeleteTextures(1, &tex_copy);
+        if (variants[v].flags & V_FULL)
+            glDeleteTextures(NFULL, tex_full);
     }
     Printf("GL error 0x%lx\n", (LONG) glGetError());
     rc = RETURN_OK;

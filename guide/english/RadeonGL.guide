@@ -756,6 +756,9 @@ was tested on real hardware.
     * RadeonGLFlip=csbnowait: ChangeScreenBuffer without waiting for each
       switch's DispMessage, for tests only (Picasso96's maintainer says
       it is not safe, and GLQuake was no faster with it)
+    * 32-bit textures upload faster, and glTexImage2D takes GL_BGRA with
+      GL_UNSIGNED_INT_8_8_8_8_REV (0xAARRGGBB words, the card's own
+      layout, copied as they are): Herald's cards in 22 ms instead of 42
     * GLQuake with two buffers as fast as with 0.13
 
 0.13 (13.11.2026)

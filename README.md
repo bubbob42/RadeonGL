@@ -62,7 +62,10 @@ needs.
   `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
   the card's memory (up to 16 MB), nearest, linear and mipmap filters,
   repeat and clamp, the environments MODULATE, REPLACE, DECAL, BLEND and
-  ADD (`GL_EXT_texture_env_add`), `glTexSubImage2D` updates.
+  ADD (`GL_EXT_texture_env_add`), `glTexSubImage2D` updates. 32-bit
+  textures also take `GL_BGRA` with `GL_UNSIGNED_INT_8_8_8_8_REV`: native
+  0xAARRGGBB words, the card's own texel, copied as they are (a 422 x 102
+  texture in 22 ms on a Mediator, the bus speed).
 - **Lighting on the Radeon's TCL:** `glLight`, `glMaterial`,
   `glLightModel` (ambient, local viewer, two-sided), `glColorMaterial`,
   `GL_NORMALIZE`; eight lights, directional, local and spot, with

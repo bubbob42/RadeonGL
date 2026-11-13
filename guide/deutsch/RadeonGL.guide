@@ -812,6 +812,10 @@ Hardware getestet.
       DispMessage jedes Wechsels zu warten, nur für Tests (laut dem
       Betreuer von Picasso96 nicht sicher, und GLQuake war damit nicht
       schneller)
+    * 32-Bit-Texturen werden schneller hochgeladen, und glTexImage2D nimmt
+      GL_BGRA mit GL_UNSIGNED_INT_8_8_8_8_REV (0xAARRGGBB-Langwörter, das
+      eigene Format der Karte, unverändert kopiert): die Karten von Herald
+      in 22 ms statt 42
     * GLQuake mit zwei Puffern so schnell wie mit 0.13
 
 0.13 (13.11.2026)

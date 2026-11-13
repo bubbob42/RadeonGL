@@ -1388,9 +1388,14 @@ dist/Test/ScreenInfo: test/amiga/screeninfo.c
 	$(GCC_CC) $(GCC_CFLAGS) -noixemul -s $< -o $@ -lamiga
 
 .PHONY: autotest
-autotest: $(AUTOTEST_CONFIG) dist/Test/Grab dist/Test/InputPoke dist/Test/ScreenInfo
+autotest: $(AUTOTEST_CONFIG) dist/Test/Grab dist/Test/InputPoke dist/Test/ScreenInfo $(RGL_LIB)
 	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in test/auto>"; exit 2; }
 	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf -- see tools/autotest.sh"; exit 2; }
+	@# 2026-11-14: the GLSmoke tests load DEV:GLSmoke/Libs, which only
+	@# `gmake glsmoke` used to refresh: the 0.14 regression ran three of them
+	@# on a day-old library. Every autotest now copies the current one.
+	@mkdir -p dist/GLSmoke/Libs
+	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@mkdir -p dist/Test
 	@cp test/auto/RunOne test/auto/RunCensus test/auto/RunNull test/auto/RunNullX test/auto/RunNullB test/auto/RunPlayB test/auto/RunNullTime test/auto/RunAB test/auto/WaitDone test/auto/InstallClicks test/auto/InstallClicksMsg test/auto/InstallCheck test/auto/ShowDrawers.rexx dist/Test/
 	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
