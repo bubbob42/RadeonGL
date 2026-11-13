@@ -451,7 +451,7 @@ that is not set means the default.
     moved to the next third (ScrollVPort). csb: Intuition switches
     between three screen buffers (ChangeScreenBuffer). A program may set
     it for itself as a local variable and switch while it runs (GLQuake's
-    Video Options > Buffering does). On the test machine (GLQuake demo1)
+    Video Options > Display sync does). On the test machine (GLQuake demo1)
     the copy with vertical sync was fastest: 29.8 fps at 1280 x 720
     (panning 26.6, csb 21.6) and 22.7 at 1920 x 1080 (panning 21.9, csb
     17.1).

@@ -84,7 +84,7 @@ needs.
   (`mglChooseNumberOfBuffers(3)` or `RadeonGLBuffers=3`) shown by panning a
   screen three times as tall or by Intuition's `ChangeScreenBuffer`
   (`RadeonGLFlip=csb`); a program may switch while it runs (GLQuake's
-  Video Options > Buffering).
+  Video Options > Display sync).
 - **Windows and bitmaps:** a context in the program's window
   (`mglCreateContextFromWindow`), in a window of its own on the default
   public screen (`mglChooseWindowMode`), or drawing straight into the

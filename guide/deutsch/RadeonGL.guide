@@ -485,7 +485,7 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Intuition wechselt zwischen drei Bildschirmpuffern
     (ChangeScreenBuffer). Ein Programm darf die Variable lokal für sich
     setzen und während des Laufs umschalten (so macht es GLQuakes Video
-    Options > Buffering). Auf dem Testrechner (GLQuake demo1) war das
+    Options > Display sync). Auf dem Testrechner (GLQuake demo1) war das
     Kopieren mit vertikaler Synchronisation am schnellsten: 29,8 Bilder
     pro Sekunde bei 1280 x 720 (pan 26,6, csb 21,6) und 22,7 bei
     1920 x 1080 (pan 21,9, csb 17,1).
