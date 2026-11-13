@@ -161,8 +161,9 @@ void Core_GetIntegerv(struct Core *c, ULONG pname, LONG *out)
  * hunk in front of frame.c and array.c): kept, so the hot array and emit
  * code stays where the 0.12 A/B measured it (tools/hot_layout.py). The
  * string itself lives in compat.c now. Remove it with the next accepted
- * layout change (then gmake hot-layout-ref). */
-const char Core_GetPad[156] = "layout pad";
+ * layout change (then gmake hot-layout-ref). 2026-11-14: 140 of the 156
+ * bytes went to texture.c's longword upload paths (Herald), 16 are left. */
+const char Core_GetPad[16] = "layout pad";
 
 const char *Core_GetString(struct Core *c, ULONG name)
 {

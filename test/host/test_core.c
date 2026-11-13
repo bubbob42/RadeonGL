@@ -954,6 +954,47 @@ static void test_tex32(void)
     Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     CHECK_HEX(t->hwfmt, R_TXFORMAT_ARGB8888);
     CHECK_HEX(Texel(t, 0, 1, 0), 0xff556677UL);
+    /* 2026-11-14: native ARGB words (GL_BGRA + 8_8_8_8_REV) copied as they
+     * are, and RGBA bytes from an unaligned source (the byte path) */
+    {
+        static const ULONG argb[4] = { 0x80102030UL, 0x40506070UL, 0xff8090a0UL, 0x00b0c0d0UL };
+        static UBYTE odd[1 + 16];
+        int k;
+
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_HEX(Texel(t, 0, 0, 0), 0x80102030UL);
+        CHECK_HEX(Texel(t, 0, 1, 0), 0x40506070UL);
+        CHECK_HEX(Texel(t, 0, 1, 1), 0x00b0c0d0UL);
+        Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_HEX(Texel(t, 0, 1, 1), 0xffb0c0d0UL);     /* RGB8: alpha 1 */
+        Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 1, 0, 1, 1, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb + 3);
+        CHECK_HEX(Texel(t, 0, 1, 0), 0xffb0c0d0UL);
+        /* into a 16-bit texture: through the generic path (ARGB4444) */
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_INT(t->cpp, 2);
+        CHECK_HEX(Texel(t, 0, 0, 0) & 0xffffUL, 0x8123UL);
+        {
+            /* RGBA bytes from a longword-aligned buffer: the rotate path */
+            static ULONG al[4];
+            UBYTE *ab = (UBYTE *) al;
+
+            for (k = 0; k < 16; k++)
+                ab[k] = px[k];
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, ab);
+            CHECK_HEX(Texel(t, 0, 0, 0), 0x44112233UL);
+            CHECK_HEX(Texel(t, 0, 0, 1), 0xcc99aabbUL);
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, ab);
+            CHECK_HEX(Texel(t, 0, 0, 1), 0xff99aabbUL);
+        }
+        for (k = 0; k < 16; k++)
+            odd[1 + k] = px[k];
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, odd + 1);
+        CHECK_HEX(Texel(t, 0, 0, 0), 0x44112233UL);
+        CHECK_HEX(Texel(t, 0, 1, 1), 0x01ddeef0UL);
+    }
     /* generic GL_RGBA stays ARGB4444 (GLQuake's) */
     Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     CHECK_INT(t->cpp, 2);

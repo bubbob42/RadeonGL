@@ -1260,6 +1260,14 @@ $(GLSMOKE030): glsmoke/glsmoke.c
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu881.py $@
 
 GLCOST := dist/GLSmoke/GLCost
+GLFILL := dist/GLSmoke/GLFill
+
+# 2026-11-14: fill rate of big quads, Doom64's wipe and its variants
+$(GLFILL): glsmoke/glfill.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -o $@ glsmoke/glfill.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 $(GLCOST): glsmoke/glcost.c glsmoke/pcprof.c glsmoke/pcprof.h
 	@mkdir -p dist/GLSmoke
@@ -1319,7 +1327,7 @@ $(GLGLUT): glsmoke/glglut.c
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLCOST) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke
@@ -1488,7 +1496,7 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info dist/Probe
 	@# here, and release-aminet renders the same file beside the archive
 	$(PYTHON) tools/make_aminet_readme.py -o $(RELDRAWER)/RadeonGL.readme >/dev/null
 	$(PYTHON) tools/make_aminet_readme.py --check $(RELDRAWER)/RadeonGL.readme
-	cp icons/readme.info $(RELDRAWER)/RadeonGL.readme.info     # plain text: no AmigaGuide icon
+	cp icons/text.info $(RELDRAWER)/RadeonGL.readme.info     # plain text: 3.2's def_text.info (tools/make_text_icon.py)
 	@# the Installer (comments stripped by `gmake installer`)
 	cp dist/Install dist/Install.info $(RELDRAWER)/
 	@# Test and CardReport: IconX scripts (icons/run.info keeps the
@@ -1517,13 +1525,15 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info dist/Probe
 	cp $(REL_DRAWER_ICON) $(RELDRAWER)/Files/RadeonGL.info
 	@# LhA records the HOST file mode as protection bits: nothing read-only
 	chmod -R u+w $(RELSTAGE)
-	@# where everything sits: the package window (two manuals over the
-	@# readme and the Installer), the installed drawer (the manuals over
-	@# Test, CardReport and Licences), the Licences drawer
-	$(SETPOS) $(RELDRAWER)/RadeonGL.guide.info --center-x 100 8
-	$(SETPOS) $(RELDRAWER)/RadeonGL_deutsch.guide.info --center-x 290 8
-	$(SETPOS) $(RELDRAWER)/RadeonGL.readme.info --center-x 100 70
-	$(SETPOS) $(RELDRAWER)/Install.info --center-x 290 70
+	@# where everything sits: the package window (one column, the user's
+	@# layout snapshot on the A4000D, 2026-11-14, then the German manual and
+	@# the readme swapped: the Installer, the English manual, the German
+	@# manual, the readme), the installed drawer (the manuals over Test,
+	@# CardReport and Licences), the Licences drawer
+	$(SETPOS) $(RELDRAWER)/Install.info --pos 107 4
+	$(SETPOS) $(RELDRAWER)/RadeonGL.guide.info --pos 110 75
+	$(SETPOS) $(RELDRAWER)/RadeonGL_deutsch.guide.info --pos 110 143
+	$(SETPOS) $(RELDRAWER)/RadeonGL.readme.info --center-x 129 205     # the column's centre; glow 38 x 42 as the guides
 	$(SETPOS) $(REL_FILES)/RadeonGL.guide.info --center-x 135 8
 	$(SETPOS) $(REL_FILES)/RadeonGL_deutsch.guide.info --center-x 345 8
 	$(SETPOS) $(REL_FILES)/Test.info --center-x 50 70
@@ -1544,7 +1554,7 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info dist/Probe
 	$(SETPOS) $(REL_FILES)/Licences.info --window 160 70 420 80 $(REL_DRAWER_WIN)
 	@# the package drawer's own icon, and the window it opens
 	cp $(REL_DRAWER_ICON) $(RELSTAGE)/RadeonGL.info
-	$(SETPOS) $(RELSTAGE)/RadeonGL.info --no-pos --window 120 50 400 165 $(REL_DRAWER_WIN)
+	$(SETPOS) $(RELSTAGE)/RadeonGL.info --no-pos --window 120 50 283 315 $(REL_DRAWER_WIN)
 	@# the sources and makefiles (the user, 2026-11-03), in Source: no icon,
 	@# so the package window stays as it is; the list is tools/source_list.py
 	$(PYTHON) -I tools/source_list.py --check > build/release-src.txt

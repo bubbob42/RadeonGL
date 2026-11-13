@@ -744,6 +744,16 @@
 #endif
 /* 2026-11-07, extension GL_RGL_resize_error: glGetString of it = why the
  * last mglResizeContext that kept the old size did so ("" if none did) */
+/* GL 1.2's packed BGRA: with GL_UNSIGNED_INT_8_8_8_8_REV a pixel is one
+ * native 32-bit word 0xAARRGGBB -- the R200's ARGB8888 texel (2026-11-14,
+ * Herald: its pixels are those words already) */
+#ifndef GL_BGRA
+#define GL_BGRA                                  0x80E1UL
+#endif
+#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
+#define GL_UNSIGNED_INT_8_8_8_8_REV              0x8367UL
+#endif
+
 #ifndef GL_RGL_RESIZE_ERROR
 #define GL_RGL_RESIZE_ERROR                      0x52474c05UL
 #endif
