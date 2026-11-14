@@ -196,6 +196,65 @@ static void FlipSm_Unshow(struct FlipSm *s)
     s->leave = FLIP_NONE;
 }
 
+/*
+ * 2026-11-14, the panning tear (docs/concept-panning-tear.md, cure B). A
+ * pan's new offset is taken by the CRTC at the next vertical blank: until
+ * then the third the pan left is still scanned out, and a frame kicked
+ * into it shows half drawn. The rule, by the beam (read only):
+ *
+ * a reference is a beam line read AFTER the pan's register write with the
+ * beam in the picture. Whenever the beam is in the blank later, or back
+ * above the reference, the blank it passed began after the write: the
+ * offset is taken (or will be before the next line is scanned). So a kick
+ * needs no wait once that is seen; any other kick must wait for the blank
+ * -- in the Radeon (R2E_WaitVline), the 68k goes on. The beam decides:
+ * the time since the pan only cuts it short once it is longer than a
+ * refresh in any mode a display takes (the review of 2026-11-14: a 21 ms
+ * rule tore a 30 Hz mode).
+ *
+ * A line read in the blank is no reference: the write may have come after
+ * the point of the blank where the CRTC takes the offset, and the third
+ * stays on show for a whole picture more. A line no counter gives (at or
+ * past the total, e.g. a failed bus read: $FFFFFFFF) is no verdict: wait.
+ */
+
+/* A refresh period at the slowest mode the Radeon offers (50 Hz) */
+#define FLIP_SAFE_US     20000UL
+/* The beam's time rule: this long after a pan's write the blank that takes
+ * its offset has begun in any mode a display takes -- a refresh at 24 Hz
+ * (41.7 ms), the lines a latch may come before the blank (FLIP_BEAM_GUARD)
+ * and a margin. FLIP_SAFE_US (one refresh at 50 Hz) is too short even for
+ * a 50 Hz mode with an early latch (test_flip: 20.06 ms at 720 x 576); it
+ * stays as it was for the paths that use it (no helper). */
+#define FLIP_BEAM_AGED_US 50000UL
+/* lines a reference keeps off the picture's end (the counter against the
+ * point the CRTC takes the offset at) */
+#define FLIP_BEAM_GUARD  4UL
+
+/* A beam line read after the pan's write: a reference? disp = the lines
+ * displayed (the blank begins at line disp) */
+static BOOL FlipBeam_RefOk(ULONG line, ULONG disp)
+{
+    return (BOOL) (disp > FLIP_BEAM_GUARD && line + FLIP_BEAM_GUARD < disp);
+}
+
+/* At the kick: TRUE = the Radeon must wait for the blank before it draws
+ * into the third the pan left. ref_line: the reference; us_since_pan: no
+ * more than the time since the pan's write; line_now: the beam now; disp,
+ * vtot: the lines displayed and in all (the blank is [disp, vtot)) */
+static BOOL FlipBeam_MustWait(ULONG ref_line, ULONG us_since_pan, ULONG line_now, ULONG disp, ULONG vtot)
+{
+    if (us_since_pan >= FLIP_BEAM_AGED_US)
+        return FALSE;               /* longer than any refresh */
+    if (line_now >= vtot)
+        return TRUE;                /* no line the counter gives: no verdict */
+    if (line_now >= disp)
+        return FALSE;               /* in the blank that followed the reference */
+    if (line_now < ref_line)
+        return FALSE;               /* back above it: through a blank */
+    return TRUE;
+}
+
 #endif /* FLIP_SM_FUNCTIONS */
 
 #endif /* RADEONGL_CARDFLIP_SM_H */

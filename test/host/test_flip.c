@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <exec/types.h>
 
@@ -522,6 +523,403 @@ static void RunP(const char *name, unsigned long seed, long frames, double cpu_l
            m.shown / (m.t / 1000000.0));
 }
 
+/* --- the panning tear (2026-11-14, docs/concept-panning-tear.md, cure B) --------------------- */
+
+/*
+ * MEASURED by eye on the A4000D: the CRTC takes a pan's new offset at the
+ * next vertical blank, so the third a pan left is scanned out until then.
+ * The rule (cardflip_sm.h FlipBeam_*) and the way lib/cardflip.c applies it
+ * (BeamNote in the helper, BeamRef at the flush's start, CardFlip_Beam at
+ * the kick), against a model of the beam:
+ *
+ * a mode of vt lines, disp of them displayed, a refresh every T us; time 0
+ * is the top of a picture. The CRTC takes a pending offset at one latch
+ * point a refresh -- four models: two lines before the blank (a prefetch),
+ * the blank's start, its middle, its end. The third a pan left is on show
+ * until the blank of the first latch point after the pan's register write
+ * W: the Radeon's first write into it must come at that blank's start or
+ * later.
+ *
+ * A trial: W at random; the helper reads the beam 5-300 us later (BeamNote)
+ * and the E clock a little after; the game judges (BeamRef) some time
+ * later -- the reference is the helper's line, or (that was in the blank)
+ * a picture line polled in 1 ms sleeps; without one it sleeps out the time
+ * rule; the kick (CardFlip_Beam) comes later still, reads the beam once
+ * more and decides; the CP reaches the wait delta after that. With the wait
+ * the engine starts at the first moment the beam is in a blank, else at
+ * once.
+ */
+
+struct BeamMode
+{
+    const char *name;
+    double vt;                  /* lines a refresh */
+    double disp;                /* ... displayed */
+    double T;                   /* us a refresh */
+};
+
+static const struct BeamMode beam_modes[] =
+{
+    { "640x480@60", 525.0, 480.0, 16683.0 },
+    { "1024x768@60", 806.0, 768.0, 16661.0 },
+    { "1280x720@60", 750.0, 720.0, 16667.0 },
+    { "1920x1080@60", 1125.0, 1080.0, 16667.0 },
+    { "800x600@75", 625.0, 600.0, 13333.0 },
+    { "1024x768@85", 808.0, 768.0, 11765.0 },
+    { "720x576@50", 625.0, 576.0, 20000.0 },
+    { "1280x1024@50", 1066.0, 1024.0, 20000.0 },
+    { "PAL-ish 49.92 Hz, blank 3 ms", 625.0, 530.0, 20032.0 },
+    { "640x400@70", 449.0, 400.0, 14268.0 },
+    { "1920x1080@30 (a TV)", 1125.0, 1080.0, 33333.0 },
+    { "1920x1080@24 (a TV)", 1125.0, 1080.0, 41667.0 }
+};
+
+#define BEAM_MODES ((int) (sizeof(beam_modes) / sizeof(beam_modes[0])))
+
+#define LATCH_PREFETCH 0        /* two lines before the blank */
+#define LATCH_START    1
+#define LATCH_MID      2
+#define LATCH_END      3
+#define LATCHES        4
+
+static const char *latch_names[LATCHES] = { "latch 2 lines early", "latch at the blank", "latch mid-blank",
+                                            "latch at the blank's end" };
+
+static double BeamLt(const struct BeamMode *m)
+{
+    return m->T / m->vt;
+}
+
+static ULONG BeamLine(const struct BeamMode *m, double t)
+{
+    long k;
+    double r;
+    ULONG line;
+
+    k = (long) (t / m->T);
+    r = t - (double) k * m->T;
+    if (r < 0.0)
+        r = 0.0;
+    line = (ULONG) (r / BeamLt(m));
+    if ((double) line >= m->vt)
+        line = (ULONG) m->vt - 1;
+    return line;
+}
+
+static double BeamBlank(const struct BeamMode *m, long k)
+{
+    return (double) k * m->T + m->disp * BeamLt(m);
+}
+
+static double BeamLatch(const struct BeamMode *m, int latch, long k)
+{
+    double b;
+
+    b = BeamBlank(m, k);
+    if (latch == LATCH_PREFETCH)
+        return b - 2.0 * BeamLt(m);
+    if (latch == LATCH_START)
+        return b;
+    if (latch == LATCH_MID)
+        return b + 0.5 * (m->vt - m->disp) * BeamLt(m);
+    return (double) (k + 1) * m->T - 0.01;
+}
+
+/* the start of the blank in which the CRTC takes a write at W */
+static double BeamTaken(const struct BeamMode *m, int latch, double W)
+{
+    long k;
+
+    k = (long) (W / m->T) - 1;
+    while (BeamLatch(m, latch, k) <= W)
+        k++;
+    return BeamBlank(m, k);
+}
+
+/* the rule's two halves, and the wrong ones the test must catch */
+typedef BOOL (*BeamRefFn)(ULONG line, ULONG disp);
+typedef BOOL (*BeamWaitFn)(ULONG ref_line, ULONG us_since_pan, ULONG line_now, ULONG disp, ULONG vtot);
+
+static BOOL RefAny(ULONG line, ULONG disp)
+{
+    (void) line;
+    (void) disp;
+    return TRUE;                /* a line in the blank taken as a reference */
+}
+
+static BOOL RefNoGuard(ULONG line, ULONG disp)
+{
+    return (BOOL) (line < disp);
+}
+
+static BOOL WaitNever(ULONG ref_line, ULONG us_since_pan, ULONG line_now, ULONG disp, ULONG vtot)
+{
+    (void) ref_line;
+    (void) us_since_pan;
+    (void) line_now;
+    (void) disp;
+    (void) vtot;
+    return FALSE;
+}
+
+/* the time rule of the first build (21 ms): a 30 Hz mode tears with it */
+static BOOL Wait21(ULONG ref_line, ULONG us_since_pan, ULONG line_now, ULONG disp, ULONG vtot)
+{
+    if (us_since_pan >= 21000UL)
+        return FALSE;
+    return FlipBeam_MustWait(ref_line, 0, line_now, disp, vtot);
+}
+
+struct BeamTiming
+{
+    const char *name;
+    double game_lo, game_hi;    /* the helper's E clock to BeamRef */
+    double kick_lo, kick_hi;    /* BeamRef to the kick */
+    double cp_lo, cp_hi;        /* the kick to the CP at the wait */
+    double read_lo, read_hi;    /* the write to the helper's line read */
+};
+
+static const struct BeamTiming beam_timings[] =
+{
+    /* GLQuake: the helper pans while the game waits, the kick 1.5-4.5 ms
+     * later (locks, the CP's start, the stream's copy); the wait goes to
+     * the CP at once */
+    { "steady", 10.0, 1000.0, 1500.0, 4500.0, 2.0, 60.0, 5.0, 300.0 },
+    /* anything: mid-frame flushes, lock waits, a busy system */
+    { "spread", 0.0, 25000.0, 300.0, 40000.0, 2.0, 60.0, 5.0, 300.0 },
+    /* the CP late at the wait (as it would be without the commit) */
+    { "late CP", 10.0, 1000.0, 300.0, 4500.0, 300.0, 3000.0, 5.0, 300.0 },
+    /* the helper's line read right at the write */
+    { "quick read", 0.0, 200.0, 300.0, 4500.0, 2.0, 60.0, 1.0, 30.0 }
+};
+
+#define BEAM_TIMINGS ((int) (sizeof(beam_timings) / sizeof(beam_timings[0])))
+
+struct BeamStats
+{
+    long trials;
+    long waits;
+    long passed;
+    long aged;
+    long late;
+    long polls;
+    long timed;
+    long tears;
+    long extra;                 /* the engine waited a whole refresh more than needed */
+    long extra_ref;             /* ... the write in the picture, the helper's line the reference */
+    double stall;               /* us the engine stood at the wait */
+};
+
+static void BeamTrial(const struct BeamMode *m, int latch, const struct BeamTiming *tm, BeamRefFn ref_ok,
+                      BeamWaitFn must_wait, struct BeamStats *st)
+{
+    double W;
+    double R;
+    double h_ticks;
+    double t;
+    double K;
+    double te;
+    double taken;
+    ULONG disp;
+    ULONG h_line;
+    ULONG ref;
+    ULONG line;
+    BOOL h_ok;
+    BOOL have;
+    BOOL wait;
+    long k;
+    int i;
+
+    disp = (ULONG) m->disp;
+    W = 10.0 * m->T + Rand(0.0, m->T);
+    R = W + Rand(tm->read_lo, tm->read_hi);
+    h_line = BeamLine(m, R);
+    h_ok = ref_ok(h_line, disp);
+    h_ticks = R + Rand(1.0, 20.0);
+    t = h_ticks + Rand(tm->game_lo, tm->game_hi);
+    st->trials++;
+    wait = FALSE;
+    if ((ULONG) (t - h_ticks) >= FLIP_BEAM_AGED_US)
+    {
+        st->aged++;
+        K = t + Rand(tm->kick_lo, tm->kick_hi);
+    }
+    else
+    {
+        ref = h_line;
+        have = h_ok;
+        if (!have)
+        {
+            st->late++;
+            for (i = 0; i < 8 && !have; i++)
+            {
+                line = BeamLine(m, t);
+                if (ref_ok(line, disp))
+                {
+                    have = TRUE;
+                    ref = line;
+                }
+                else
+                {
+                    st->polls++;
+                    t += Rand(1000.0, 1300.0);
+                }
+            }
+        }
+        if (!have)
+        {
+            st->timed++;
+            if (t - h_ticks < (double) FLIP_BEAM_AGED_US)
+                t = h_ticks + (double) FLIP_BEAM_AGED_US + Rand(0.0, 200.0);
+            K = t + Rand(tm->kick_lo, tm->kick_hi);
+        }
+        else
+        {
+            K = t + Rand(tm->kick_lo, tm->kick_hi);
+            line = BeamLine(m, K);
+            wait = must_wait(ref, (ULONG) (K - h_ticks), line, disp, (ULONG) m->vt);
+            if (wait)
+                st->waits++;
+            else
+                st->passed++;
+        }
+    }
+    t = K + Rand(tm->cp_lo, tm->cp_hi);
+    te = t;
+    if (wait && BeamLine(m, t) < disp)
+    {
+        k = (long) (t / m->T);
+        te = BeamBlank(m, k);
+        if (te < t)
+            te = BeamBlank(m, k + 1);
+    }
+    taken = BeamTaken(m, latch, W);
+    if (te < taken)
+        st->tears++;
+    if (wait)
+    {
+        st->stall += te - t;
+        if (te - taken >= m->T)
+        {
+            /* a write in the blank, or a helper's line in the blank:
+             * whether that blank took the write is not known (the latch
+             * point is not), so the rule waits for the next one -- the
+             * price, by design. A write in the picture with the helper's
+             * line as the reference must never cost it. */
+            st->extra++;
+            if (h_ok && BeamLine(m, W) + FLIP_BEAM_GUARD < disp)
+                st->extra_ref++;
+        }
+    }
+    CHECK(te - K <= m->T + 3000.0, "the engine waited longer than a refresh past the CP");
+}
+
+static void BeamRun(const struct BeamMode *m, int latch, const struct BeamTiming *tm, BeamRefFn ref_ok,
+                    BeamWaitFn must_wait, unsigned long seed, long trials, struct BeamStats *st)
+{
+    long i;
+
+    rng = seed;
+    memset(st, 0, sizeof(*st));
+    for (i = 0; i < trials; i++)
+        BeamTrial(m, latch, tm, ref_ok, must_wait, st);
+}
+
+static void TestBeam(void)
+{
+    static char name[160];
+    struct BeamStats st;
+    struct BeamStats sum;
+    double worst;
+    long tears;
+    int mi;
+    int li;
+    int ti;
+
+    /* the time rule: no later than FLIP_BEAM_AGED_US after any write the
+     * blank that takes it has begun, in every mode and latch model */
+    for (mi = 0; mi < BEAM_MODES; mi++)
+    {
+        regime = beam_modes[mi].name;
+        worst = beam_modes[mi].T + (double) FLIP_BEAM_GUARD * BeamLt(&beam_modes[mi]);
+        CHECK(worst <= (double) FLIP_BEAM_AGED_US, "the time rule is shorter than a refresh and the guard");
+    }
+    /* the reference: a line in the picture, kept off its end */
+    regime = "FlipBeam_RefOk";
+    CHECK(FlipBeam_RefOk(0, 768), "the top line is no reference");
+    CHECK(FlipBeam_RefOk(763, 768), "line disp-5 is no reference");
+    CHECK(!FlipBeam_RefOk(764, 768), "line disp-4 taken as a reference");
+    CHECK(!FlipBeam_RefOk(768, 768), "the blank's first line taken as a reference");
+    CHECK(!FlipBeam_RefOk(805, 768), "a blank line taken as a reference");
+    CHECK(!FlipBeam_RefOk(2, 4), "a mode of four lines has a reference");
+    regime = "FlipBeam_MustWait";
+    CHECK(FlipBeam_MustWait(100, 2000, 100, 768, 806), "the reference's own line needs no wait");
+    CHECK(FlipBeam_MustWait(100, 2000, 767, 768, 806), "the picture's last line needs no wait");
+    CHECK(!FlipBeam_MustWait(100, 2000, 768, 768, 806), "a wait in the blank");
+    CHECK(!FlipBeam_MustWait(100, 2000, 805, 768, 806), "a wait in the blank's last line");
+    CHECK(FlipBeam_MustWait(100, 2000, 806, 768, 806), "a line past the total taken as the blank");
+    CHECK(FlipBeam_MustWait(100, 2000, 0x7ff, 768, 806), "a failed read ($FFFFFFFF) taken as the blank");
+    CHECK(!FlipBeam_MustWait(100, 2000, 99, 768, 806), "a wait after the beam wrapped");
+    CHECK(!FlipBeam_MustWait(100, FLIP_BEAM_AGED_US, 500, 768, 806), "a wait after the time rule");
+    CHECK(!FlipBeam_MustWait(100, FLIP_BEAM_AGED_US, 0x7ff, 768, 806), "a wait after the time rule");
+    CHECK(FlipBeam_MustWait(100, FLIP_BEAM_AGED_US - 1, 500, 768, 806), "no wait before the time rule");
+
+    /* the real rule: never a write into a third on show */
+    memset(&sum, 0, sizeof(sum));
+    for (mi = 0; mi < BEAM_MODES; mi++)
+        for (li = 0; li < LATCHES; li++)
+            for (ti = 0; ti < BEAM_TIMINGS; ti++)
+            {
+                sprintf(name, "beam: %s, %s, %s", beam_modes[mi].name, latch_names[li], beam_timings[ti].name);
+                regime = name;
+                BeamRun(&beam_modes[mi], li, &beam_timings[ti], FlipBeam_RefOk, FlipBeam_MustWait,
+                        (unsigned long) (1000 + mi * 31 + li * 7 + ti), 20000, &st);
+                CHECK(st.tears == 0, "the Radeon wrote into a third still on show");
+                CHECK(st.waits + st.passed + st.aged + st.timed == st.trials, "a trial without a verdict");
+                if (ti == 0 && li == LATCH_START && beam_modes[mi].T <= 20100.0)
+                {
+                    sum.trials += st.trials;
+                    sum.waits += st.waits;
+                    sum.passed += st.passed;
+                    sum.aged += st.aged;
+                    sum.late += st.late;
+                    sum.polls += st.polls;
+                    sum.timed += st.timed;
+                    sum.extra += st.extra;
+                    sum.stall += st.stall;
+                }
+                if (ti == 0)
+                    CHECK(st.extra_ref == 0, "steady: a whole extra refresh for a write in the picture");
+            }
+    printf("test_flip: beam, steady, 50-85 Hz, %ld trials: the Radeon waited %ld%% (mean %.1f ms), no wait %ld%%, "
+           "aged %ld%%, late %ld%% (polls %ld), timed %ld, extra refreshes %ld\n",
+           sum.trials, sum.waits * 100 / sum.trials, sum.waits ? sum.stall / sum.waits / 1000.0 : 0.0,
+           sum.passed * 100 / sum.trials, sum.aged * 100 / sum.trials, sum.late * 100 / sum.trials, sum.polls,
+           sum.timed, sum.extra);
+
+    /* the test must see a wrong rule: no wait at all; a line in the blank
+     * as the reference (latch at the blank's start); no guard against a
+     * latch two lines early */
+    for (mi = 0; mi < BEAM_MODES; mi++)
+    {
+        regime = beam_modes[mi].name;
+        BeamRun(&beam_modes[mi], LATCH_START, &beam_timings[0], FlipBeam_RefOk, WaitNever, 7, 20000, &st);
+        CHECK(st.tears > 0, "the model sees no tear without the wait");
+        BeamRun(&beam_modes[mi], LATCH_START, &beam_timings[0], RefAny, FlipBeam_MustWait, 7, 20000, &st);
+        CHECK(st.tears > 0, "the model sees no tear with a blank line as the reference");
+        tears = 0;
+        BeamRun(&beam_modes[mi], LATCH_PREFETCH, &beam_timings[3], RefNoGuard, FlipBeam_MustWait, 7, 400000,
+                &st);
+        tears += st.tears;
+        CHECK(tears > 0, "the model sees no tear without the guard");
+        if (beam_modes[mi].T > 21000.0)
+        {
+            BeamRun(&beam_modes[mi], LATCH_START, &beam_timings[1], FlipBeam_RefOk, Wait21, 7, 20000, &st);
+            CHECK(st.tears > 0, "the model sees no tear with the 21 ms time rule below 48 Hz");
+        }
+    }
+}
+
 int main(void)
 {
     double secs;
@@ -603,6 +1001,7 @@ int main(void)
              &secs);
     for (seed = 1; seed <= 20; seed++)
         RunP("refused 10%, mid", seed, 2000, 5000, 40000, 1000, 20000, 0.10, 1, 1, &d, &sh, &w, &secs);
+    TestBeam();
     printf("test_flip: %s (%d checks)\n", failures ? "FAILED" : "OK", checks);
     if (failures)
         printf("test_flip: %d of %d checks FAILED\n", failures, checks);

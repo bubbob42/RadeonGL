@@ -1157,7 +1157,10 @@ CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow
 # bytes: 10476 - 20 keeps the core behind it in place. (The upload-cache
 # fix adds 32 bytes to core_array.o, which moves r2emit.o's hot code: a
 # GLQuake A/B, ab_ufix.)
-RGL_DISPATCH_PAD := 10684
+# 2026-11-14, the panning tear's cure B (docs/concept-panning-tear.md: all
+# of it in cardflip.o, linked late; one call in card.o, +16 bytes in front
+# of the pad): 10684 - 16.
+RGL_DISPATCH_PAD := 10668
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \

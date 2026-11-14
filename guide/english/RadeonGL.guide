@@ -401,8 +401,13 @@ that is not set means the default.
     with a short Picasso96 lock each time, instead of one lock a frame.
     About 2% faster on the test machine.
 
-@{b}RadeonGLUploadCache@{ub}  (default: on)
-    0 sends every vertex again in every frame (for comparing only).
+@{b}RadeonGLUploadCache@{ub}  (default: on, 4 MB that grow with the scene)
+    0 sends every vertex again in every frame (for comparing only). A
+    number from 1 to 256 fixes the cache at that many MB of card memory.
+    On, it starts at 4 MB (2 or 1 when card memory or fast RAM has no
+    room for 4), doubles while it keeps dropping what a program sends
+    again and card memory is free, and gives memory back to textures,
+    never below the size it started with.
 
 @{b}RadeonGLLocked@{ub}  (default: on)
     0 draws a program's vertex arrays the slow, direct way (for
@@ -453,12 +458,15 @@ that is not set means the default.
     same without waiting for each switch's DispMessage before the next
     one. Picasso96's maintainer says that is not safe, and in GLQuake it
     was no faster (21.6 and 17.0 fps as csb); it is there for tests and
-    is never chosen for you. A program may set
-    it for itself as a local variable and switch while it runs (GLQuake's
-    Video Options > Display sync does). On the test machine (GLQuake demo1)
-    panning was the fastest way without tearing: 32.1 fps at 1280 x 720
-    (the copy with vertical sync 29.9, csb 21.6; the copy without sync,
-    which tears, 32.2) and 30.6 at 1920 x 1080 (22.4, 17.0; 28.7).
+    is never chosen for you. A program may set it for itself as a local
+    variable and switch while it runs (GLQuake's Video Options > Display
+    sync does). The card shows a new third only from the next vertical
+    blank on; since 0.15 the Radeon waits for that blank before it draws
+    into the third just left (before, panning tore). On the test machine
+    (GLQuake demo1) panning is the fastest way without tearing: 31.5 fps
+    at 1280 x 720 (the copy with vertical sync 29.9, csb 21.6; the copy
+    without sync, which tears, 32.2) and 27.9 at 1920 x 1080 (22.4, 17.0;
+    28.7).
 
 @{b}RadeonGLHelperPri@{ub}  (default: -1 for pan, +1 for csb)
     The priority of the task that shows the three buffers, against the
@@ -746,13 +754,35 @@ was tested on real hardware.
 
 @{b}History@{ub}
 
+0.15 (14.11.2026)
+    * fixed: three buffers by panning tore the picture. The card shows a
+      new third only from the next vertical blank on, and the next frame
+      was drawn into the third still on show. The Radeon now waits for
+      that blank before it draws there, unless the beam has passed it
+      already. The wait is the one the copy with vertical sync uses;
+      nothing that changes the picture is written. GLQuake demo1 on the
+      test machine without tearing: 30.1 fps at 1024 x 768, 31.5 at
+      1280 x 720, 27.9 at 1920 x 1080 (2 to 10% slower than with the
+      tearing; at 1280 x 720 and 1920 x 1080 still faster than the copy
+      with vertical sync, 29.9 and 22.4)
+    * the upload cache starts at 4 MB (was 2) and grows with the scene
+      while card memory is free; textures get memory back from it.
+      RadeonGLUploadCache=n fixes it at n MB
+    * fixed: with the static arrays hint, a frame with more new data than
+      the upload cache held could overwrite data it still drew from
+      (Reflector)
+    * GL_RGL_bitmap_view: a Picasso96 bitmap on the card (R5G6B5PC,
+      R5G5B5PC or B8G8R8A8) drawn as a texture without a copy, up to
+      four per context (Herald)
+    * GLQuake with two buffers as fast as with 0.14
+
 0.14 (13.11.2026)
     * three buffers by panning (the default way) are much faster: the
       task that pans now runs below the program, so its wait for the card
       costs the program nothing. GLQuake demo1: 32.1 fps at 1280 x 720
       (0.13: 26.6) and 30.6 at 1920 x 1080 (0.13: 21.9), faster than the
-      copy with vertical sync (29.9 and 22.4) and without tearing;
-      RadeonGLHelperPri sets that task's priority
+      copy with vertical sync (29.9 and 22.4); panning tore, which 0.15
+      fixes; RadeonGLHelperPri sets that task's priority
     * RadeonGLFlip=csbnowait: ChangeScreenBuffer without waiting for each
       switch's DispMessage, for tests only (Picasso96's maintainer says
       it is not safe, and GLQuake was no faster with it)

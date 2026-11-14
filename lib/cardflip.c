@@ -40,7 +40,9 @@
  * beam, which in the game's own task made triple buffering 15% slower than
  * the copy with vertical sync (26.0 against 30.7 fps, demo1). The game asks
  * and goes on; the helper's return from ScrollVPort marks the third it left
- * as off the display (no fixed wait). Without the helper (it did not start)
+ * as off the display -- by the bookkeeping: the CRTC shows it until the next
+ * blank (2026-11-14, cure B below: BeamNote, BeamRef, CardFlip_Beam). Without
+ * the helper (it did not start)
  * the pan runs in the game's task, the left third safe 20 ms later.
  * 2026-11-13: the helper now runs ONE BELOW the game while panning
  * (RadeonGLHelperPri, EnvHelperPri): ScrollVPort's wait spins until the
@@ -126,10 +128,6 @@
 #include "r2emit.h"
 
 #define NONE CARD_FLIP_NONE
-
-/* A refresh period at the slowest mode the Radeon offers (50 Hz): the
- * third a switch left is off the display by then */
-#define FLIP_SAFE_US 20000UL
 
 ULONG Card_Buffers = 0;
 
@@ -253,8 +251,9 @@ static struct CardFlip *Want(struct Card *k)
 
 /* --- the third a switch left ------------------------------------------------------------- */
 
-/* Off the display once the helper's pan returned (or, panning in the game's
- * task, a refresh period after the switch) */
+/* Off the display by the bookkeeping once the helper's pan returned (on show
+ * until the next blank: cure B guards the first frame drawn into it), or,
+ * panning in the game's task, a refresh period after the switch */
 static void Expire(struct CardFlip *f)
 {
     if (f->sm.leave == NONE)
@@ -346,6 +345,209 @@ static void Pan(struct Card *k, ULONG i)
     vp->RasInfo->RxOffset = 0;
     vp->RasInfo->RyOffset = (WORD) (i * k->height);
     ScrollVPort(vp);
+}
+
+/* --- the beam after a pan (2026-11-14, docs/concept-panning-tear.md, cure B) ---------------- */
+
+/*
+ * MEASURED by eye 2026-11-14 on the A4000D (GLQuake demo1, 1024 x 768 and
+ * 1280 x 720): with the helper one below the game the picture splits, with
+ * it one above (RadeonGLHelperPri 1: the pan ~7 ms before the next kick) it
+ * does not. The CRTC takes ScrollVPort's new offset at the next vertical
+ * blank; until then the third the pan left is scanned out, and the next
+ * frame was kicked into it ~2 ms after the pan. "The pan returned" never
+ * meant "off the display".
+ *
+ * The cure: the first flush that draws into a third a pan left puts the
+ * Radeon's own wait for the blank (R2E_WaitVline, the vsync copy's packets:
+ * the engine's wait window and WAIT_UNTIL, nothing that changes the
+ * picture) in front of its commands, unless a
+ * blank is known to have passed since the pan (cardflip_sm.h, FlipBeam_*).
+ * The 68k goes on; it waits (timer.device) only for a reference (the
+ * helper's line was in the blank: 1 ms polls, at most CF_BEAM_POLLS) or,
+ * with no beam at all, for the rest of FLIP_BEAM_AGED_US.
+ */
+
+#define CF_CRTC2_VLINE        0x0310UL
+#define CF_CRTC2_OFFSET_CNTL  0x0328UL
+/* CRTC_OFFSET's address bits (above them GUI_TRIG_OFFSET and its like) */
+#define CF_OFFSET_MASK        0x07ffffffUL
+/* 1 ms sleeps for a line in the picture (the longest blank the Radeon's
+ * modes have is ~3 ms) */
+#define CF_BEAM_POLLS         8
+
+/* The CRTC that scans the GL screen out, its displayed and total lines and
+ * the beam's line now (read only; the CRTC chosen as card.c's VsyncWindow
+ * chooses it). FALSE: no CRTC is on, or its lines do not fit the Radeon's
+ * wait */
+static BOOL BeamRead(struct Card *k, ULONG *crtc, ULONG *disp, ULONG *line, ULONG *vtot)
+{
+    ULONG v;
+    ULONG c;
+
+    if (Card_ReadReg(k, R_CRTC_GEN_CNTL) & R_CRTC_EN)
+        c = 0;
+    else if (Card_ReadReg(k, R_CRTC2_GEN_CNTL) & R_CRTC_EN)
+        c = 1;
+    else
+        return FALSE;
+    v = Card_ReadReg(k, c ? R_CRTC2_V_TOTAL_DISP : R_CRTC_V_TOTAL_DISP);
+    *crtc = c;
+    *disp = ((v >> R_CRTC_V_DISP_SHIFT) & R_CRTC_V_DISP_MASK) + 1;
+    *vtot = (v & R_CRTC_V_DISP_MASK) + 1;       /* CRTC_V_TOTAL, bits 0-10 */
+    *line = (Card_ReadReg(k, c ? CF_CRTC2_VLINE : CF_CRTC_VLINE) >> 16) & 0x7ffUL;
+    return (BOOL) (*disp >= 2 && *disp <= R_TRIG_VLINE_LINE_MASK && *disp < *vtot);
+}
+
+/* us on timer.device (the flush's request: nothing else of it is out) */
+static void FlipSleep(struct Card *k, ULONG us)
+{
+    struct timerequest *t;
+
+    t = k->treq;
+    t->tr_node.io_Command = TR_ADDREQUEST;
+    t->tr_time.tv_secs = 0;
+    t->tr_time.tv_micro = us;
+    DoIO((struct IORequest *) t);
+}
+
+/* The rest of the beam's time rule since the E clock read since */
+static void SleepRest(struct Card *k, ULONG since)
+{
+    ULONG gone;
+
+    gone = FlipUs(FlipTicks() - since);
+    if (gone < FLIP_BEAM_AGED_US)
+        FlipSleep(k, FLIP_BEAM_AGED_US - gone);
+}
+
+/* The helper, right after its pan onto third to: the beam, as the
+ * reference of the third the display was on; and whether ScrollVPort wrote
+ * the offset before it returned (o1, o2: CRTC_OFFSET and CRTC2_OFFSET
+ * before the call) -- the rule's premise, counted for the log */
+static void BeamNote(struct CardFlip *f, ULONG to, ULONG o1, ULONG o2)
+{
+    ULONG crtc;
+    ULONG disp;
+    ULONG line;
+    ULONG vtot;
+    ULONG left;
+    BOOL ok;
+
+    crtc = 0;
+    disp = 0;
+    line = 0;
+    vtot = 0;
+    ok = BeamRead(f->card, &crtc, &disp, &line, &vtot);
+    left = f->h_shown;
+    f->h_shown = to;
+    if (left >= CARD_FLIP_N || left == to)
+        return;
+    f->h_ok[left] = (ok && FlipBeam_RefOk(line, disp)) ? 1UL : 0UL;
+    f->h_line[left] = line;
+    f->h_disp[left] = disp;
+    f->h_crtc[left] = crtc;
+    f->h_ticks[left] = FlipTicks();
+    if (ok)
+    {
+        f->pan_crtc = crtc;
+        f->pan_off0 = crtc ? o2 : o1;
+        f->pan_off1 = Card_ReadReg(f->card, crtc ? R_CRTC2_OFFSET : R_CRTC_OFFSET);
+        f->pan_cntl = Card_ReadReg(f->card, crtc ? CF_CRTC2_OFFSET_CNTL : R_CRTC_OFFSET_CNTL);
+        f->pan_cmp++;
+        if (((f->pan_off0 ^ f->pan_off1) & CF_OFFSET_MASK) == 0)
+            f->pan_same++;
+    }
+}
+
+/* The Radeon's wait for the blank of this CRTC: built once a mode and, when
+ * the checker runs, through it (the pair alone leaves the checker's state
+ * as it was) */
+static BOOL BeamPacket(struct Card *k, struct CardFlip *f, ULONG crtc, ULONG disp)
+{
+    struct R2Cs cs;
+    struct R2ChkError err;
+
+    if (f->pkt_ok && f->pkt_crtc == crtc && f->pkt_disp == disp)
+        return TRUE;
+    f->pkt_ok = 0;
+    R2Cs_InitBuffer(&cs, f->beam_pkt, 4, 1);
+    (void) R2E_WaitVline(&cs, crtc, 0, disp);
+    if (cs.error != R2_OK || cs.ptr != f->beam_pkt + 4)
+        return FALSE;
+    if (k->check && R2Chk_Run(&k->cfg, &k->chk, f->beam_pkt, 4, 1, 0, &err) != R2CE_OK)
+    {
+        f->beam_refused++;
+        return FALSE;
+    }
+    f->pkt_crtc = crtc;
+    f->pkt_disp = disp;
+    f->pkt_ok = 1;
+    return TRUE;
+}
+
+/* CardFlip_Safe: this flush draws into a third a pan left, no verdict
+ * since. The reference -- the helper's line, or (it read in the blank) a
+ * later one read here -- and the Radeon's wait, for CardFlip_Beam to decide
+ * with at the kick; or the verdict now */
+static void BeamRef(struct Card *k, struct CardFlip *f)
+{
+    ULONG d;
+    ULONG crtc;
+    ULONG disp;
+    ULONG line;
+    ULONG vtot;
+    ULONG i;
+    BOOL have;
+
+    d = f->sm.draw;
+    if ((LONG) (f->done - f->left_seq[d]) < 0)
+    {
+        /* its pan has not come back (WaitPan gave up): nothing is known,
+         * the next flush asks again */
+        f->beam_out++;
+        return;
+    }
+    f->pan_ticks = f->h_ticks[d];
+    if (FlipUs(FlipTicks() - f->pan_ticks) >= FLIP_BEAM_AGED_US)
+    {
+        f->beam_left &= ~(1UL << d);
+        f->beam_aged++;
+        return;
+    }
+    crtc = f->h_crtc[d];
+    disp = f->h_disp[d];
+    line = f->h_line[d];
+    have = (BOOL) (f->h_ok[d] != 0);
+    if (!have)
+    {
+        f->beam_late++;
+        for (i = 0; i < CF_BEAM_POLLS && !have; i++)
+        {
+            if (!BeamRead(k, &crtc, &disp, &line, &vtot))
+                break;
+            if (FlipBeam_RefOk(line, disp))
+                have = TRUE;
+            else
+            {
+                f->beam_polls++;
+                FlipSleep(k, 1000);
+            }
+        }
+    }
+    if (have && !BeamPacket(k, f, crtc, disp))
+        have = FALSE;
+    if (!have)
+    {
+        /* no beam to go by: the refresh period, in this task */
+        f->beam_timed++;
+        SleepRest(k, f->pan_ticks);
+        f->beam_left &= ~(1UL << d);
+        return;
+    }
+    f->ref_line = line;
+    f->beam_third = d;
+    f->beam_go = 1;
 }
 
 /* --- the ChangeScreenBuffer way (RadeonGLFlip=csb) ------------------------------------------ */
@@ -619,6 +821,9 @@ static void FlipTask(void)
     ULONG seq;
     ULONG t0;
     ULONG us;
+    ULONG to;
+    ULONG o1;
+    ULONG o2;
 
     ULONG i;
     BOOL ok;
@@ -641,13 +846,17 @@ static void FlipTask(void)
             }
             else
             {
+                to = f->pan_to;
+                o1 = Card_ReadReg(f->card, R_CRTC_OFFSET);
+                o2 = Card_ReadReg(f->card, R_CRTC2_OFFSET);
                 t0 = FlipTicks();
-                Pan(f->card, f->pan_to);
+                Pan(f->card, to);
                 us = FlipUs(FlipTicks() - t0);
                 if (us > f->call_us_max)
                     f->call_us_max = us;
                 f->call_us_sum += us;
                 PanBeam(f);
+                BeamNote(f, to, o1, o2);    /* before done: the game reads it then */
             }
             f->done = seq;
             Signal(f->owner, 1UL << f->sig);
@@ -1070,6 +1279,10 @@ void CardFlip_Open(struct Card *k)
     StartHelper(f);                 /* none: the pans run in this task */
     f->asked = f->done;
     Pan(k, f->sm.show);             /* the top third (where it opened) */
+    f->beam_left = 0;               /* no third left by a pan yet */
+    f->beam_go = 0;
+    f->pkt_ok = 0;                  /* the mode may be another */
+    f->h_shown = f->sm.show;
     k->flip_on = 1;
 }
 
@@ -1124,6 +1337,19 @@ void CardFlip_Free(struct Card *k)
 static void LogPut(struct LogOut *f, const char *s)
 {
     Rgl_LogPut(f, s);
+}
+
+static void LogX(struct LogOut *f, ULONG v)
+{
+    char b[12];
+    int i;
+
+    b[0] = '0';
+    b[1] = 'x';
+    for (i = 0; i < 8; i++)
+        b[2 + i] = "0123456789abcdef"[(v >> (28 - 4 * i)) & 15];
+    b[10] = 0;
+    LogPut(f, b);
 }
 
 static void LogU(struct LogOut *f, ULONG v)
@@ -1258,6 +1484,41 @@ void CardFlip_Log(struct LogOut *f, struct Card *k)
     LogU(f, fl->sm.dropped);
     LogPut(f, ", frames drawn into the shown third ");
     LogU(f, fl->on_shown);
+    if (fl->helper != NULL)
+    {
+        /* 2026-11-14: "the shown third" above is the bookkeeping's; what
+         * the CRTC scans out follows the pan only at the next blank */
+        LogPut(f, "\n  a left third until the blank: the Radeon waited for it ");
+        LogU(f, fl->beam_waits);
+        LogPut(f, ", no wait by the beam ");
+        LogU(f, fl->beam_passed);
+        LogPut(f, ", by the pan's age ");
+        LogU(f, fl->beam_aged);
+        LogPut(f, "; the pan's line no reference ");
+        LogU(f, fl->beam_late);
+        LogPut(f, " (1 ms polls ");
+        LogU(f, fl->beam_polls);
+        LogPut(f, "), the 68k waited instead ");
+        LogU(f, fl->beam_timed);
+        LogPut(f, " (wait refused by the checker ");
+        LogU(f, fl->beam_refused);
+        LogPut(f, "), pan not back ");
+        LogU(f, fl->beam_out);
+        LogPut(f, ", another mode at the kick ");
+        LogU(f, fl->beam_mode);
+        LogPut(f, ", odd lines ");
+        LogU(f, fl->beam_odd);
+        LogPut(f, "\n  ScrollVPort left the offset as it was ");
+        LogU(f, fl->pan_same);
+        LogPut(f, " of ");
+        LogU(f, fl->pan_cmp);
+        LogPut(f, fl->pan_crtc ? "; the last pan CRTC2_OFFSET " : "; the last pan CRTC_OFFSET ");
+        LogX(f, fl->pan_off0);
+        LogPut(f, " -> ");
+        LogX(f, fl->pan_off1);
+        LogPut(f, ", OFFSET_CNTL ");
+        LogX(f, fl->pan_cntl);
+    }
     LogPut(f, "\n");
 }
 
@@ -1268,6 +1529,7 @@ void CardFlip_Safe(struct Card *k)
     struct CardFlip *f;
 
     f = k->flip;
+    f->beam_go = 0;                 /* a flush that left before its kick decided nothing */
     if (f->mode == CARD_FLIP_CSB)
     {
         CsbExpire(f);
@@ -1278,6 +1540,64 @@ void CardFlip_Safe(struct Card *k)
     Expire(f);
     if (FlipSm_MustWait(&f->sm))
         WaitSafe(k, f);
+    /* off the display by the bookkeeping; by the beam (cure B): */
+    if (f->helper != NULL && f->sm.draw < CARD_FLIP_N && (f->beam_left & (1UL << f->sm.draw)) != 0)
+        BeamRef(k, f);
+}
+
+void CardFlip_Beam(struct Card *k)
+{
+    struct CardFlip *f;
+    ULONG crtc;
+    ULONG disp;
+    ULONG line;
+    ULONG vtot;
+    ULONG us;
+    ULONG *p;
+
+    f = k->flip;
+    if (f == NULL || !f->beam_go)
+        return;
+    f->beam_go = 0;
+    f->beam_left &= ~(1UL << f->beam_third);
+    us = FlipUs(FlipTicks() - f->pan_ticks);
+    if (us >= FLIP_BEAM_AGED_US)
+    {
+        f->beam_aged++;
+        return;
+    }
+    /* the mode the wait was built for, read here in the lock as the vsync
+     * copy reads its window (a screen switch outside the lock -- a
+     * non-present flush is not held back by the hidden-screen test --
+     * would leave the CP waiting for a blank the new mode never reaches);
+     * another mode, or none: the GL screen is not what that CRTC shows */
+    if (!BeamRead(k, &crtc, &disp, &line, &vtot) || crtc != f->pkt_crtc || disp != f->pkt_disp)
+    {
+        f->beam_mode++;
+        return;
+    }
+    if (line >= vtot)
+        f->beam_odd++;
+    if (!FlipBeam_MustWait(f->ref_line, us, line, disp, vtot))
+    {
+        f->beam_passed++;
+        return;
+    }
+    /* the wait first in this flush's part of the ring, and to the CP at
+     * once: the engine is idle (the lock), so it stands at the wait while
+     * the beam is still before the blank the 68k saw coming -- reached
+     * only after the blank, it would wait a whole refresh more (no room:
+     * the error stays in the ring's stream, CopyCommands returns it) */
+    p = R2Cs_Room(&k->ring.cs, 4);
+    if (p == NULL)
+        return;
+    p[0] = f->beam_pkt[0];
+    p[1] = f->beam_pkt[1];
+    p[2] = f->beam_pkt[2];
+    p[3] = f->beam_pkt[3];
+    k->ring.cs.ptr = p + 4;
+    (void) R2Ring_Commit(&k->ring);
+    f->beam_waits++;
 }
 
 void CardFlip_Settled(struct Card *k)
@@ -1405,13 +1725,21 @@ void CardFlip_After(struct Card *k)
     if (show != NONE && f->helper != NULL)
     {
         /* the helper pans (or switches); its return marks the left buffer
-         * off the display (or, switching, its SafeMessage does) */
+         * off the display by the bookkeeping (or, switching, its
+         * SafeMessage does); a pan's left third is on show until the next
+         * blank: cure B guards the first frame drawn into it */
         f->pan_to = show;
         f->switched = FlipTicks();
         f->asked++;
         Signal(&f->helper->pr_Task, SIGBREAKF_CTRL_F);
         FlipSm_Shown(&f->sm);
         f->switches++;
+        if (f->mode != CARD_FLIP_CSB && f->sm.leave < CARD_FLIP_N)
+        {
+            /* on show until the blank after this pan (CardFlip_Safe) */
+            f->left_seq[f->sm.leave] = f->asked;
+            f->beam_left |= 1UL << f->sm.leave;
+        }
     }
     else if (show != NONE)
     {

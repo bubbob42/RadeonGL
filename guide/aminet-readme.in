@@ -58,7 +58,7 @@ FEATURES
     in every GL 1.1 layout and type, MiniGL's own main loop
   * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048, in
     every mode of the card, switched while the program runs; vertical
-    sync
+    sync, or three buffers without tearing
   * Or a window on the Workbench (the program's or one of its own), or
     straight into the program's bitmap, on 15-, 16- and 32-bit screens
   * Several programs at once, each with its own context
@@ -149,10 +149,17 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.15 (14.11.2026)
+  - fixed: panning tore the picture (0.14 was wrong to call it tear-free)
+  - the upload cache starts at 4 MB and grows with the scene
+  - fixed: a stale upload-cache block under the static arrays hint
+  - GL_RGL_bitmap_view: board bitmaps as textures without a copy
+
 0.14 (13.11.2026)
   - panning (three buffers) 21-40% faster, its task now below the
-    program: faster than vsync and tear-free; RadeonGLFlip=csbnowait for
-    tests; faster 32-bit texture uploads, GL_BGRA 0xAARRGGBB words
+    program: faster than vsync (but it tore, fixed in 0.15);
+    RadeonGLFlip=csbnowait for tests; faster 32-bit texture uploads,
+    GL_BGRA 0xAARRGGBB words
 
 0.13 (13.11.2026)
   - public port "RadeonGL" (is anything drawing?), GL_ARB_multitexture

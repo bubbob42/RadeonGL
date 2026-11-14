@@ -1352,6 +1352,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         WHERE(79, k->core->udirty_n);
     }
     WHERE(7, n);
+    if (k->flip_on)
+        CardFlip_Beam(k);           /* a third a pan left: the Radeon waits for the blank */
     e = CopyCommands(k, n);
     if (e == R2_OK)
         e = R2Ring_Fence(&k->ring, &seq);
