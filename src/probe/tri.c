@@ -588,6 +588,7 @@ static BOOL RenderScene(struct Ctx *c, ULONG *buf)
     /* the ring's byte order, or the registers' own for the direct path */
     R2Cs_InitBuffer(&bcs, buf, STREAM_DW, c->direct ? 0UL : 1UL);
     env.alloc = EnvAlloc;
+    env.alloc_raw = NULL;
     env.free = EnvFree;
     env.wait_idle = EnvIdle;
     env.env = NULL;

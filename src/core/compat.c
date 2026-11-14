@@ -25,6 +25,9 @@
 #include "r200reg.h"
 #include "arrayfetch.h"
 
+/* GL_EXTENSIONS for Core_GetString (get.c): kept here, behind the hot code. */
+const char Core_Extensions[] = CORE_EXTENSIONS;
+
 /* GL's defaults for the state compat.c adds (Fog_Defaults calls it at
  * Core_Init; the rest of that state starts zeroed) */
 void Compat_Defaults(struct Core *c)
@@ -638,8 +641,9 @@ static void *Unpack(struct Core *c, LONG w, LONG h, ULONG *format, ULONG *type,
  * formats come with that type too), not GL_RED/GREEN/BLUE, in the default
  * unpack state -- straight on, before anything else (a few instructions:
  * GLQuake's lightmap uploads, every frame) */
-#define UPLOAD_PLAIN(c, format, type) ((c)->unpack_plain && (type) == GL_UNSIGNED_BYTE \
-                                       && ((format) < GL_COLOR_INDEX || (format) > GL_BLUE))
+#define UPLOAD_PLAIN(c, format, type) ((c)->unpack_plain && (((type) == GL_UNSIGNED_BYTE \
+                                       && ((format) < GL_COLOR_INDEX || (format) > GL_BLUE)) \
+                                       || ((format) == GL_BGRA && (type) == GL_UNSIGNED_INT_8_8_8_8_REV)))
 
 void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
                       LONG w, LONG h, LONG border, ULONG format, ULONG type,

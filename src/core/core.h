@@ -88,6 +88,11 @@ struct CoreEnv
 {
     APTR (*alloc)(APTR env, ULONG size);            /* zeroed, or NULL */
     void (*free)(APTR env, APTR mem, ULONG size);
+    /* As alloc, but the bytes are left as they are: only for a buffer
+     * whose every reader reads only what was written into it first (the
+     * upload cache's mirror, Core_SetVram; 2026-11-12, the fast create:
+     * clearing 2 MB cost ~90 ms). Freed with free. NULL: alloc is used. */
+    APTR (*alloc_raw)(APTR env, ULONG size);
     /* Return once the GPU has finished everything emitted so far. Needed
      * before the CPU rewrites VRAM the GPU may still read. */
     LONG (*wait_idle)(APTR env);
@@ -390,7 +395,7 @@ struct Core
     ULONG ucache_off, ucache_size, ucache_pos, ucache_on;
     ULONG ustaged;
     ULONG *ushadow;                 /* CORE_UCACHE_BYTES of fast RAM, staged only; 16-byte aligned */
-    APTR ushadow_mem;               /* as env.alloc gave it (16 bytes more), for env.free */
+    APTR ushadow_mem;               /* as env.alloc_raw (or alloc) gave it (16 bytes more), for env.free */
     ULONG udirty_off[CORE_UDIRTY], udirty_len[CORE_UDIRTY];  /* bytes in the region */
     ULONG udirty_n, udirty_all;
     struct CoreUEntry uq[CORE_UQ];
@@ -532,7 +537,12 @@ struct PmWork;
 
 /* Initialise c for the stream cs, the target t and the texture heap
  * [heap_gpu, heap_gpu + heap_size) mapped at heap_cpu. Returns 0 or a GL
- * error (GL_OUT_OF_MEMORY). Nothing is emitted until the first draw. */
+ * error (GL_OUT_OF_MEMORY). Nothing is emitted until the first draw.
+ * c must be all zero bits on entry: from a zeroing allocator (MEMF_CLEAR,
+ * calloc), static storage, or cleared whole by the caller after Core_Free
+ * of the same struct. Core_Init does not clear it again (2026-11-12, the
+ * fast create; the library's struct Rgl comes MEMF_CLEAR). Host builds
+ * check every byte and stop the run if one is not zero. */
 ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
                 const struct CoreTarget *t, ULONG heap_gpu, ULONG *heap_cpu,
                 ULONG heap_size);
@@ -729,8 +739,21 @@ struct CoreScreen
 /* Copy the target's colour buffer 1:1 to (x, y) on the screen with the 3D
  * engine (concept 6.7; Mesa r200_blit): flush the colour cache, wait for
  * the 3D engine, draw the back buffer as a texture into the screen. The
- * client's state comes back at the next draw. */
+ * client's state comes back at the next draw. With c->sync, in bands from
+ * the top down (frame.c): ahead of the beam all the way. */
 void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y);
+
+/* The synced present's bands (frame.c, 2026-11-12): a band at row a is
+ * BAND0 + a / GROW rows high (480 rows: 27 bands; 720: 32; 1080: 38; 2048:
+ * 48), at most BANDS of them. The copy stays ahead of the beam if it copies
+ * more than 1 + 1 / GROW rows while the beam shows one and starts BAND0
+ * rows' worth of copy time before the beam reaches row 0. CORE_PRESENT_DW:
+ * the present's dwords at most after its Core_Validate -- 58 of state, 14 a
+ * band (the back end's reserve holds it, lib/card.c). */
+#define CORE_PRESENT_BAND0  8
+#define CORE_PRESENT_GROW   16
+#define CORE_PRESENT_BANDS  48
+#define CORE_PRESENT_DW     (58 + 14 * CORE_PRESENT_BANDS)
 
 /* --- Queries (get.c) --------------------------------------------------------------- */
 
@@ -779,13 +802,18 @@ void Core_TexMemStat(struct Core *c, LONG *current, LONG *peak);
 void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const void *p);
 /* GL_EXTENSIONS (get.c); the library appends RGL_PALETTE_EXTENSIONS. MiniGLV3D's
  * spelling, so clients take the same paths (GLQuake finds GL_ARB_multitexture
- * inside GL_MGL_...) */
-#define CORE_EXTENSIONS "GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array GL_MGL_packed_pixels " \
+ * inside GL_MGL_...). The standalone GL_ARB_multitexture comes FIRST: Doom 64
+ * EX/EX+'s FindExtension restarts its strstr at the same spot after a hit
+ * inside another word, so with GL_MGL_ARB_multitexture first it hangs at GL
+ * init (a host simulation: standalone first OK, after it still a hang).
+ * GL_EXT_texture_env_add: GL_ADD is implemented (hwstate.c) and accepted. */
+#define CORE_EXTENSIONS "GL_ARB_multitexture GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array " \
+                        "GL_MGL_packed_pixels GL_EXT_texture_env_add " \
                         "GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag GL_RGL_resize_error"
 /* GL 1.3 phase 1 (tex13.c): features passed as values to calls MiniGL has.
  * The library appends it (lib/rglcompat.c): with it the string is longer
  * than C90's 509 characters, which the core's compilers must take. */
-#define CORE_EXTENSIONS_13 " GL_ARB_texture_env_add GL_EXT_texture_env_add " \
+#define CORE_EXTENSIONS_13 " GL_ARB_texture_env_add " \
                         "GL_ARB_texture_env_combine GL_EXT_texture_env_combine GL_ARB_texture_env_dot3 " \
                         "GL_EXT_texture_env_dot3 GL_ARB_texture_env_crossbar GL_ATI_texture_env_combine3 " \
                         "GL_ARB_texture_border_clamp GL_ARB_texture_mirrored_repeat " \
@@ -793,6 +821,8 @@ void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const voi
                         "GL_SGIS_texture_lod GL_EXT_texture_lod_bias GL_ARB_texture_cube_map " \
                         "GL_EXT_texture_cube_map GL_EXT_bgra GL_EXT_packed_pixels " \
                         "GL_EXT_separate_specular_color GL_EXT_rescale_normal"
+extern const char Core_Extensions[];            /* compat.c: CORE_EXTENSIONS, linked late */
+extern const char Core_GetPad[];                /* get.c: keeps the hot code in place */
 #define RGL_PALETTE_EXTENSIONS " GL_EXT_color_table GL_EXT_paletted_texture GL_EXT_shared_texture_palette"
 void Core_ColorTable(struct Core *c, ULONG target, ULONG internal, LONG width, ULONG format,
                      ULONG type, const void *data);

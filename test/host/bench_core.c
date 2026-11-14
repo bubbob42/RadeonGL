@@ -91,6 +91,7 @@ static void Setup(void)
     t.depth_gpu = 0x00200000UL;
     t.depth_pitch = 320;
     e.alloc = HostAlloc;
+    e.alloc_raw = NULL;
     e.free = HostFree;
     e.wait_idle = HostIdle;
     e.env = NULL;

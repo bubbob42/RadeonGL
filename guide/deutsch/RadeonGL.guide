@@ -468,6 +468,41 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Programm endet.
 
         SetEnv SAVE RadeonGLDisplayPriority high
+
+@{b}RadeonGLBuffers@{ub}  (Vorgabe: was das Programm wünscht)
+    3 zeigt ein Programm auf einem eigenen Bildschirm mit drei Puffern:
+    einer wird gezeigt, einer wartet, einer wird gezeichnet. Ein fertiges
+    Bild wartet nie auf den Strahl, und nichts reißt. 2 kopiert jedes
+    Bild auf den Bildschirm, mit vertikaler Synchronisation, wenn das
+    Programm sie einschaltet. Nicht gesetzt gilt die Wahl des Programms
+    (mglChooseNumberOfBuffers); die meisten Programme wünschen zwei.
+
+        SetEnv SAVE RadeonGLBuffers 3
+
+@{b}RadeonGLFlip@{ub}  (Vorgabe: pan)
+    Wie drei Puffer gezeigt werden. pan: ein Bildschirm, dreimal so hoch,
+    der zum nächsten Drittel verschoben wird (ScrollVPort). csb:
+    Intuition wechselt zwischen drei Bildschirmpuffern
+    (ChangeScreenBuffer). csbnowait: dasselbe, ohne vor dem nächsten
+    Wechsel auf die DispMessage des letzten zu warten. Laut dem Betreuer
+    von Picasso96 ist das nicht sicher, und in GLQuake war es nicht
+    schneller (21,6 und 17,0 Bilder pro Sekunde wie csb); es ist für
+    Tests da und wird nie von selbst gewählt. Ein Programm darf die Variable lokal für sich
+    setzen und während des Laufs umschalten (so macht es GLQuakes Video
+    Options > Display sync). Auf dem Testrechner (GLQuake demo1) war pan
+    der schnellste Weg ohne Zerreißen: 32,1 Bilder pro Sekunde bei
+    1280 x 720 (Kopieren mit vertikaler Synchronisation 29,9, csb 21,6;
+    Kopieren ohne Synchronisation, das zerreißt, 32,2) und 30,6 bei
+    1920 x 1080 (22,4, 17,0; 28,7).
+
+@{b}RadeonGLHelperPri@{ub}  (Vorgabe: -1 für pan, +1 für csb)
+    Die Priorität des Tasks, der die drei Puffer zeigt, gegenüber der des
+    Programms. pan wartet, bis die Karte das Bild fertig hat; unterhalb
+    des Programms kostet dieses Warten das Programm nichts (oberhalb war
+    pan 26,6 Bilder pro Sekunde statt 32,1). ChangeScreenBuffer läuft
+    oberhalb am besten.
+
+        SetEnv SAVE RadeonGLFlip csb
 @endnode
 
 @node Speed "Geschwindigkeit"
@@ -637,8 +672,7 @@ Für gar kein Protokoll:
 RadeonGL beantwortet alle 205 Funktionen der minigl.library 29.1
 (einige davon ohne Wirkung, siehe unten). Noch nicht da:
 
-    * Polygone als Linien oder Punkte (glPolygonMode), Stencil- und
-      Akkumulationspuffer, Linien- und Flächenmuster, logische
+    * Stencil- und Akkumulationspuffer, Linien- und Flächenmuster, logische
       Verknüpfungen, den Tiefenpuffer lesen.
 
 Angenommen, aber ohne Wirkung: Kantenmarken und Farbindex-Werte,
@@ -746,9 +780,9 @@ Hardware getestet.
       minigl.library, nach Quake von id Software -- das Programm, mit
       dem RadeonGL entwickelt und gemessen wurde.
     * Advanced Micro Devices: der R200-Mikrocode.
-    * Martin "Mason" Merz: die Piktogramme f�r Install und die
-      AmigaGuide-Hilfe, die von AmigaOS 3.2, mit seiner Erlaubnis
-      verwendet.
+    * Martin "Mason" Merz: die Piktogramme für Install, die
+      AmigaGuide-Hilfe und Texte, die von AmigaOS 3.2, mit seiner
+      Erlaubnis verwendet.
     * ATI Technologies, VA Linux Systems, Precision Insight, The Weather
       Channel und Tungsten Graphics, Red Hat und die Autoren der Treiber
       radeon (Linux) und r200 (Mesa) (darunter Dave Airlie, Alex Deucher,
@@ -765,6 +799,58 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.14 (13.11.2026)
+    * drei Puffer durch Verschieben (der vorgegebene Weg) sind viel
+      schneller: Der Task, der verschiebt, läuft jetzt unterhalb des
+      Programms, sein Warten auf die Karte kostet das Programm also
+      nichts. GLQuake demo1: 32,1 Bilder pro Sekunde bei 1280 x 720
+      (0.13: 26,6) und 30,6 bei 1920 x 1080 (0.13: 21,9), schneller als
+      das Kopieren mit vertikaler Synchronisation (29,9 und 22,4) und ohne
+      Zerreißen; RadeonGLHelperPri setzt die Priorität dieses Tasks
+    * RadeonGLFlip=csbnowait: ChangeScreenBuffer, ohne auf die
+      DispMessage jedes Wechsels zu warten, nur für Tests (laut dem
+      Betreuer von Picasso96 nicht sicher, und GLQuake war damit nicht
+      schneller)
+    * 32-Bit-Texturen werden schneller hochgeladen, und glTexImage2D nimmt
+      GL_BGRA mit GL_UNSIGNED_INT_8_8_8_8_REV (0xAARRGGBB-Langwörter, das
+      eigene Format der Karte, unverändert kopiert): die Karten von Herald
+      in 22 ms statt 42
+    * GLQuake mit zwei Puffern so schnell wie mit 0.13
+
+0.13 (13.11.2026)
+    * ein öffentlicher Port namens "RadeonGL" sagt anderen Programmen, ob
+      etwas auf der Radeon zeichnet: wie viele Kontexte, wie viele davon
+      Spiele auf einem eigenen Bildschirm, und wann die letzte
+      Befehlsliste zur Karte ging (lib/rglport.h und als Beispiel
+      src/probe/rglport.c in den Quellen)
+    * die Liste der Erweiterungen nennt GL_ARB_multitexture für sich
+      allein (Doom 64 EX blieb mit der alten beim Start hängen) und
+      GL_EXT_texture_env_add
+    * ein Programm, das während des Laufs vom Verschieben auf
+      ChangeScreenBuffer umschaltet: der Hilfs-Task nimmt die
+      Puffer-Nachrichten wieder an
+    * GLQuake so schnell wie mit 0.12
+
+0.12 (12.11.2026)
+    * drei Puffer auf einem eigenen Bildschirm, für ein Programm, das sie
+      wünscht (mglChooseNumberOfBuffers), oder für jedes mit
+      RadeonGLBuffers=3: durch Verschieben eines dreimal so hohen
+      Bildschirms oder mit ChangeScreenBuffer (RadeonGLFlip); ein
+      Programm darf während des Laufs umschalten
+    * vertikale Synchronisation ohne das gerissene Dreieck oben im Bild:
+      die Kopie läuft jetzt dem Strahl voraus den Bildschirm hinunter
+    * Drahtgitter und Punkte: glPolygonMode GL_LINE und GL_POINT werden
+      als Linien und Punkte gezeichnet (der Recognizer in GLTron)
+    * beleuchtete Eckpunkte einzeln (glNormal3f, glVertex3f) sind
+      schneller: das Timedemo von GLTron etwa 10% schneller
+    * ein Kontext öffnet sich in 26 ms statt 146 ms und schließt sich in
+      6 ms statt 15
+    * RadeonGLHeapMax bemisst den Texturspeicher eines Fensters in beide
+      Richtungen: GLQuake im Fenster behält seine Texturen
+    * das eigene Fenster von RadeonGL nutzt Smart Refresh, wie das der
+      MiniGL
+    * GLQuake so schnell wie mit 0.11
 
 0.11 (8.11.2026)
     * alle 205 Funktionen der minigl.library 29.1

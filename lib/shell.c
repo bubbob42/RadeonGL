@@ -273,6 +273,7 @@ static BPTR LibExpunge(register struct MiniGLBase *base __asm("a6"))
     }
     seg = base->segList;
     Remove((struct Node *)base);
+    Back_Expunge();
     CloseBases();
     FreeBase(base);
     return seg;

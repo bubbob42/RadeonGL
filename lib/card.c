@@ -22,6 +22,7 @@
 #include <proto/Picasso96.h>
 
 #include "card.h"
+#include "cardflip.h"
 #include "r200reg.h"
 #include "r2pm4.h"
 
@@ -267,6 +268,12 @@ static ULONG Swap32(ULONG v)
     return ((v >> 24) & 0xffUL) | ((v >> 8) & 0xff00UL) | ((v << 8) & 0xff0000UL) | (v << 24);
 }
 
+/* The reserve (CARD_RESERVE) holds what the flush adds after the frame: the
+ * vsync wait (8 dwords), the present's Core_Validate (the whole state at
+ * most) and the present with all its bands (2026-11-12). A smaller reserve
+ * does not compile: overrunning it in the flush loses the context. */
+typedef char card_reserve_holds_present[(CARD_RESERVE >= 8 + CORE_STATE_MAX + CORE_PRESENT_DW) ? 1 : -1];
+
 static ULONG HwRead(APTR hw, ULONG reg)
 {
     struct Card *k;
@@ -275,6 +282,12 @@ static ULONG HwRead(APTR hw, ULONG reg)
     k = (struct Card *) hw;
     v = *(volatile ULONG *) ((UBYTE *) k->mmio + reg);
     return k->mmio_swap ? Swap32(v) : v;
+}
+
+/* A register read for cardflip.c (read only: the pan's beam check) */
+ULONG Card_ReadReg(struct Card *k, ULONG reg)
+{
+    return HwRead(k, reg);
 }
 
 static void HwWrite(APTR hw, ULONG reg, ULONG val)
@@ -630,10 +643,11 @@ static void DisplayPriority(struct Card *k);
 
 static void TargetAt(struct Card *k, ULONG *color, ULONG *depth)
 {
-    if (k->kind == CARD_KIND_BITMAP)
+    if (k->kind == CARD_KIND_BITMAP || k->flip_on)
     {
-        /* W1: the program's bitmap is the colour buffer, ours the depth */
-        *color = k->b[CARD_SCREEN].gpu;
+        /* W1: the program's bitmap is the colour buffer, ours the depth
+         * (triple buffering: the third of the GL screen drawn into) */
+        *color = k->b[CARD_SCREEN].gpu + (k->flip_on ? k->flip->sm.draw * k->flip->panel : 0UL);
         *depth = Align4k(k->b[CARD_TARGET].gpu);
         return;
     }
@@ -1059,8 +1073,11 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     }
     k->in_flush = 1;
     k->flushes++;
+    Port_Flushed();                 /* the public port: someone draws (rglport.c) */
     e = R2_OK;
     scr_ok = FALSE;
+    if (k->flip_on)
+        CardFlip_Safe(k);           /* the buffer drawn into off the display */
     tail = ~0UL;
     /* a window's frame is blitted, a bitmap's read by the program, right
      * after this: the Radeon must have finished the copy (no overlap) */
@@ -1104,7 +1121,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
      * buffer, the program's bitmap), on the board */
     if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
         || !LockBm(k, CARD_HEAP, FALSE)
-        || (k->kind == CARD_KIND_BITMAP && !LockBm(k, CARD_SCREEN, FALSE)))
+        || ((k->kind == CARD_KIND_BITMAP || k->flip_on) && !LockBm(k, CARD_SCREEN, FALSE)))
     {
         UnlockAll(k);
         SettleAlone(k, FALSE);
@@ -1120,6 +1137,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
      * (the lock has waited for the 3D engine already, probe B) */
     if (k->pending)
         Settle(k, FALSE);
+    if (k->flip_on)
+        CardFlip_Settled(k);        /* the last frame finished */
     if (k->lost != 0)
         goto unlock;
     if (k->drop_next)
@@ -1172,8 +1191,15 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     /* 3. the present, at the screen bitmap's address of this lock */
     WHERE(71, n);
     i = n;
-    if (present && k->kind == CARD_KIND_BITMAP)
-        k->presents++;              /* drawn into the program's bitmap already: nothing to copy */
+    if (present && (k->kind == CARD_KIND_BITMAP || k->flip_on))
+    {
+        /* drawn into the program's bitmap (or the screen buffer) already:
+         * nothing to copy; triple buffering ends the frame and takes the
+         * next one's buffer from this lock */
+        if (k->flip_on)
+            CardFlip_Present(k);
+        k->presents++;
+    }
     else if (present)
     {
         scr_ok = LockBm(k, CARD_SCREEN, FALSE);
@@ -1378,6 +1404,8 @@ unlock:
     k->lock_flushes++;
     ResetCs(k);
     k->in_flush = 0;
+    if (k->flip_on)
+        CardFlip_After(k);          /* the next frame retargeted, the finished one shown */
     if (scr_ok && k->kind == CARD_KIND_WINDOW && k->lost == 0)
         ShowInWindow(k);
     return (k->lost != 0) ? R2_ETIMEOUT : R2_OK;
@@ -1666,7 +1694,7 @@ static BOOL OpenInputWindow(struct Card *k)
     t[1].ti_Tag = WA_Left;          t[1].ti_Data = 0;
     t[2].ti_Tag = WA_Top;           t[2].ti_Data = 0;
     t[3].ti_Tag = WA_Width;         t[3].ti_Data = k->width;
-    t[4].ti_Tag = WA_Height;        t[4].ti_Data = k->height;
+    t[4].ti_Tag = WA_Height;        t[4].ti_Data = (ULONG) k->scr->Height;   /* triple buffering: all three thirds */
     t[5].ti_Tag = WA_Backdrop;      t[5].ti_Data = TRUE;
     t[6].ti_Tag = WA_Borderless;    t[6].ti_Data = TRUE;
     t[7].ti_Tag = WA_Activate;      t[7].ti_Data = TRUE;
@@ -1682,27 +1710,124 @@ static BOOL OpenInputWindow(struct Card *k)
  * pixel the screen must have (a resize keeps the format), 0 for either of
  * R5G6B5PC and B8G8R8A8. FALSE with why[]; what opened stays for the
  * caller to close. */
+/* The GL screen for ChangeScreenBuffer (RadeonGLFlip=csb): opened by
+ * Intuition, which on 3.2 allocates the RTG bitmap itself (intuition
+ * release notes: AllocBitMap with tags), so the screen is not CUSTOMBITMAP
+ * and AllocScreenBuffer may wrap its bitmap (SB_SCREEN_BITMAP) and allocate
+ * the others. NULL, with the reason in the log, if it is not such a
+ * screen in the mode's format. */
+static struct Screen *OpenIntuiScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG fmt)
+{
+    struct TagItem t[13];
+    struct Screen *scr;
+    const char *bad;
+    ULONG err;
+
+    t[0].ti_Tag = SA_DisplayID;     t[0].ti_Data = id;
+    t[1].ti_Tag = SA_Width;         t[1].ti_Data = w;
+    t[2].ti_Tag = SA_Height;        t[2].ti_Data = h;
+    t[3].ti_Tag = SA_Depth;         t[3].ti_Data = p96GetModeIDAttr(id, P96IDA_DEPTH);
+    t[4].ti_Tag = SA_Type;          t[4].ti_Data = CUSTOMSCREEN;
+    t[5].ti_Tag = SA_Title;         t[5].ti_Data = (ULONG) "RadeonGL";
+    t[6].ti_Tag = SA_ShowTitle;     t[6].ti_Data = FALSE;
+    t[7].ti_Tag = SA_Quiet;         t[7].ti_Data = TRUE;
+    t[8].ti_Tag = SA_AutoScroll;    t[8].ti_Data = FALSE;
+    t[9].ti_Tag = SA_Draggable;     t[9].ti_Data = FALSE;   /* a screen drag refuses switches */
+    t[10].ti_Tag = SA_Exclusive;    t[10].ti_Data = TRUE;
+    t[11].ti_Tag = SA_ErrorCode;    t[11].ti_Data = (ULONG) &err;
+    t[12].ti_Tag = TAG_DONE;        t[12].ti_Data = 0;
+    err = 0;
+    scr = OpenScreenTagList(NULL, t);
+    if (scr == NULL)
+    {
+        switch (err)
+        {
+        case OSERR_NOMEM:       bad = "no memory for Intuition's GL screen"; break;
+        case OSERR_UNKNOWNMODE: bad = "Intuition does not know the GL screen's mode"; break;
+        case OSERR_TOODEEP:     bad = "the GL screen's depth is too deep for Intuition"; break;
+        case OSERR_NORTGBITMAP: bad = "Intuition got no RTG bitmap for the GL screen"; break;
+        default:                bad = "Intuition did not open the GL screen"; break;
+        }
+        CardFlip_CsbFailed(k, bad);
+        return NULL;
+    }
+    bad = NULL;
+    if ((scr->Flags & CUSTOMBITMAP) != 0)
+        bad = "Intuition's GL screen is CUSTOMBITMAP (no SB_SCREEN_BITMAP)";
+    else if (!p96GetBitMapAttr(scr->RastPort.BitMap, P96BMA_ISP96))
+        bad = "Intuition's GL screen bitmap is not a Picasso96 one";
+    else if (p96GetBitMapAttr(scr->RastPort.BitMap, P96BMA_RGBFORMAT) != fmt)
+        bad = "Intuition's GL screen is not in the mode's pixel format";
+    if (bad != NULL)
+    {
+        CardFlip_CsbFailed(k, bad);
+        (void) CloseScreen(scr);
+        return NULL;
+    }
+    return scr;
+}
+
+/* The GL screen closed the way it was opened; FALSE while a visitor window
+ * holds it */
+static BOOL CloseScr(struct Card *k)
+{
+    BOOL ok;
+
+    ok = k->scr_intui ? (BOOL) CloseScreen(k->scr) : (BOOL) p96CloseScreen(k->scr);
+    if (ok)
+        k->scr_intui = 0;
+    return ok;
+}
+
 static BOOL OpenGLScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG bpp, char *why,
                        ULONG whylen)
 {
-    struct TagItem t[10];
+    struct TagItem t[11];
+    struct Rectangle clip;
     struct BitMap *sbm;
     ULONG fmt;
+    BOOL tall;
+    BOOL csb;
 
+    /* triple buffering (cardflip.c): RadeonGLFlip=csb, ChangeScreenBuffer
+     * on an Intuition screen; else three times as tall, the display
+     * clipped to the top third */
+    csb = CardFlip_Csb(k);
+    tall = csb ? FALSE : CardFlip_Tall(k);
+    k->scr_intui = 0;
+    clip.MinX = 0;
+    clip.MinY = 0;
+    clip.MaxX = (WORD) (w - 1);
+    clip.MaxY = (WORD) (h - 1);
     fmt = p96GetModeIDAttr(id, P96IDA_RGBFORMAT);
     k->compat = p96GetModeIDAttr(id, P96IDA_COMPATIBLEFORMATS);
     k->board = p96GetModeIDAttr(id, P96IDA_BOARDNUMBER);
     t[0].ti_Tag = P96SA_DisplayID;  t[0].ti_Data = id;
     t[1].ti_Tag = P96SA_Width;      t[1].ti_Data = w;
-    t[2].ti_Tag = P96SA_Height;     t[2].ti_Data = h;
+    t[2].ti_Tag = P96SA_Height;     t[2].ti_Data = tall ? h * CARD_FLIP_N : h;
     t[3].ti_Tag = P96SA_RGBFormat;  t[3].ti_Data = fmt;
     t[4].ti_Tag = P96SA_Depth;      t[4].ti_Data = 8;
     t[5].ti_Tag = P96SA_Title;      t[5].ti_Data = (ULONG) "RadeonGL";
     t[6].ti_Tag = P96SA_ShowTitle;  t[6].ti_Data = FALSE;
     t[7].ti_Tag = P96SA_Quiet;      t[7].ti_Data = TRUE;
     t[8].ti_Tag = P96SA_AutoScroll; t[8].ti_Data = FALSE;
-    t[9].ti_Tag = TAG_DONE;         t[9].ti_Data = 0;
-    k->scr = p96OpenScreenTagList(t);
+    t[9].ti_Tag = tall ? P96SA_DClip : TAG_IGNORE;  t[9].ti_Data = (ULONG) &clip;
+    t[10].ti_Tag = TAG_DONE;        t[10].ti_Data = 0;
+    k->scr = NULL;
+    if (csb)
+    {
+        k->scr = OpenIntuiScreen(k, id, w, h, fmt);   /* else the copy path's screen */
+        k->scr_intui = (k->scr != NULL) ? 1UL : 0UL;
+    }
+    if (k->scr == NULL)
+        k->scr = p96OpenScreenTagList(t);
+    if (k->scr == NULL && tall)
+    {
+        CardFlip_TallFailed(k);
+        t[2].ti_Data = h;
+        t[9].ti_Tag = TAG_IGNORE;
+        k->scr = p96OpenScreenTagList(t);
+    }
     if (k->scr == NULL)
     {
         WhyMode(why, whylen, "the GL screen did not open", id, w, h);
@@ -1732,6 +1857,8 @@ static BOOL OpenGLScreen(struct Card *k, ULONG id, ULONG w, ULONG h, ULONG bpp, 
         Why(why, whylen, "the input window did not open");
         return FALSE;
     }
+    CardFlip_Open(k);               /* triple buffering on the tall screen or with
+                                     * ScreenBuffers (sets k->pitch) */
     return TRUE;
 }
 
@@ -1752,10 +1879,11 @@ static BOOL AllocTarget(struct Card *k, char *why, ULONG whylen)
 
     k->depth_pitch = (k->width + 63) & ~63UL;
     k->depth_bytes = Align4k(k->depth_pitch * ((k->height + 15) & ~15UL) * 2);
-    if (k->kind == CARD_KIND_BITMAP)
+    if (k->kind == CARD_KIND_BITMAP || k->flip_on)
     {
         /* W1: the colour buffer is the program's bitmap (k->pitch from its
-         * rows, Card_OpenBitMap); ours holds the depth buffer only */
+         * rows, Card_OpenBitMap) or the tall GL screen (CardFlip_Open);
+         * ours holds the depth buffer only */
         k->color_bytes = k->pitch * k->show_h * k->bpp;
         colour = 0;
     }
@@ -1782,17 +1910,28 @@ static BOOL AllocTarget(struct Card *k, char *why, ULONG whylen)
  * FALSE, with nothing closed, while a visitor window holds the screen. */
 static BOOL CloseGLScreen(struct Card *k)
 {
+    BOOL csb;
+
+    CardFlip_Quiet(k);              /* triple buffering: no pan in flight */
     if (k->win != NULL)
     {
         ModifyIDCMP(k->win, 0);
         CloseWindow(k->win);
         k->win = NULL;
     }
-    if (k->scr != NULL && !p96CloseScreen(k->scr))
+    /* ScreenBuffers: all freed before the screen closes (intuition.doc
+     * FreeScreenBuffer), the window first (its layer is on the screen) */
+    csb = CardFlip_Switching(k);
+    if (csb)
+        CardFlip_Unbuffer(k);
+    if (k->scr != NULL && !CloseScr(k))
     {
         (void) OpenInputWindow(k);
+        if (csb)
+            CardFlip_Open(k);       /* the buffers again */
         return FALSE;
     }
+    k->flip_on = 0;                 /* triple buffering: the next screen decides anew */
     k->scr = NULL;
     k->b[CARD_SCREEN].bm = NULL;
     FreeBm(k, CARD_TARGET);
@@ -1888,7 +2027,8 @@ static ULONG CardResize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whyle
         Why(why, whylen, "the context is lost");
         return CARD_FAILED;
     }
-    if (w == k->width && h == k->height)
+    /* the same size again only for a new buffering wish (rgl.c, 2026-11-12) */
+    if (w == k->width && h == k->height && !CardFlip_Changed(k))
         return CARD_OK;
     bpp = k->bpp;
     id = BestMode(w, h, (bpp == 4) ? 32UL : 16UL);
@@ -1926,15 +2066,17 @@ static ULONG CardResize(struct Card *k, ULONG w, ULONG h, char *why, ULONG whyle
         }
     }
 
-    /* 4. the back buffer's address, from a lock */
-    if (!LockBm(k, CARD_TARGET, FALSE))
+    /* 4. the back buffer's address, from a lock (and the screen buffer's
+     * with triple buffering) */
+    if (!LockBm(k, CARD_TARGET, FALSE) || (k->flip_on && !LockBm(k, CARD_SCREEN, FALSE)))
     {
+        UnlockAll(k);
         Why(why, whylen, "the back buffer is not on the board");
         k->lost = CARD_LOST_SCREEN;
         return CARD_FAILED;
     }
     TargetAt(k, &k->color_gpu, &k->depth_gpu);
-    UnlockBm(k, CARD_TARGET);
+    UnlockAll(k);
     return ok ? CARD_OK : CARD_FAILED;
 }
 
@@ -2118,9 +2260,16 @@ static ULONG OpenRest(struct Card *k, ULONG check, char *why, ULONG whylen)
     }
 
     /* buffers in fast RAM */
+    /* buffers in fast RAM, neither cleared (2026-11-12, the fast create:
+     * 512 KB cleared cost ~23 ms): the core writes every dword a command
+     * refers to before the command is built, and the checker's Peek reads
+     * no other; the flush copies the rest too -- the 32-byte padding, the
+     * room of a draw refused while packing -- into the stream's own block,
+     * where nothing reads it (array.c DrawLocked, DrawCached). Stale after
+     * the first frame in any case. */
     /* 16-byte aligned (MOVE16 lines; AllocVec gives 4 past 8) */
     k->cmd_mem = AllocVec(CARD_CMD_DW * 4 + 16, MEMF_ANY);
-    k->staging_mem = AllocVec(CORE_STREAM_BYTES + 16, MEMF_ANY | MEMF_CLEAR);
+    k->staging_mem = AllocVec(CORE_STREAM_BYTES + 16, MEMF_ANY);
     k->cmd = (k->cmd_mem != NULL) ? (ULONG *) (((ULONG) k->cmd_mem + 15UL) & ~15UL) : NULL;
     k->staging = (k->staging_mem != NULL) ? (ULONG *) (((ULONG) k->staging_mem + 15UL) & ~15UL) : NULL;
     if (k->cmd == NULL || k->staging == NULL)
@@ -2263,6 +2412,13 @@ static ULONG CardOpen(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modei
     if (OpenTimer(k, why, whylen) && OpenGLScreen(k, id, w, h, 0, why, whylen)
         && AllocTarget(k, why, whylen))
         res = OpenRest(k, check, why, whylen);
+    /* triple buffering: the first screen buffer's address (OpenRest's lock
+     * had the target only) */
+    if (res == CARD_OK && k->flip_on && LockBm(k, CARD_SCREEN, FALSE))
+    {
+        k->color_gpu = k->b[CARD_SCREEN].gpu + k->flip->sm.draw * k->flip->panel;
+        UnlockBm(k, CARD_SCREEN);
+    }
     if (res != CARD_OK)
         Card_Close(k);
     return res;
@@ -2702,11 +2858,12 @@ void Card_Close(struct Card *k)
         }
         k->win = NULL;
     }
+    CardFlip_Free(k);               /* triple buffering: the display back on the top third */
     if (k->scr != NULL)
     {
         /* a visitor window (a requester, a tool) keeps it open: give it
          * five seconds, then leave the screen (the next log says so) */
-        for (i = 0; i < 25 && !p96CloseScreen(k->scr); i++)
+        for (i = 0; i < 25 && !CloseScr(k); i++)
             Delay(10);
         if (i == 25)
             Card_ScreensLeft++;

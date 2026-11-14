@@ -106,8 +106,11 @@ void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y)
     ULONG w;
     ULONG h;
     ULONG cpp;
-    float fx0, fy0, fx1, fy1;
-    float s1, t1;
+    ULONG row;
+    ULONG next;
+    ULONG bands;
+    float fh;
+    float ta, tb;
 
     if (IN_BEGIN(c))
     {
@@ -173,23 +176,49 @@ void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y)
     R2E_Reg(cs, R_RB3D_CNTL, s->format);
     R2E_ColorTarget(cs, s->gpu, s->pitch, 0);
 
-    /* three corners, texture coordinates normalised to the back buffer */
-    fx0 = (float) x;
-    fy0 = (float) y;
-    fx1 = (float) (x + (LONG) w);
-    fy1 = (float) (y + (LONG) h);
-    s1 = (float) w / (float) c->target.width;
-    t1 = (float) h / (float) c->target.height;
-    v[0] = R2Cs_FloatBits(fx0); v[1] = R2Cs_FloatBits(fy1);
+    /* Three corners per band, texture coordinates normalised to the back
+     * buffer; the fourth corner is implied. Without vertical sync one band:
+     * the whole rectangle. With it, bands from the top down (2026-11-12):
+     * with one rectangle the old frame showed in a triangle in the top
+     * fifth at 1280 x 720 (Tim, the user) -- the beam overtook the copy
+     * somewhere inside the rectangle (two triangles? another walk order?
+     * not known); the ring keeps the bands in order, so the copy goes down
+     * the screen ahead of the beam whatever happens inside one band. A band at row a is CORE_PRESENT_BAND0
+     * + a / CORE_PRESENT_GROW rows high: small at the top, where the copy
+     * starts only a little ahead of the beam, longer below, where it is far
+     * ahead; at most CORE_PRESENT_BANDS of them (the last takes the rest),
+     * so the present fits the back end's reserve. Band edges lie on whole
+     * rows and pixel centres on half rows: every row is drawn by one band,
+     * from its own source row (t continuous: a band's top is the last
+     * band's bottom, the same bits). */
+    fh = (float) c->target.height;
+    v[0] = R2Cs_FloatBits((float) x);
     v[2] = R2Cs_FloatBits(0.0f);
-    v[3] = R2Cs_FloatBits(t1);
-    v[4] = R2Cs_FloatBits(fx1); v[5] = R2Cs_FloatBits(fy1);
-    v[6] = R2Cs_FloatBits(s1);
-    v[7] = v[3];
-    v[8] = R2Cs_FloatBits(fx1); v[9] = R2Cs_FloatBits(fy0);
+    v[4] = R2Cs_FloatBits((float) (x + (LONG) w));
+    v[6] = R2Cs_FloatBits((float) w / (float) c->target.width);
+    v[8] = v[4];
     v[10] = v[6];
-    v[11] = R2Cs_FloatBits(0.0f);
-    R2E_Immd(cs, R_VF_PRIM_RECT_LIST, 4, 3, v);
+    ta = 0.0f;
+    bands = 0;
+    for (row = 0; row < h; row = next)
+    {
+        next = h;
+        if (c->sync && ++bands < CORE_PRESENT_BANDS)
+        {
+            next = row + CORE_PRESENT_BAND0 + row / CORE_PRESENT_GROW;
+            if (next > h)
+                next = h;
+        }
+        tb = (float) next / fh;
+        v[1] = R2Cs_FloatBits((float) (y + (LONG) next));
+        v[3] = R2Cs_FloatBits(tb);
+        v[5] = v[1];
+        v[7] = v[3];
+        v[9] = R2Cs_FloatBits((float) (y + (LONG) row));
+        v[11] = R2Cs_FloatBits(ta);
+        R2E_Immd(cs, R_VF_PRIM_RECT_LIST, 4, 3, v);
+        ta = tb;
+    }
 
     /* the next draw goes to the back buffer again, with the client's state */
     c->dirty |= D_INIT;

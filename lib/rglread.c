@@ -10,6 +10,10 @@
  * is about 75 ms; the lock holds the board's other drawing for as long.
  * The null card has no pixels: it reads zeros.
  *
+ * Triple buffering (cardflip.c, 2026-11-12): glReadPixels and the copies
+ * into textures read the screen buffer the frame draws into;
+ * mglWriteShotPPM, called between frames, reads the last frame finished.
+ *
  * Linked after the hot code (Makefile RGL_OBJS, as rgllight.c).
  */
 
@@ -27,8 +31,13 @@
 #include "rglint.h"
 #include "coreint.h"
 #include "r200reg.h"
+#include "cardflip.h"
 
 extern struct Library *P96Base;
+
+/* mglWriteShotPPM reads: with triple buffering, the last frame finished
+ * rather than the buffer the next frame will draw into */
+static ULONG read_shot = 0;
 
 /* One row of the frame as 0xAARRGGBB, from its bytes in video RAM: the
  * R200's own little-endian formats (the aperture does not swap) */
@@ -75,10 +84,12 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
 {
     struct Card *k;
     struct CardBm *b;
+    struct CardFlip *f;
+    struct BitMap *bm;
     struct RenderInfo ri;
     ULONG *buf;
     UBYTE *base;
-    ULONG bpr, bpp, fmt, gpu;
+    ULONG bpr, bpp, fmt, gpu, i;
     LONG lock;
     LONG row;
 
@@ -98,26 +109,39 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
     }
     Card_Obtain();                  /* no other card's frame while this one is read (W3) */
     (void) Card_WaitIdle(k);
-    b = &k->b[(k->kind == CARD_KIND_BITMAP) ? CARD_SCREEN : CARD_TARGET];
-    if (b->bm == NULL || b->lock != 0)
+    b = &k->b[(k->kind == CARD_KIND_BITMAP || k->flip_on) ? CARD_SCREEN : CARD_TARGET];
+    bm = b->bm;
+    i = 0;
+    if (k->flip_on)
+    {
+        /* the third drawn into; for the shot the newest finished frame:
+         * kicked (now finished), else waiting to be shown, else shown */
+        f = k->flip;
+        i = f->sm.draw;
+        if (read_shot)
+            i = (f->sm.kick != CARD_FLIP_NONE) ? f->sm.kick
+              : (f->sm.ready != CARD_FLIP_NONE) ? f->sm.ready : f->sm.show;
+        i *= f->panel;
+    }
+    if (bm == NULL || b->lock != 0)
     {
         Card_Release();
         FreeVec(buf);
         return FALSE;
     }
-    lock = p96LockBitMap(b->bm, (UBYTE *) &ri, sizeof(ri));
-    if (lock == 0 || ri.Memory == NULL || !p96GetBitMapAttr(b->bm, P96BMA_ISONBOARD))
+    lock = p96LockBitMap(bm, (UBYTE *) &ri, sizeof(ri));
+    if (lock == 0 || ri.Memory == NULL || !p96GetBitMapAttr(bm, P96BMA_ISONBOARD))
     {
         if (lock != 0)
-            p96UnlockBitMap(b->bm, lock);
+            p96UnlockBitMap(bm, lock);
         Card_Release();
         FreeVec(buf);
         return FALSE;
     }
     bpp = k->bpp;
-    if (k->kind == CARD_KIND_BITMAP)
+    if (k->kind == CARD_KIND_BITMAP || k->flip_on)
     {
-        base = (UBYTE *) ri.Memory;
+        base = (UBYTE *) ri.Memory + i;     /* triple buffering: its third */
         bpr = (ULONG) ri.BytesPerRow;
         fmt = k->show_format;
     }
@@ -136,7 +160,7 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
                 (ULONG) (x1 - x0), fmt);
         fn(ud, row, buf);
     }
-    p96UnlockBitMap(b->bm, lock);
+    p96UnlockBitMap(bm, lock);
     Card_Release();
     FreeVec(buf);
     return TRUE;
@@ -536,7 +560,10 @@ void Hook_MGLWriteShotPPM(GLcontext context, char *filename)
     s.rgb = (UBYTE *) AllocVec((ULONG) s.w * (ULONG) s.h * 3, MEMF_ANY | MEMF_CLEAR);
     if (s.rgb == NULL)
         return;
-    if (ReadRows(r, 0, s.w, 0, s.h, ToShot, &s))
+    read_shot = 1;
+    n = ReadRows(r, 0, s.w, 0, s.h, ToShot, &s) ? 1UL : 0UL;
+    read_shot = 0;
+    if (n != 0)
     {
         /* the file after the unlock */
         n = 0;

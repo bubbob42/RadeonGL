@@ -1,0 +1,38 @@
+; RglPortNull -- RadeonGL's public port "RadeonGL" (lib/rglport.h, Herald's
+; R3) on the null card (uaegfx in FS-UAE): no port before the library is
+; loaded; the port while GLSmoke draws (0 contexts on the Radeon: the null
+; card does not count) and after it ends (the library stays loaded); no
+; port again after Avail FLUSH expunged the library (Port_Remove), no hit.
+; Needs: gmake glsmoke, gmake dist/Probe/C/RglPort.
+; LIMIT 240
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Echo "=== before: no library loaded ===" >>DEV:Test/auto.log
+DEV:Probe/C/RglPort >>DEV:Test/auto.log
+Echo "rc=$RC (5: no port)" >>DEV:Test/auto.log
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLLog NIL:
+Echo "=== while GLSmoke draws ===" >>DEV:Test/auto.log
+Run >NIL: DEV:GLSmoke/GLSmoke FRAMES=600
+Wait 3
+DEV:Probe/C/RglPort WATCH SECONDS=2 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== the same, the SAS/C build ===" >>DEV:Test/auto.log
+DEV:Probe/C/RglPort_sasc >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Wait 20
+Echo "=== after GLSmoke (the library still loaded) ===" >>DEV:Test/auto.log
+DEV:Probe/C/RglPort >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Avail >NIL: FLUSH
+Echo "=== after Avail FLUSH (expunged) ===" >>DEV:Test/auto.log
+DEV:Probe/C/RglPort >>DEV:Test/auto.log
+Echo "rc=$RC (5: no port)" >>DEV:Test/auto.log
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+UnSetEnv RadeonGLLog
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

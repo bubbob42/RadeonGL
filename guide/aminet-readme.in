@@ -152,6 +152,20 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.14 (13.11.2026)
+  - panning (three buffers) 21-40% faster, its task now below the
+    program: faster than vsync and tear-free; RadeonGLFlip=csbnowait for
+    tests; faster 32-bit texture uploads, GL_BGRA 0xAARRGGBB words
+
+0.13 (13.11.2026)
+  - public port "RadeonGL" (is anything drawing?), GL_ARB_multitexture
+    named on its own, GL_EXT_texture_env_add, a ChangeScreenBuffer fix
+
+0.12 (12.11.2026)
+  - triple buffering (panning or ChangeScreenBuffer), vsync without
+    tearing, wireframe and points, faster lit vertices, contexts open
+    in 26 ms
+
 0.11 (8.11.2026)
   - all 205 functions of minigl.library 29.1: display lists, GLUT
 

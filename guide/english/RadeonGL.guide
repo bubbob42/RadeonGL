@@ -435,6 +435,38 @@ that is not set means the default.
     driver's setting, which also comes back when the program quits.
 
         SetEnv SAVE RadeonGLDisplayPriority high
+
+@{b}RadeonGLBuffers@{ub}  (default: what the program asks for)
+    3 shows a program on a screen of its own with three buffers: one on
+    show, one waiting, one being drawn. A finished frame never waits for
+    the beam, and nothing tears. 2 copies each frame onto the screen,
+    with vertical sync if the program turns it on. Not set means the
+    program's choice (mglChooseNumberOfBuffers); most programs ask for
+    two.
+
+        SetEnv SAVE RadeonGLBuffers 3
+
+@{b}RadeonGLFlip@{ub}  (default: pan)
+    How three buffers are shown. pan: one screen three times as tall,
+    moved to the next third (ScrollVPort). csb: Intuition switches
+    between three screen buffers (ChangeScreenBuffer). csbnowait: the
+    same without waiting for each switch's DispMessage before the next
+    one. Picasso96's maintainer says that is not safe, and in GLQuake it
+    was no faster (21.6 and 17.0 fps as csb); it is there for tests and
+    is never chosen for you. A program may set
+    it for itself as a local variable and switch while it runs (GLQuake's
+    Video Options > Display sync does). On the test machine (GLQuake demo1)
+    panning was the fastest way without tearing: 32.1 fps at 1280 x 720
+    (the copy with vertical sync 29.9, csb 21.6; the copy without sync,
+    which tears, 32.2) and 30.6 at 1920 x 1080 (22.4, 17.0; 28.7).
+
+@{b}RadeonGLHelperPri@{ub}  (default: -1 for pan, +1 for csb)
+    The priority of the task that shows the three buffers, against the
+    program's. Panning waits for the card to finish the frame; below the
+    program that wait costs the program nothing (above it, panning was
+    26.6 fps instead of 32.1). ChangeScreenBuffer works best above it.
+
+        SetEnv SAVE RadeonGLFlip csb
 @endnode
 
 @node Speed "Speed"
@@ -593,8 +625,7 @@ To have no log at all:
 RadeonGL answers all 205 functions of minigl.library 29.1 (a few of
 them accepted without effect, see below). Not there yet:
 
-    * Polygons drawn as lines or points (glPolygonMode), stencil and
-      accumulation buffers, line and polygon stipple, logic operations,
+    * Stencil and accumulation buffers, line and polygon stipple, logic operations,
       reading the depth buffer.
 
 Accepted but without effect: edge flags and colour-index values,
@@ -696,8 +727,8 @@ was tested on real hardware.
       minigl.library, after id Software's Quake -- the program RadeonGL
       was made and measured with.
     * Advanced Micro Devices: the R200 microcode.
-    * Martin "Mason" Merz: the Install and AmigaGuide icons, AmigaOS
-      3.2's own, used with his permission.
+    * Martin "Mason" Merz: the Install, AmigaGuide and text icons,
+      AmigaOS 3.2's own, used with his permission.
     * ATI Technologies, VA Linux Systems, Precision Insight, The Weather
       Channel and Tungsten Graphics, Red Hat, and the authors of the Linux
       radeon and Mesa r200 drivers (among them Dave Airlie, Alex Deucher,
@@ -714,6 +745,51 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.14 (13.11.2026)
+    * three buffers by panning (the default way) are much faster: the
+      task that pans now runs below the program, so its wait for the card
+      costs the program nothing. GLQuake demo1: 32.1 fps at 1280 x 720
+      (0.13: 26.6) and 30.6 at 1920 x 1080 (0.13: 21.9), faster than the
+      copy with vertical sync (29.9 and 22.4) and without tearing;
+      RadeonGLHelperPri sets that task's priority
+    * RadeonGLFlip=csbnowait: ChangeScreenBuffer without waiting for each
+      switch's DispMessage, for tests only (Picasso96's maintainer says
+      it is not safe, and GLQuake was no faster with it)
+    * 32-bit textures upload faster, and glTexImage2D takes GL_BGRA with
+      GL_UNSIGNED_INT_8_8_8_8_REV (0xAARRGGBB words, the card's own
+      layout, copied as they are): Herald's cards in 22 ms instead of 42
+    * GLQuake with two buffers as fast as with 0.13
+
+0.13 (13.11.2026)
+    * a public port named "RadeonGL" tells other programs whether anything
+      draws on the Radeon: how many contexts, how many of them games on a
+      screen of their own, and when the last command list went to the
+      card (lib/rglport.h, and src/probe/rglport.c as an example reader,
+      in the source)
+    * the extension string names GL_ARB_multitexture on its own (Doom 64
+      EX hung at its start on the old one) and GL_EXT_texture_env_add
+    * a program that switches from panning to ChangeScreenBuffer while it
+      runs: the helper task takes the buffer messages again
+    * GLQuake as fast as with 0.12
+
+0.12 (12.11.2026)
+    * three buffers on a screen of its own, for a program that asks for
+      them (mglChooseNumberOfBuffers) or for any with RadeonGLBuffers=3:
+      by panning a screen three times as tall, or by ChangeScreenBuffer
+      (RadeonGLFlip); a program may switch while it runs
+    * vertical sync without the torn triangle at the top of the screen:
+      the copy now goes down the screen ahead of the beam
+    * wireframe and points: glPolygonMode GL_LINE and GL_POINT are drawn
+      as lines and points (GLTron's Recognizer)
+    * lit vertices one at a time (glNormal3f, glVertex3f) are faster:
+      GLTron's timedemo about 10% faster
+    * a context opens in 26 ms instead of 146 ms and closes in 6 ms
+      instead of 15
+    * RadeonGLHeapMax sizes a window's texture heap either way: GLQuake in
+      a window keeps its textures
+    * RadeonGL's own window uses smart refresh, as MiniGL's does
+    * GLQuake as fast as with 0.11
 
 0.11 (8.11.2026)
     * all 205 functions of minigl.library 29.1

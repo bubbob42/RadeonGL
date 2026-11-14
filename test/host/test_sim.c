@@ -41,6 +41,7 @@ static void Fresh(void)
     struct CoreEnv e;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
     memset(vram, 0, VRAM_SIZE);
     R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, stream_swap);
     t.width = W_;
@@ -51,6 +52,7 @@ static void Fresh(void)
     t.depth_gpu = DEPTH_GPU;
     t.depth_pitch = W_;
     e.alloc = HostAlloc;
+    e.alloc_raw = NULL;
     e.free = HostFree;
     e.wait_idle = HostIdle;
     e.env = NULL;
@@ -224,6 +226,85 @@ static void test_present(void)
                 bad++;
     CHECK_INT(bad, 0);
     CHECK_HEX(Sim_Pixel(&sim, SCREEN_GPU, 640, R_COLOR_FORMAT_ARGB8888, 10, 10), 0);   /* outside: untouched */
+}
+
+/* The present, every pixel (2026-11-12): a back buffer whose every row and
+ * column differ from their neighbours, a screen of a colour no 565 pixel
+ * expands to; the copy must show every source pixel at its place, once,
+ * and leave the screen around it alone. sync: in bands. */
+static ULONG PokePx(ULONG gpu, ULONG pitch_px, ULONG cpp, ULONG x, ULONG y, ULONG v)
+{
+    ULONG a = gpu + (y * pitch_px + x) * cpp;
+    ULONG g = R2Cs_Swap32(vram[a / 4]);                 /* textures: stored byte-reversed */
+    ULONG sh = (a & 3) * 8;
+
+    if (cpp == 4)
+        g = v;
+    else
+        g = (g & ~(0xffffUL << sh)) | (v << sh);
+    vram[a / 4] = R2Cs_Swap32(g);
+    return v;
+}
+
+/* a 565 pixel as the sim's texel path writes it to an 8888 target: rounded
+ * (Sim_Pixel truncates: it reads 565 targets, not texels) */
+static ULONG Texel565(ULONG d)
+{
+    float r = (float) ((d >> 11) & 31) / 31.0f;
+    float g = (float) ((d >> 5) & 63) / 63.0f;
+    float b = (float) (d & 31) / 31.0f;
+
+    return ((ULONG) (r * 255 + 0.5f) << 16) | ((ULONG) (g * 255 + 0.5f) << 8) | (ULONG) (b * 255 + 0.5f);
+}
+
+static ULONG Pattern(ULONG x, ULONG y)
+{
+    return ((y & 31) << 11) | ((x & 63) << 5) | ((y >> 5) & 31);
+}
+
+static ULONG PresentEveryPixel(ULONG sync, LONG px, LONG py, ULONG sw, ULONG sh, ULONG w, ULONG h,
+                               const char *name)
+{
+    struct CoreScreen scr;
+    ULONG x, y, bad, in;
+
+    Fresh();
+    for (y = 0; y < H_; y++)
+        for (x = 0; x < W_; x++)
+            PokePx(COLOR_GPU, W_, 2, x, y, Pattern(x, y));
+    for (y = 0; y < sh; y++)
+        for (x = 0; x < sw; x++)
+            PokePx(SCREEN_GPU, sw, 4, x, y, 0x00010203UL);
+    scr.gpu = SCREEN_GPU;
+    scr.pitch = sw;
+    scr.format = R_COLOR_FORMAT_ARGB8888;
+    scr.width = sw;
+    scr.height = sh;
+    core.sync = sync;
+    Core_Present(&core, &scr, px, py);
+    core.sync = 0;
+    Render(name);
+    Sim_WritePPM(&sim, "build/host/sim-present-every.ppm", SCREEN_GPU, sw, R_COLOR_FORMAT_ARGB8888, sw, sh);
+    bad = 0;
+    for (y = 0; y < sh; y++)
+        for (x = 0; x < sw; x++)
+        {
+            in = x >= (ULONG) px && x < (ULONG) px + w && y >= (ULONG) py && y < (ULONG) py + h;
+            if (Sim_Pixel(&sim, SCREEN_GPU, sw, R_COLOR_FORMAT_ARGB8888, x, y)
+                != (in ? Texel565(Pattern(x - (ULONG) px, y - (ULONG) py)) : 0x010203UL))
+                bad++;
+        }
+    return bad;
+}
+
+static void test_present_bands(void)
+{
+    /* one rectangle; bands; bands clipped to 160 x 180 (a width of 32 x 5:
+     * pixel centres fall on the bands' diagonals) */
+    CHECK_INT(PresentEveryPixel(0, 160, 120, 640, 480, W_, H_, "present-one"), 0);
+    CHECK_INT(PresentEveryPixel(1, 160, 120, 640, 480, W_, H_, "present-bands"), 0);
+    CHECK_INT(PresentEveryPixel(1, 480, 300, 640, 480, 160, 180, "present-bands-clip"), 0);
+    CHECK_INT(PresentEveryPixel(1, 0, 0, 320, 240, W_, H_, "present-bands-full"), 0);
 }
 
 static void PutBE(FILE *f, ULONG v)
@@ -403,6 +484,7 @@ static void test_tri_scene(void)
     LONG ce;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
     memset(vram, 0, VRAM_SIZE);
     R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, 1);
     t.width = TRI_W;
@@ -413,6 +495,7 @@ static void test_tri_scene(void)
     t.depth_gpu = DEPTH_GPU;
     t.depth_pitch = TRI_W;
     e.alloc = HostAlloc;
+    e.alloc_raw = NULL;
     e.free = HostFree;
     e.wait_idle = HostIdle;
     e.env = NULL;
@@ -476,6 +559,7 @@ static void test_tex_scene(void)
     LONG ce;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
     memset(vram, 0, VRAM_SIZE);
     R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, 1);
     t.width = TRI_W;
@@ -486,6 +570,7 @@ static void test_tex_scene(void)
     t.depth_gpu = DEPTH_GPU;
     t.depth_pitch = TRI_W;
     e.alloc = HostAlloc;
+    e.alloc_raw = NULL;
     e.free = HostFree;
     e.wait_idle = HostIdle;
     e.env = NULL;
@@ -709,6 +794,7 @@ int main(void)
     test_depth_and_cull();
     test_textures();
     test_present();
+    test_present_bands();
     test_locked_pixels();
     test_tri_scene();
     test_tex_scene();

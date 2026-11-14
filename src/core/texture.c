@@ -320,6 +320,12 @@ static void HwOf(ULONG base, ULONG deep, ULONG *hwfmt, ULONG *cpp)
 #define SRC_LA      5
 #define SRC_4444    6   /* big-endian A4R4G4B4 words */
 #define SRC_565     7   /* big-endian R5G6B5 words */
+#define SRC_ARGB32  8   /* GL_BGRA + GL_UNSIGNED_INT_8_8_8_8_REV: native 0xAARRGGBB words */
+
+/* One native 32-bit word (the host tests' byte order is the host's, as GL
+ * means for a packed type); the source is longword aligned (GL's unpack
+ * alignment 4 and 4 bytes a pixel) */
+#define NATIVE32(q) (*(const ULONG *) (const void *) (q))
 
 static ULONG SrcOf(ULONG format, ULONG type, ULONG *bpp)
 {
@@ -332,6 +338,11 @@ static ULONG SrcOf(ULONG format, ULONG type, ULONG *bpp)
     {
         *bpp = 2;
         return SRC_565;
+    }
+    if (format == GL_BGRA && type == GL_UNSIGNED_INT_8_8_8_8_REV)
+    {
+        *bpp = 4;
+        return SRC_ARGB32;
     }
     if (type != GL_UNSIGNED_BYTE)
         return 0;
@@ -358,6 +369,13 @@ static void Fetch(ULONG src, const UBYTE *p, ULONG *r, ULONG *g, ULONG *b, ULONG
         case SRC_L:    *r = *g = *b = p[0]; *a = 255; return;
         case SRC_A:    *r = *g = *b = 255; *a = p[0]; return;
         case SRC_LA:   *r = *g = *b = p[0]; *a = p[1]; return;
+        case SRC_ARGB32:
+            w = NATIVE32(p);
+            *a = w >> 24;
+            *r = (w >> 16) & 255;
+            *g = (w >> 8) & 255;
+            *b = w & 255;
+            return;
         case SRC_4444:
             w = ((ULONG) p[0] << 8) | p[1];
             *a = ((w >> 12) & 15) * 17;
@@ -568,15 +586,37 @@ static void WriteRow(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG 
         WriteRow8(c, dst, first, w, row);
         return;
     }
-    if (cpp == 4 && bpp == 4 && src == SRC_RGBA)
+    if (cpp == 4 && bpp == 4 && (src == SRC_RGBA || src == SRC_ARGB32))
     {
-        /* true colour from RGBA bytes: one texel a dword (W2) */
+        /* true colour: one texel a dword (W2). 2026-11-14 (Herald's card
+         * uploads, ~46 ms for 172 KB against ~22 ms of bus on the A4000D):
+         * the texel from one longword load -- a rotate for RGBA bytes,
+         * nothing for native ARGB words -- instead of four byte loads,
+         * shifts and ors */
+        r = (t->base == GL_RGB) ? 0xff000000UL : 0;     /* RGB8: alpha 1 */
+        if (src == SRC_ARGB32)
+        {
+            for (i = 0; i < w; i++)
+            {
+                *dst++ = Out(c, NATIVE32(row) | r);
+                row += 4;
+            }
+            return;
+        }
+        if (TEX_ALIGNED(row))
+        {
+            for (i = 0; i < w; i++)
+            {
+                texel = LOAD_TEX32(row);                /* R G B A */
+                *dst++ = Out(c, ((texel >> 8) | (texel << 24)) | r);
+                row += 4;
+            }
+            return;
+        }
         for (i = 0; i < w; i++)
         {
             texel = ((ULONG) row[3] << 24) | ((ULONG) row[0] << 16) | ((ULONG) row[1] << 8) | row[2];
-            if (t->base == GL_RGB)
-                texel |= 0xff000000UL;
-            *dst++ = Out(c, texel);
+            *dst++ = Out(c, texel | r);
             row += 4;
         }
         return;

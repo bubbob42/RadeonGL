@@ -40,6 +40,20 @@ static APTR HostAlloc(APTR env, ULONG size)
     return calloc(1, size);
 }
 
+/* CoreEnv alloc_raw: the bytes are not zeroed in the library either, so
+ * fill them with a pattern no draw writes: an index 0xa5a5 lies past every
+ * lock, so the checker and SameAsGl refuse a read of an unwritten byte */
+static APTR HostAllocRaw(APTR env, ULONG size)
+{
+    APTR p;
+
+    (void) env;
+    p = malloc(size);
+    if (p != NULL)
+        memset(p, 0xa5, size);
+    return p;
+}
+
 static void HostFree(APTR env, APTR mem, ULONG size)
 {
     (void) env;
@@ -70,6 +84,7 @@ static void Target(struct CoreTarget *t)
 static void Env(struct CoreEnv *e)
 {
     e->alloc = HostAlloc;
+    e->alloc_raw = HostAllocRaw;
     e->free = HostFree;
     e->wait_idle = HostIdle;
     e->env = NULL;
@@ -81,6 +96,7 @@ static void Fresh(ULONG swap)
     struct CoreEnv e;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
     R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, swap);
     Target(&t);
     Env(&e);
@@ -938,6 +954,47 @@ static void test_tex32(void)
     Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     CHECK_HEX(t->hwfmt, R_TXFORMAT_ARGB8888);
     CHECK_HEX(Texel(t, 0, 1, 0), 0xff556677UL);
+    /* 2026-11-14: native ARGB words (GL_BGRA + 8_8_8_8_REV) copied as they
+     * are, and RGBA bytes from an unaligned source (the byte path) */
+    {
+        static const ULONG argb[4] = { 0x80102030UL, 0x40506070UL, 0xff8090a0UL, 0x00b0c0d0UL };
+        static UBYTE odd[1 + 16];
+        int k;
+
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_HEX(Texel(t, 0, 0, 0), 0x80102030UL);
+        CHECK_HEX(Texel(t, 0, 1, 0), 0x40506070UL);
+        CHECK_HEX(Texel(t, 0, 1, 1), 0x00b0c0d0UL);
+        Core_TexImage2DX(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_HEX(Texel(t, 0, 1, 1), 0xffb0c0d0UL);     /* RGB8: alpha 1 */
+        Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 1, 0, 1, 1, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb + 3);
+        CHECK_HEX(Texel(t, 0, 1, 0), 0xffb0c0d0UL);
+        /* into a 16-bit texture: through the generic path (ARGB4444) */
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK_INT(t->cpp, 2);
+        CHECK_HEX(Texel(t, 0, 0, 0) & 0xffffUL, 0x8123UL);
+        {
+            /* RGBA bytes from a longword-aligned buffer: the rotate path */
+            static ULONG al[4];
+            UBYTE *ab = (UBYTE *) al;
+
+            for (k = 0; k < 16; k++)
+                ab[k] = px[k];
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, ab);
+            CHECK_HEX(Texel(t, 0, 0, 0), 0x44112233UL);
+            CHECK_HEX(Texel(t, 0, 0, 1), 0xcc99aabbUL);
+            Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, ab);
+            CHECK_HEX(Texel(t, 0, 0, 1), 0xff99aabbUL);
+        }
+        for (k = 0; k < 16; k++)
+            odd[1 + k] = px[k];
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, odd + 1);
+        CHECK_HEX(Texel(t, 0, 0, 0), 0x44112233UL);
+        CHECK_HEX(Texel(t, 0, 1, 1), 0x01ddeef0UL);
+    }
     /* generic GL_RGBA stays ARGB4444 (GLQuake's) */
     Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     CHECK_INT(t->cpp, 2);
@@ -4482,6 +4539,67 @@ static void test_ucache_staged(void)
     vram_now = NULL;
 }
 
+/* 2026-11-12, the fast create: the mirror is not zeroed (CoreEnv alloc_raw;
+ * here HostAllocRaw fills it with 0xa5). Sizes that leave unwritten bytes
+ * behind every entry -- 1501 vertices of 24 bytes (36024, rounded to 36032)
+ * and 93 indices (47 dwords, the last one half padding; 188 bytes rounded to
+ * 192) -- so the flush copies never-written bytes into video RAM; a draw
+ * that read one would take index 0xa5a5, past every lock, and fail the
+ * checker or the picture. MEASURED: skipping the last index dword's write
+ * fails here (3 checks), with this pattern and with a zeroed mirror alike
+ * (index 0 draws the wrong vertex). */
+static UWORD uc_odd[30][93];
+
+/* uc_idx's first 93 indices, the last one the lock's LAST vertex: the 24
+ * bytes right before its block's unwritten tail are drawn too */
+static void UcDrawOdd(ULONG d, ULONG first, ULONG count)
+{
+    ULONG i;
+
+    for (i = 0; i < 92; i++)
+        uc_odd[d][i] = uc_idx[d][i];
+    uc_odd[d][92] = (UWORD) (first + count - 1);
+    Core_LockArrays(&core, (LONG) first, (LONG) count);
+    Core_DrawElements(&core, GL_TRIANGLES, 93, GL_UNSIGNED_SHORT, uc_odd[d]);
+    Core_UnlockArrays(&core);
+}
+
+static void test_ucache_staged_tails(void)
+{
+    ULONG d;
+    ULONG i;
+    ULONG n;
+    ULONG frame;
+
+    UcSetup();
+    memset(&vram[core.ucache_off / 4], 0x55, core.ucache_size);
+    vram_now = vram;
+    vram_begins = 0;
+    Core_SetVram(&core, HostVramBegin, HostVramEnd, staging);
+    CHECK_INT(core.ustaged, 1);
+    CHECK_INT(core.ushadow[0], 0xa5a5a5a5UL);      /* the raw allocator, not a cleared one */
+    for (frame = 0; frame < 3; frame++)
+    {
+        collect_from = (ULONG) (cs.ptr - stream);
+        n = 0;
+        for (d = 0; d < 30; d++)
+        {
+            UcDrawOdd(d, d * 250, 1501);
+            for (i = 0; i < 93; i++)
+                uc_all[n++] = uc_odd[d][i];
+        }
+        HostFlushStaged();
+        CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+        Core_GpuIdle(&core);
+    }
+    collect_from = 0;
+    CHECK_INT(vram_begins, 0);
+    CHECK_INT(core.stat_lock_draws, 90);
+    CHECK(core.stat_uc_hits > 0 && core.stat_uc_misses > 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    vram_now = NULL;
+}
+
 static void test_frames_through_ring(void)
 {
     struct SimCp sim;
@@ -4497,6 +4615,7 @@ static void test_frames_through_ring(void)
     ULONG seq;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
     Cfg(&cfg);
     SimCp_Init(&sim, ring_mem, ring_shadow, RING_DW, 1, FENCE_REG, 0, 300, &cfg);
     CHECK_INT(R2Ring_Init(&ring, ring_mem, 0x01000000UL, RING_DW, &sim.hw, 1, FENCE_REG, 100000),
@@ -5099,6 +5218,68 @@ static void test_polymode_frames(void)
  * the card) decides culling and the face as the glArrayElement way does:
  * a ball of quads, triangles and one polygon seen from many sides, both
  * front faces, back and front culling, GL_LINE and GL_POINT. */
+/* Doom 64 EX/EX+'s FindExtension, as the Doom 64 session read it: start
+ * moves on only after a whole-token match, so a hit inside another word is
+ * found again forever. Returns 1 found, 0 not found, -1 the loop hangs. */
+static int ExPlusFind(const char *ext, const char *name)
+{
+    const char *start;
+    const char *where;
+    const char *term;
+    int loops;
+
+    start = ext;
+    for (loops = 0; loops < 100; loops++)
+    {
+        where = strstr(start, name);
+        if (where == NULL)
+            return 0;
+        term = where + strlen(name);
+        if (where == start || where[-1] == ' ')
+        {
+            if (*term == ' ' || *term == '\0')
+                return 1;
+            start = term;
+        }
+    }
+    return -1;
+}
+
+/* Whole-token search, the usual client check. */
+static int TokenFind(const char *ext, const char *name)
+{
+    const char *p;
+    ULONG n;
+
+    n = strlen(name);
+    for (p = strstr(ext, name); p != NULL; p = strstr(p + 1, name))
+        if ((p == ext || p[-1] == ' ') && (p[n] == ' ' || p[n] == '\0'))
+            return 1;
+    return 0;
+}
+
+static void test_extension_tokens(void)
+{
+    static const char ext[] = CORE_EXTENSIONS RGL_PALETTE_EXTENSIONS;
+
+    CHECK_INT(ExPlusFind(ext, "GL_ARB_multitexture"), 1);
+    CHECK_INT(ExPlusFind(ext, "GL_EXT_texture_env_add"), 1);
+    CHECK_INT(ExPlusFind(ext, "GL_EXT_compiled_vertex_array"), 1);
+    CHECK_INT(ExPlusFind(ext, "GL_ARB_texture_env_combine"), 0);
+    /* the 0.12 string: the hang the token order cures */
+    CHECK_INT(ExPlusFind("GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array", "GL_ARB_multitexture"), -1);
+    CHECK_INT(TokenFind(ext, "GL_ARB_multitexture"), 1);
+    CHECK_INT(TokenFind(ext, "GL_MGL_ARB_multitexture"), 1);
+    CHECK_INT(TokenFind(ext, "GL_EXT_texture_env_add"), 1);
+    CHECK_INT(TokenFind(ext, "GL_RGL_static_arrays"), 1);
+    CHECK_INT(TokenFind(ext, "GL_RGL_resize_error"), 1);
+    CHECK_INT(TokenFind(ext, "GL_EXT_shared_texture_palette"), 1);
+    /* GLQuake's test: strstr with the trailing blank */
+    CHECK(strstr(ext, "GL_MGL_ARB_multitexture ") != NULL);
+    CHECK(ext[0] != ' ' && ext[strlen(ext) - 1] != ' ');
+    CHECK(strstr(ext, "  ") == NULL);
+}
+
 static void test_polymode_static(void)
 {
     static float bv[81 * 3];
@@ -5206,6 +5387,105 @@ static void test_polymode_static(void)
     Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
 }
 
+/* The synced present (2026-11-12): bands from the top down, edge to edge,
+ * each with its own t range, the band heights growing; the present's own
+ * dwords as CORE_PRESENT_DW counts them. */
+static ULONG PresentBands(ULONG from, LONG x, LONG y, ULONG w, ULONG h)
+{
+    ULONG n, i, h0, len, cntl, bands, top, bot, last_h, want;
+    float fx0, fx1, s1, ta;
+    n = (ULONG) (cs.ptr - stream);
+    bands = 0;
+    top = (ULONG) y;
+    last_h = 0;
+    fx0 = (float) x;
+    fx1 = (float) (x + (LONG) w);
+    s1 = (float) w / (float) W_;
+    ta = 0.0f;
+    for (i = from; i < n; i += len)
+    {
+        h0 = V(i);
+        len = (R2_PKT_TYPE(h0) == 2) ? 1 : (R2_PKT_TYPE(h0) == 1) ? 3 : R2_PKT_COUNT(h0) + 2;
+        if (R2_PKT_TYPE(h0) != 3 || R2_PKT3_OPCODE(h0) != R2_OP_3D_DRAW_IMMD_2)
+            continue;
+        cntl = V(i + 1);
+        CHECK_HEX(cntl & R_VF_PRIM_MASK, R_VF_PRIM_RECT_LIST);
+        CHECK_INT(cntl >> 16, 3);
+        CHECK_INT(len, 14);
+        /* v0 bottom-left, v1 bottom-right, v2 top-right: x y s t each */
+        bot = (ULONG) F(V(i + 3));
+        CHECK(F(V(i + 2)) == fx0 && F(V(i + 6)) == fx1 && F(V(i + 10)) == fx1);
+        CHECK(F(V(i + 7)) == F(V(i + 3)));
+        CHECK(F(V(i + 11)) == (float) top);             /* the last band's bottom */
+        CHECK(bot > top && (float) bot == F(V(i + 3)));
+        CHECK(F(V(i + 4)) == 0.0f && F(V(i + 8)) == s1 && F(V(i + 12)) == s1);
+        CHECK(F(V(i + 13)) == ta);                      /* the same bits as the last bottom */
+        want = (ULONG) (top - (ULONG) y);
+        CHECK(V(i + 5) == R2Cs_FloatBits((float) (bot - (ULONG) y) / (float) H_));
+        CHECK(V(i + 9) == V(i + 5));
+        if (bot != (ULONG) y + h)
+        {
+            CHECK_INT(bot - top, CORE_PRESENT_BAND0 + want / CORE_PRESENT_GROW);
+            CHECK(bot - top >= last_h);                 /* growing down the screen */
+        }
+        last_h = bot - top;
+        ta = F(V(i + 5));
+        top = bot;
+        bands++;
+    }
+    CHECK_INT(top, (ULONG) y + h);                      /* down to the last row */
+    CHECK(bands <= CORE_PRESENT_BANDS);
+    return bands;
+}
+
+static void test_present_bands(void)
+{
+    struct CoreScreen scr;
+    struct R2ChkState st;
+    ULONG from;
+    ULONG bands;
+
+    Fresh(1);
+    Core_Clear(&core, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    Draw1();
+    scr.gpu = SCREEN_GPU;
+    scr.pitch = 1024;
+    scr.format = R_COLOR_FORMAT_ARGB8888;
+    scr.width = 1024;
+    scr.height = 768;
+    /* without vertical sync: one rectangle, as before */
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 192, 144);
+    CHECK_INT(PresentBands(from, 192, 144, W_, H_), 1);
+    /* with it: 480 rows in 27 bands of 8, 8, 9 ... 35 rows and the rest */
+    core.sync = 1;
+    Draw1();
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 192, 144);
+    bands = PresentBands(from, 192, 144, W_, H_);
+    CHECK_INT(bands, 27);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    CHECK_INT(st.draws, 1 + 1 + 1 + 1 + 27);            /* clear, triangle, copy, triangle, bands */
+    printf("  synced present: %lu bands, %lu dwords after the state (CORE_PRESENT_DW %lu)\n",
+           (unsigned long) bands, (unsigned long) ((ULONG) (cs.ptr - stream) - from),
+           (unsigned long) CORE_PRESENT_DW);
+    /* the present's own dwords: a clean state, so its Core_Validate adds none */
+    Draw1();
+    Core_Validate(&core);
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 192, 144);
+    CHECK_INT((ULONG) (cs.ptr - stream) - from, 58 + 14 * 27);
+    /* clipped: 320 x 200 of the frame, 200 rows: 16 bands */
+    scr.width = 320;
+    scr.height = 200;
+    Draw1();
+    from = (ULONG) (cs.ptr - stream);
+    Core_Present(&core, &scr, 0, 0);
+    CHECK_INT(PresentBands(from, 0, 0, 320, 200), 16);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    core.sync = 0;
+}
+
 int main(void)
 {
     struct CoreTarget t;
@@ -5240,6 +5520,7 @@ int main(void)
     test_arrays();
     test_locked();
     test_present();
+    test_present_bands();
     test_vram_hooks();
     test_tex_rows();
     test_tex_rows8();
@@ -5253,11 +5534,13 @@ int main(void)
     test_hazard_restamp();
     test_scissor_empty();
     test_ucache_staged();
+    test_ucache_staged_tails();
     test_packfast();
     test_frames_through_ring();
     test_polygon_mode();
     test_polymode_frames();
     test_polymode_static();
+    test_extension_tokens();
     (void) t;
     (void) e;
     return tk_done("test_core");

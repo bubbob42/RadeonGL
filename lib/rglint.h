@@ -63,6 +63,15 @@ struct Rgl
 /* rgl.c: every context, newest first (W3) */
 extern struct Rgl *rgl_list;
 
+/* rglport.c (linked behind the hot code): the public port "RadeonGL" */
+void Port_Add(void);
+void Port_Remove(void);
+void Port_Count(void);
+
+/* rgllog.c (linked behind the hot code): the delete log and a refusal */
+void Rgl_WriteLog(struct Rgl *r);
+void Rgl_Refused(struct Rgl *r, const char *why);
+extern ULONG Rgl_UnimplEarly[];         /* rgl.c: slots called before any context */
 /* rglcompat.c (linked last): glGet with the context's buffering known */
 extern const char Rglc_Extensions[];    /* GL_EXTENSIONS (rglcompat.c) */
 /* shell.c: the calling task's own dispatch table, NULL on the shared one */
