@@ -31,6 +31,8 @@ void Compat_Defaults(struct Core *c)
 {
     c->cur_edge = 1;
     c->cur_index = 1.0f;
+    c->pm_front = GL_FILL;                  /* glPolygonMode (polymode.c) */
+    c->pm_back = GL_FILL;
     c->array_xform = 1;                     /* 29.1 starts with it on */
     c->unpack_plain = 1;
     c->blend_eq_rgb = GL_FUNC_ADD;
@@ -72,7 +74,8 @@ void Compat_Enable(struct Core *c, ULONG cap, ULONG on)
             flag = &c->shared_pal;
             break;
         default:
-            Core_Error(c, GL_INVALID_ENUM);
+            if (!Tex13_Enable(c, cap, on))  /* cube maps, GL_TEXTURE_GEN_R, GL_RESCALE_NORMAL */
+                Core_Error(c, GL_INVALID_ENUM);
             return;
     }
     *flag = on ? 1UL : 0UL;
@@ -81,6 +84,8 @@ void Compat_Enable(struct Core *c, ULONG cap, ULONG on)
 /* Core_IsEnabled's path for the same: the client arrays too */
 ULONG Compat_IsEnabled(struct Core *c, ULONG cap)
 {
+    ULONG f;
+
     switch (cap)
     {
         case GL_VERTEX_ARRAY:           return c->va.enabled;
@@ -95,6 +100,8 @@ ULONG Compat_IsEnabled(struct Core *c, ULONG cap)
         case MGL_ARRAY_TRANSFORMATIONS: return c->array_xform;
         case GL_SHARED_TEXTURE_PALETTE_EXT: return c->shared_pal;
     }
+    if (Tex13_IsEnabled(c, cap, &f))
+        return f;
     Core_Error(c, GL_INVALID_ENUM);
     return 0;
 }
@@ -196,8 +203,8 @@ static ULONG QueryX(struct Core *c, ULONG pname, float *v)
         case GL_COLOR_MATERIAL_PARAMETER:   v[0] = (float) c->cm_mode; return 1;
         case GL_LINE_WIDTH:         v[0] = c->line_width; return 1;
         case GL_POLYGON_MODE:
-            v[0] = (float) (c->polygon_mode ? c->polygon_mode : GL_FILL);
-            v[1] = v[0];
+            v[0] = (float) c->pm_front;     /* front, back (polymode.c) */
+            v[1] = (float) c->pm_back;
             return 2;
         case GL_POLYGON_OFFSET_FACTOR:  v[0] = c->poly_factor; return 1;
         case GL_POLYGON_OFFSET_UNITS:   v[0] = c->poly_units; return 1;
@@ -251,7 +258,7 @@ static ULONG QueryX(struct Core *c, ULONG pname, float *v)
         v[0] = (float) Core_IsEnabled(c, pname);
         return 1;
     }
-    return 0;
+    return Tex13_Query(c, pname, v);    /* GL 1.3 phase 1's names (tex13.c) */
 }
 
 ULONG Core_GetCountX(ULONG pname)
@@ -655,7 +662,9 @@ void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
     tmp = Unpack(c, w, h, &format, &type, &pixels, &size);
     if (tmp == NULL && size != 0)
         return;                             /* out of memory or refused, said */
+    c->unpack_done = (tmp != NULL) ? 1UL : 0UL;     /* rows laid out: tex13.c reads them so */
     Core_TexImage2D(c, target, level, internal, w, h, border, format, type, pixels);
+    c->unpack_done = 0;
     if (tmp != NULL)
         c->env.free(c->env.env, tmp, size);
 }
@@ -675,7 +684,9 @@ void Core_TexSubImage2DX(struct Core *c, ULONG target, LONG level, LONG x, LONG 
     tmp = Unpack(c, w, h, &format, &type, &pixels, &size);
     if (tmp == NULL && size != 0)
         return;
+    c->unpack_done = (tmp != NULL) ? 1UL : 0UL;
     Core_TexSubImage2D(c, target, level, x, y, w, h, format, type, pixels);
+    c->unpack_done = 0;
     if (tmp != NULL)
         c->env.free(c->env.env, tmp, size);
 }
@@ -696,19 +707,19 @@ void Core_TexEnvfv(struct Core *c, ULONG target, ULONG pname, const float *v)
     ULONG u;
     ULONG i;
 
-    if (target != GL_TEXTURE_ENV || v == NULL)
+    if (v == NULL)
     {
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
-    if (pname == GL_TEXTURE_ENV_MODE)
+    if (target == GL_TEXTURE_ENV && pname == GL_TEXTURE_ENV_MODE)
     {
         Core_TexEnvi(c, target, pname, Core_Floor(v[0] + 0.5f));
         return;
     }
-    if (pname != GL_TEXTURE_ENV_COLOR)
+    if (target != GL_TEXTURE_ENV || pname != GL_TEXTURE_ENV_COLOR)
     {
-        Core_Error(c, GL_INVALID_ENUM);
+        Tex13_TexEnvfv(c, target, pname, v);    /* the combiner's, the LOD bias (tex13.c) */
         return;
     }
     u = c->active_unit;
@@ -778,8 +789,15 @@ void Core_ArrayElement(struct Core *c, LONG i)
 
     if (i < 0)
         return;                             /* undefined in GL: nothing */
+    if (c->wide_on)
+    {
+        Tex13_ArrayElement(c, i);           /* units above 1, cube maps (tex13.c) */
+        return;
+    }
     if (c->na.enabled)
         FetchNormal(c, (ULONG) i);
+    if (c->ea.enabled && c->ea.ptr != NULL)
+        Core_EdgeFlag(c, c->ea.ptr[(ULONG) i * (c->ea.stride ? c->ea.stride : 1UL)]);
     if (!c->va.enabled)
     {
         FetchAttribs(c, (ULONG) i);
@@ -811,7 +829,7 @@ void Core_MultiDrawArrays(struct Core *c, ULONG mode, const LONG *first, const L
     if (first == NULL || count == NULL)
         return;
     for (i = 0; i < primcount; i++)
-        Core_DrawArrays(c, mode, first[i], count[i]);
+        Core_DrawArraysX(c, mode, first[i], count[i]);
 }
 
 /* s/q and t/q, as 29.1 keeps them (exact at the vertices; the R200 is not
@@ -822,15 +840,17 @@ void Core_TexCoord4f(struct Core *c, float s, float t, float r, float q)
     float sq;
     float tq;
 
-    (void) r;
     if (q > -1.0e-8f && q < 1.0e-8f)
     {
         Core_TexCoord2f(c, s, t);
+        c->cur_r[0] = r;            /* a cube map's third coordinate (tex13.c) */
         return;
     }
     sq = s / q;                 /* float locals: SAS/C passes a float expression as a double */
     tq = t / q;
     Core_TexCoord2f(c, sq, tq);
+    sq = r / q;
+    c->cur_r[0] = sq;
 }
 
 /* --- GLU: gluPerspective, gluLookAt ----------------------------------------------------- */
@@ -954,7 +974,14 @@ void Core_ReadBuffer(struct Core *c, ULONG mode)
 
 void Core_EdgeFlag(struct Core *c, ULONG flag)
 {
-    c->cur_edge = flag ? 1UL : 0UL;         /* polygons are drawn filled: stored */
+    flag = flag ? 1UL : 0UL;
+    if (c->pm_on && flag != c->cur_edge)
+    {
+        c->cur_edge = flag;
+        Pm_EdgeFlag(c);                     /* GL_LINE / GL_POINT polygons (polymode.c) */
+        return;
+    }
+    c->cur_edge = flag;                     /* filled polygons: stored */
 }
 
 void Core_EdgeFlagPointer(struct Core *c, LONG stride, const void *p)
@@ -1345,7 +1372,7 @@ void Core_Sphere(struct Core *c, const struct CoreQuadric *q, float radius, LONG
         z1 = Core_Cos(phi);
         t0 = 1.0f - (float) j / (float) stacks;
         t1 = 1.0f - (float) (j + 1) / (float) stacks;
-        Core_Begin(c, QPrim(q));
+        Core_BeginX(c, QPrim(q));
         for (i = 0; i <= slices; i++)
         {
             s = 1.0f - (float) i / (float) slices;
@@ -1368,7 +1395,7 @@ void Core_Sphere(struct Core *c, const struct CoreQuadric *q, float radius, LONG
                 }
             }
         }
-        Core_End(c);
+        Core_EndX(c);
     }
     for (j = 0; QRings(q) && j <= stacks; j++)
     {
@@ -1376,7 +1403,7 @@ void Core_Sphere(struct Core *c, const struct CoreQuadric *q, float radius, LONG
         r0 = Core_Sin(phi);
         z0 = Core_Cos(phi);
         t0 = 1.0f - (float) j / (float) stacks;
-        Core_Begin(c, GL_LINE_STRIP);
+        Core_BeginX(c, GL_LINE_STRIP);
         for (i = 0; i <= slices; i++)
         {
             s = 1.0f - (float) i / (float) slices;
@@ -1385,7 +1412,7 @@ void Core_Sphere(struct Core *c, const struct CoreQuadric *q, float radius, LONG
             n[0] *= sgn; n[1] *= sgn; n[2] *= sgn;
             QVert(c, q, n, s, t0, v);
         }
-        Core_End(c);
+        Core_EndX(c);
     }
 }
 
@@ -1416,7 +1443,7 @@ void Core_Cylinder(struct Core *c, const struct CoreQuadric *q, float base, floa
         r1 = base - d * ((float) (j + 1) / (float) stacks);
         t0 = (float) j / (float) stacks;
         t1 = (float) (j + 1) / (float) stacks;
-        Core_Begin(c, QPrim(q));
+        Core_BeginX(c, QPrim(q));
         for (i = 0; i <= slices; i++)
         {
             s = 1.0f - (float) i / (float) slices;
@@ -1438,14 +1465,14 @@ void Core_Cylinder(struct Core *c, const struct CoreQuadric *q, float base, floa
                 }
             }
         }
-        Core_End(c);
+        Core_EndX(c);
     }
     for (j = 0; QRings(q) && j <= stacks; j++)
     {
         z0 = height * (float) j / (float) stacks;
         r0 = base - d * ((float) j / (float) stacks);
         t0 = (float) j / (float) stacks;
-        Core_Begin(c, GL_LINE_STRIP);
+        Core_BeginX(c, GL_LINE_STRIP);
         for (i = 0; i <= slices; i++)
         {
             s = 1.0f - (float) i / (float) slices;
@@ -1453,7 +1480,7 @@ void Core_Cylinder(struct Core *c, const struct CoreQuadric *q, float base, floa
             v[0] = r0 * sn[i]; v[1] = r0 * cs[i]; v[2] = z0;
             QVert(c, q, n, s, t0, v);
         }
-        Core_End(c);
+        Core_EndX(c);
     }
 }
 
@@ -1479,7 +1506,7 @@ void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float o
         r1 = outer - d * ((float) (j + 1) / (float) loops);
         tx0 = r0 / outer * 0.5f;
         tx1 = r1 / outer * 0.5f;
-        Core_Begin(c, QPrim(q));
+        Core_BeginX(c, QPrim(q));
         for (i = 0; i <= slices; i++)
             for (k = 0; k < 2; k++)
             {
@@ -1495,20 +1522,20 @@ void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float o
                 }
                 QVert(c, q, n, s, t, v);
             }
-        Core_End(c);
+        Core_EndX(c);
     }
     for (j = 0; QRings(q) && j <= loops; j++)
     {
         r0 = outer - d * ((float) j / (float) loops);
         tx0 = r0 / outer * 0.5f;
-        Core_Begin(c, GL_LINE_STRIP);
+        Core_BeginX(c, GL_LINE_STRIP);
         for (i = 0; i <= slices; i++)
         {
             v[0] = r0 * sn[i]; v[1] = r0 * cs[i];
             s = tx0 * sn[i] + 0.5f; t = tx0 * cs[i] + 0.5f;
             QVert(c, q, n, s, t, v);
         }
-        Core_End(c);
+        Core_EndX(c);
     }
 }
 
@@ -1748,5 +1775,6 @@ void Compat_Free(struct Core *c)
         c->pal = NULL;
     }
     c->pal_size = 0;
+    Pm_Free(c);
 }
 

@@ -38,6 +38,7 @@
 #include "rgl_dispatch.h"
 #include "rgl.h"
 #include "rglint.h"
+#include "rgltable.h"
 #include "core.h"
 
 #ifndef GL_COLOR_INDEXES
@@ -326,8 +327,9 @@ static BOOL RDoubles(GLcontext x, ULONG shape, APTR fn, const GLdouble *d, ULONG
 
 #define FN(name) ((APTR) LIB.name)
 
-static void Rec_GLBegin(GLcontext x, GLenum m)          { if (R1(x, S_U, FN(GLBegin), m)) LIB.GLBegin(x, m); }
-static void Rec_GLEnd(GLcontext x)                      { if (R0(x, S_V, FN(GLEnd))) LIB.GLEnd(x); }
+/* glBegin/glEnd: rgltable.c's, which honour glPolygonMode (made and replayed) */
+static void Rec_GLBegin(GLcontext x, GLenum m)          { if (R1(x, S_U, (APTR) Rgltab_GLBegin, m)) Rgltab_GLBegin(x, m); }
+static void Rec_GLEnd(GLcontext x)                      { if (R0(x, S_V, (APTR) Rgltab_GLEnd)) Rgltab_GLEnd(x); }
 static void Rec_GLLoadIdentity(GLcontext x)             { if (R0(x, S_V, FN(GLLoadIdentity))) LIB.GLLoadIdentity(x); }
 static void Rec_GLPushMatrix(GLcontext x)               { if (R0(x, S_V, FN(GLPushMatrix))) LIB.GLPushMatrix(x); }
 static void Rec_GLPopMatrix(GLcontext x)                { if (R0(x, S_V, FN(GLPopMatrix))) LIB.GLPopMatrix(x); }
@@ -774,6 +776,7 @@ void Hook_GLNewList(GLcontext context, GLuint list, GLenum mode)
     dl->full = 0;
     dl->table = t;
     Swap(t, TRUE);
+    Rgltab_TableReset((struct Rgl *) context);     /* the recorders replaced its hooks */
 }
 
 void Hook_GLEndList(GLcontext context)
@@ -790,6 +793,7 @@ void Hook_GLEndList(GLcontext context)
     Swap(dl->table, FALSE);
     dl->table = NULL;
     dl->compiling = 0;
+    Rgltab_TableReset((struct Rgl *) context);     /* the state hooks again */
     if (dl->full)
         Core_Error((struct Core *) context, GL_OUT_OF_MEMORY);   /* calls were lost */
 }
@@ -801,6 +805,13 @@ void Hook_GLCallList(GLcontext context, GLuint list)
     if (context == NULL || (dl = State(context, 0)) == NULL)
         return;                     /* no lists at all: an undefined name, ignored */
     Run(context, dl, list);
+}
+
+/* A list being made: its recorders hold the task table's slots (rgltable.c
+ * leaves them alone until Hook_GLEndList) */
+BOOL Rgldl_Recording(struct Rgl *r)
+{
+    return (BOOL) (r->dl != NULL && r->dl->compiling != 0);
 }
 
 /* glGet's list names (rglcompat.c asks first): TRUE when pname is one */
@@ -824,6 +835,7 @@ void Rgldl_Free(struct Rgl *r)
     struct RglDL *dl;
     ULONG i;
 
+    Rgltab_Free(r);                 /* the task's table back from rgltable.c too */
     if ((dl = r->dl) == NULL)
         return;
     if (dl->compiling != 0 && dl->table != NULL)

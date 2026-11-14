@@ -1,5 +1,5 @@
 /*
- * GLBench -- what each kind of GL call costs in minigl.library on this
+ * GLCost (GLBench until 2026-11-08) -- what each kind of GL call costs in minigl.library on this
  * machine, so GLQuake's frame (docs/census.md) can be costed call by call
  * and every optimisation measured.
  *
@@ -24,7 +24,7 @@
  *             -- about 5,800 texels
  *   frame     mglSwitchDisplay of an empty frame
  *
- *   GLBench SCALE/N,ONLY/K,PROFILE/K
+ *   GLCost SCALE/N,ONLY/K,PROFILE/K
  *
  * SCALE multiplies the repetitions (1). ONLY runs one test by name.
  *
@@ -49,7 +49,7 @@
 #include <proto/minigl.h>
 #include "pcprof.h"
 
-static const char ver[] = "$VER: GLBench 0.1 (03.11.2026)";
+static const char ver[] = "$VER: GLCost 0.1 (08.11.2026)";
 
 #define TEMPLATE "SCALE/N,ONLY/K,PROFILE/K"
 
@@ -524,7 +524,7 @@ int main(int argc, char **argv)
     rda = ReadArgs(TEMPLATE, args, NULL);
     if (rda == NULL)
     {
-        PrintFault(IoErr(), "GLBench");
+        PrintFault(IoErr(), "GLCost");
         return RETURN_ERROR;
     }
     /* one cleanup path: the context and the library above all (libminigl.a
@@ -542,7 +542,7 @@ int main(int argc, char **argv)
         req = (struct timerequest *) CreateIORequest(port, sizeof(*req));
     if (req == NULL || OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ, (struct IORequest *) req, 0) != 0)
     {
-        Printf("GLBench: timer.device did not open\n");
+        Printf("GLCost: timer.device did not open\n");
         goto out;
     }
     dev = TRUE;
@@ -551,34 +551,34 @@ int main(int argc, char **argv)
     Printf("%s\n", (LONG) (ver + 6));
     if (!MiniGLOpen())
     {
-        Printf("GLBench: minigl.library 29.1 did not open\n");
+        Printf("GLCost: minigl.library 29.1 did not open\n");
         goto out;
     }
     lib = TRUE;
     mglChoosePixelDepth(16);
     if (!mglCreateContext(0, 0, 320, 240))
     {
-        Printf("GLBench: no context\n");
+        Printf("GLCost: no context\n");
         goto out;
     }
     ctx = TRUE;
     Printf("GL_RENDERER: %s\n", (LONG) glGetString(GL_RENDERER));
     Where("the dispatch table", (APTR) MiniGLDispatch);
     Where("a hook in the library", (APTR) MiniGLDispatch->GLTexCoord2f);
-    Where("GLBench's code", (APTR) main);
-    Where("GLBench's data", (APTR) pos);
+    Where("GLCost's code", (APTR) main);
+    Where("GLCost's data", (APTR) pos);
     Setup();
     membuf_mem = AllocVec(320 * 1024, MEMF_ANY | MEMF_CLEAR);
     if (membuf_mem == NULL)
     {
-        Printf("GLBench: no memory for the 320 KB test buffer\n");
+        Printf("GLCost: no memory for the 320 KB test buffer\n");
         goto out;
     }
     membuf = (ULONG *) (((ULONG) membuf_mem + 15) & ~15UL);
     mglSwitchDisplay();
     if (args[2] && !PcProf_Start(1000, 8000, 64))
     {
-        Printf("GLBench: the sampler did not start\n");
+        Printf("GLCost: the sampler did not start\n");
         args[2] = 0;
     }
     for (t = 0; t < sizeof(tests) / sizeof(tests[0]); t++)

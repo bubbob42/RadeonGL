@@ -339,13 +339,13 @@ static ULONG PackFast(struct Core *c, ULONG *out, ULONG first, ULONG count, ULON
 {
     const UBYTE *vp;
     const UBYTE *cp;
-    const UBYTE *tp[CORE_UNITS];
+    const UBYTE *tp[CORE_NARROW];
     const ULONG *v;
     const ULONG *t;
     ULONG vs;
     ULONG cs;
-    ULONG ts[CORE_UNITS];
-    ULONG st[CORE_UNITS][2];
+    ULONG ts[CORE_NARROW];
+    ULONG st[CORE_NARROW][2];
     ULONG col;
     ULONG swap;
     ULONG b0, b1, b2, b3;
@@ -358,7 +358,7 @@ static ULONG PackFast(struct Core *c, ULONG *out, ULONG first, ULONG count, ULON
     if (c->ca.enabled && c->ca.type != MGL_UBYTE_ARGB && c->ca.type != MGL_UBYTE_BGRA
         && c->ca.type != GL_UNSIGNED_BYTE)
         return 0;
-    for (u = 0; u < CORE_UNITS; u++)
+    for (u = 0; u < CORE_NARROW; u++)
     {
         tp[u] = NULL;
         ts[u] = 0;
@@ -418,7 +418,7 @@ static ULONG PackFast(struct Core *c, ULONG *out, ULONG first, ULONG count, ULON
         out[2] = b2;
         out[3] = b3;
         n = 4;
-        for (u = 0; u < CORE_UNITS; u++)
+        for (u = 0; u < CORE_NARROW; u++)
         {
             if (!(units & (1UL << u)))
                 continue;
@@ -464,7 +464,7 @@ static ULONG LockCurrent(struct Core *c, ULONG units)
         return 0;
     if (c->vnorm && !c->na.enabled)
         return 0;                   /* lit, the current normal for all: packed anew */
-    for (u = 0; u < CORE_UNITS; u++)
+    for (u = 0; u < CORE_NARROW; u++)
         if ((units & (1UL << u)) && !c->ta[u].enabled
             && (c->lk_st[u][0] != c->cur_st[u][0] || c->lk_st[u][1] != c->cur_st[u][1]))
             return 0;
@@ -708,8 +708,14 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
     ULONG col;
     ULONG k;
 
-    /* lit (normals): never one of GLQuake's layouts */
-    if (c->vnorm)
+    /* lit (normals), or no texture unit on: never one of GLQuake's layouts.
+     * 2026-11-12, units 0 (GLTron's cycle shadows and outlines: unlit,
+     * untextured, 5.8 draws and ~85 KB packed into the stream a frame):
+     * the general key below took only GLQuake's two layouts. Four bytes
+     * in the object, the code around unchanged (a key for every other
+     * layout at the end instead re-allocated Core_DrawElements' registers,
+     * -148 bytes). */
+    if (c->vnorm || units == 0)
         return c->static_arrays ? Core_StaticKey(c, first, lcount, units, h) : 0;
     if (c->no_fast || !c->cs->swap || c->va.type != GL_FLOAT || c->va.size != 3)
         return 0;
@@ -1320,7 +1326,7 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
         c->lk_valid = 1;
         c->lk_units = units | (c->vnorm << 8);
         c->lk_color = c->cur_color;
-        for (k = 0; k < CORE_UNITS; k++)
+        for (k = 0; k < CORE_NARROW; k++)
         {
             c->lk_st[k][0] = c->cur_st[k][0];
             c->lk_st[k][1] = c->cur_st[k][1];
@@ -1438,7 +1444,7 @@ static ULONG DrawLocked(struct Core *c, ULONG mode, LONG count, ULONG type, cons
         c->lk_valid = 1;
         c->lk_units = units | (c->vnorm << 8);
         c->lk_color = c->cur_color;
-        for (k = 0; k < CORE_UNITS; k++)
+        for (k = 0; k < CORE_NARROW; k++)
         {
             c->lk_st[k][0] = c->cur_st[k][0];
             c->lk_st[k][1] = c->cur_st[k][1];
@@ -1528,6 +1534,11 @@ void Core_DrawArrays(struct Core *c, ULONG mode, LONG first, LONG count)
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
+    if (c->wide_on)
+    {
+        Tex13_DrawArrays(c, mode, first, count);    /* units above 1, cube maps (tex13.c) */
+        return;
+    }
     if (!c->va.enabled || count == 0 || CORE_SCISSOR_EMPTY(c))
         return;
     Core_Begin(c, mode);
@@ -1562,6 +1573,11 @@ void Core_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, const
         || (type != GL_UNSIGNED_BYTE && type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT))
     {
         Core_Error(c, GL_INVALID_ENUM);
+        return;
+    }
+    if (c->wide_on)
+    {
+        Tex13_DrawElements(c, mode, count, type, idx);  /* units above 1, cube maps (tex13.c) */
         return;
     }
     if (!c->va.enabled || count == 0 || idx == NULL || CORE_SCISSOR_EMPTY(c))

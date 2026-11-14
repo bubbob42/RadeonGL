@@ -209,7 +209,13 @@ extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card
 /* Breadcrumbs for the debug trap catcher (trapcatch.h, RGL_TRAPCATCH):
  * where the card code is, and the bitmaps' CPU addresses at the last
  * lock. Nothing in the release build. */
-#if defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
+#if defined(RGL_TRACE)
+/* The trace build (RGL_DEFS=-DRGL_TRACE, 2026-11-11, GLBench Pelt freezing
+ * the A4000D with no MuForce hit): every WHERE() becomes a line on the
+ * serial port, so the last line before a freeze names the step. */
+void Card_Trace(ULONG n, ULONG v);
+#define WHERE(n, v) Card_Trace((n), (ULONG) (v))
+#elif defined(RGL_TRAPCATCH) && defined(RGL_CPU_040)
 extern volatile ULONG rgl_where, rgl_where2, rgl_pending;
 extern volatile ULONG rgl_bm[CARD_NBM];
 #define WHERE(n, v) (rgl_where = (n), rgl_where2 = (ULONG) (v))

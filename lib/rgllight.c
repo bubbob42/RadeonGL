@@ -8,6 +8,9 @@
  * 33.1 -> 32.8 fps, interleaved A/B, the work dword for dword the same) --
  * the 68060's caches care where the vertex and array code sits. GLQuake
  * calls none of these.
+ *
+ * The lighting and texgen calls arm the context's state hooks (rgltable.c:
+ * lit vertices): its first such call, then nothing more.
  */
 
 #include <exec/types.h>
@@ -16,6 +19,7 @@
 #include "rgl_dispatch.h"
 #include "rgl.h"
 #include "core.h"
+#include "rgltable.h"
 
 void Hook_GLLightf(GLcontext context, GLenum light, GLenum pname, GLfloat param)
 {
@@ -24,6 +28,7 @@ void Hook_GLLightf(GLcontext context, GLenum light, GLenum pname, GLfloat param)
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_Lightfv(c, light, pname, &param, 1);
 }
 void Hook_GLLightfv(GLcontext context, GLenum light, GLenum pname, const GLfloat *params)
@@ -33,6 +38,7 @@ void Hook_GLLightfv(GLcontext context, GLenum light, GLenum pname, const GLfloat
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_Lightfv(c, light, pname, params, 4);
 }
 void Hook_GLLightModelf(GLcontext context, GLenum pname, GLfloat param)
@@ -42,6 +48,7 @@ void Hook_GLLightModelf(GLcontext context, GLenum pname, GLfloat param)
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_LightModelfv(c, pname, &param, 1);
 }
 void Hook_GLLightModelfv(GLcontext context, GLenum pname, const GLfloat *params)
@@ -51,6 +58,7 @@ void Hook_GLLightModelfv(GLcontext context, GLenum pname, const GLfloat *params)
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_LightModelfv(c, pname, params, 4);
 }
 void Hook_GLMaterialf(GLcontext context, GLenum face, GLenum pname, GLfloat param)
@@ -60,6 +68,7 @@ void Hook_GLMaterialf(GLcontext context, GLenum face, GLenum pname, GLfloat para
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_Materialfv(c, face, pname, &param, 1);
 }
 void Hook_GLMaterialfv(GLcontext context, GLenum face, GLenum pname, const GLfloat *params)
@@ -69,6 +78,7 @@ void Hook_GLMaterialfv(GLcontext context, GLenum face, GLenum pname, const GLflo
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_Materialfv(c, face, pname, params, 4);
 }
 void Hook_GLGetLightfv(GLcontext context, GLenum light, GLenum pname, GLfloat *params)
@@ -96,6 +106,7 @@ void Hook_GLColorMaterial(GLcontext context, GLenum face, GLenum mode)
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_ColorMaterial(c, face, mode);
 }
 void Hook_GLNormalPointer(GLcontext context, GLenum type, GLsizei stride, const GLvoid *pointer)
@@ -115,6 +126,7 @@ void Hook_GLTexGeni(GLcontext context, GLenum coord, GLenum mode, GLenum map)
     (void) context;
     if ((c = (struct Core *) context) == NULL)
         return;
+    Rgltab_Arm(c);
     Core_TexGeni(c, coord, mode, map);
 }
 

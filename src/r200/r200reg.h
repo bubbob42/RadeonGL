@@ -447,6 +447,52 @@
 #define   R_TXC_CLAMP_0_1         (1UL << 12)    /* in TXCBLEND2 / TXABLEND2 */
 #define   R_TXC_OUTPUT_REG_R0     (1UL << 16)
 #define   R_TXC_TFACTOR_SEL_SHIFT 0      /* in TXCBLEND2 / TXABLEND2 */
+/* GL 1.3 phase 1 (src/core/tex13.c, 2026-11-12; Mesa 21.3 r200_reg.h) */
+#define   R_MIN_FILTER_MASK       (15UL << 1)
+#define   R_MIN_FILTER_ANISO_NEAREST          (8UL << 1)
+#define   R_MIN_FILTER_ANISO_LINEAR           (9UL << 1)
+#define   R_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST (10UL << 1)
+#define   R_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR  (11UL << 1)
+#define   R_MAX_ANISO_SHIFT       5      /* 0 1:1, 1 2:1, 2 4:1, 3 8:1, 4 16:1 */
+#define   R_MAX_ANISO_MASK        (7UL << 5)
+#define   R_CLAMP_S_SHIFT         23     /* 0 wrap, 1 mirror, 2 clamp last, 4 clamp border */
+#define   R_CLAMP_T_SHIFT         27
+#define   R_CLAMP_MASK            7UL
+#define   R_CLAMP_WRAP            0UL
+#define   R_CLAMP_MIRROR          1UL
+#define   R_CLAMP_LAST            2UL
+#define   R_CLAMP_BORDER          4UL
+#define   R_TXFORMAT_WIDTH_MASK   (15UL << 8)
+#define   R_TXFORMAT_HEIGHT_MASK  (15UL << 12)
+#define   R_TXFORMAT_F5_WIDTH_SHIFT  16  /* cube face 5 */
+#define   R_TXFORMAT_F5_HEIGHT_SHIFT 20
+#define   R_TXFORMAT_CUBIC_MAP_ENABLE (1UL << 30)
+#define   R_MIN_MIP_LEVEL_SHIFT   12     /* in TXFORMAT_X */
+#define   R_MIN_MIP_LEVEL_MASK    (15UL << 12)
+#define   R_TEXCOORD_CUBIC_ENV    (1UL << 16)
+#define   R_LOD_BIAS_MASK         0xfff80000UL
+#define   R_LOD_BIAS_FIXED_ONE    0x08000000L
+#define R_PP_CUBIC_FACES_0      0x2c18   /* faces 1..4: log2 w | log2 h << 4, at 8 n - 8 */
+#define R_PP_CUBIC_OFFSET_F1_0  0x2d04   /* faces 1..5 at + 4 (f - 1), unit at + 0x18 */
+#define   R_TXC_BIAS_ARG_A        (1UL << 17)    /* x - 0.5 */
+#define   R_TXC_SCALE_ARG_A       (1UL << 18)    /* x * 2 */
+#define   R_TXC_NEG_ARG_A         (1UL << 19)    /* -x */
+#define   R_TXC_BIAS_ARG_B        (1UL << 21)
+#define   R_TXC_SCALE_ARG_B       (1UL << 22)
+#define   R_TXC_NEG_ARG_B         (1UL << 23)
+#define   R_TXC_COMP_ARG_A        (1UL << 16)
+#define   R_TXC_COMP_ARG_C        (1UL << 24)
+#define   R_TXC_BIAS_ARG_C        (1UL << 25)
+#define   R_TXC_SCALE_ARG_C       (1UL << 26)
+#define   R_TXC_NEG_ARG_C         (1UL << 27)
+#define   R_TXC_OP_DOT3           (4UL << 28)
+#define   R_TXC_OP_MASK           (7UL << 28)
+#define   R_TXC_SCALE_SHIFT       8      /* TXCBLEND2 / TXABLEND2: 0 1x, 1 2x, 2 4x */
+#define   R_TXC_OUTPUT_REG_SHIFT  16     /* register n + 1 */
+#define   R_TXA_DOT_ALPHA         (1UL << 20)    /* TXABLEND2: alpha takes the dot product */
+#define   R_TXC_ARG_SPECULAR_COLOR 6UL
+#define   R_TXA_ARG_SPECULAR_ALPHA 6UL
+#define R_PP_TFACTOR_STRIDE     4
 #define R_RB3D_BLENDCOLOR       0x3218
 #define R_RB3D_ABLENDCNTL       0x321c
 #define R_RB3D_CBLENDCNTL       0x3220

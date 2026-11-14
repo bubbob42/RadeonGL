@@ -1,0 +1,28 @@
+; GLCompatNull -- GLCompat through the RadeonGL minigl.library on the null
+; card (uaegfx in FS-UAE, 2026-11-12), for GL 1.3 phase 1's Tex13Cases and
+; everything before them. A bitmap context reaches the null card only when
+; asked (SetEnv RadeonGLCard n; without it the library refuses, so a program
+; learns nothing would be drawn). Nothing is drawn there, so the pixel
+; checks FAIL by design; what it checks is the 68k build: every packet
+; passes the library's checker ("checker errors: 0"), and the program ends.
+; The pictures: gmake test (test_tex13) on the Mac, GLCompat on the card.
+; Needs: gmake glsmoke.
+; LIMIT 300
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLCard n
+SetEnv RadeonGLLog DEV:Test/glcompat.log
+Echo "=== GLCompat DEPTH=32 NOLOOP ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLCompat DEPTH=32 NOLOOP >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+UnSetEnv RadeonGLCard
+UnSetEnv RadeonGLLog
+Echo "=== the library's log ===" >>DEV:Test/auto.log
+Type DEV:Test/glcompat.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

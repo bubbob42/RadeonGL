@@ -235,6 +235,8 @@ static LONG EmitTexture(struct Core *c, ULONG u)
     r.format_x = R_LOD_BIAS_CORRECTION;
     r.multi = 0;
     r.offset = t->gpu;
+    if (c->tex_x)
+        Tex13_TexRegs(c, u, t, &r);     /* phase-1 parameters, cube maps, LOD bias (tex13.c) */
     /* R2E_Texture's three packets, each only when it differs */
     sh = c->hw_tex[u];
     if (sh[0] != r.filter || sh[1] != r.format || sh[2] != r.format_x || sh[3] != r.size
@@ -285,8 +287,10 @@ static LONG EmitCombiner(struct Core *c, ULONG units)
     struct CoreTex *t;
     LONG e;
 
+    if ((units & ~3UL) || (c->comb_x & units))
+        return Tex13_Combiner(c, units);    /* units above 1, GL_COMBINE (tex13.c) */
     e = R2_OK;
-    for (s = 0; s < CORE_UNITS; s++)
+    for (s = 0; s < CORE_NARROW; s++)
     {
         prevc = (s == 0) ? R_TXC_ARG_DIFFUSE_COLOR : R_TXC_ARG_R0_COLOR;
         preva = (s == 0) ? R_TXA_ARG_DIFFUSE_ALPHA : R_TXA_ARG_R0_ALPHA;
@@ -348,6 +352,8 @@ static ULONG PpCntl(struct Core *c, ULONG units)
     for (u = 0; u < CORE_UNITS; u++)
         if (units & (1UL << u))
             v |= (R_TEX_0_ENABLE << u) | (R_TEX_BLEND_0_ENABLE << u);
+    if ((units & ~3UL) || (c->comb_x & units))
+        v = Tex13_PpCntl(c, v, units);      /* its stages, compacted (tex13.c) */
     if (c->enables & EN_ALPHA_TEST)
         v |= R_ALPHA_TEST_ENABLE;
     return v | c->x_pp;             /* FOG_ENABLE (Core_Extras) */
@@ -362,6 +368,8 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
     if (units == c->hw_units && !(c->dirty & D_VTXFMT))
         return;
     fmt1 = ((units & 1) ? 2UL : 0) | ((units & 2) ? 2UL << 3 : 0);
+    if (c->wide_on)
+        fmt1 = Tex13_Fmt1(c, units);        /* units above 1, cube maps' three (tex13.c) */
     /* COMP_SEL names the outputs TCL COMPUTES: the lit colour (lighting
      * on) and transformed texture coordinates (a texture matrix or texgen).
      * Neither is in the core yet, so colour and coordinates pass through.

@@ -86,6 +86,11 @@ void Core_Enable(struct Core *c, ULONG cap, ULONG on)
     }
     if (cap == GL_TEXTURE_2D)
     {
+        if (c->x_route)
+        {
+            Tex13_Enable2D(c, on);      /* units above 1, cube maps (tex13.c) */
+            return;
+        }
         if ((c->tex_enabled[c->active_unit] != 0) != (on != 0))
         {
             c->tex_enabled[c->active_unit] = on ? 1 : 0;
@@ -117,7 +122,7 @@ ULONG Core_IsEnabled(struct Core *c, ULONG cap)
     ULONG bit;
 
     if (cap == GL_TEXTURE_2D)
-        return c->tex_enabled[c->active_unit];
+        return c->x_route ? ((c->en_2d >> c->active_unit) & 1UL) : c->tex_enabled[c->active_unit];
     if (cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T)
         return Core_TexGenEnabled(c, cap);
     bit = Bit(cap);
@@ -441,6 +446,8 @@ void Core_ActiveTexture(struct Core *c, ULONG unit)
         return;
     }
     c->active_unit = unit - GL_TEXTURE0_ARB;
+    if (c->active_unit >= CORE_NARROW || c->x_route)
+        Tex13_Update(c);            /* x_route follows the active unit (tex13.c) */
 }
 
 void Core_ClientActiveTexture(struct Core *c, ULONG unit)
@@ -457,21 +464,18 @@ void Core_TexEnvi(struct Core *c, ULONG target, ULONG pname, LONG param)
 {
     ULONG u;
 
-    if (target != GL_TEXTURE_ENV || pname != GL_TEXTURE_ENV_MODE)
+    if (target != GL_TEXTURE_ENV || pname != GL_TEXTURE_ENV_MODE
+        || ((ULONG) param != GL_MODULATE && (ULONG) param != GL_REPLACE
+            && (ULONG) param != GL_DECAL && (ULONG) param != GL_BLEND
+            && (ULONG) param != GL_ADD))
     {
-        Core_Error(c, GL_INVALID_ENUM);
-        return;
-    }
-    if ((ULONG) param != GL_MODULATE && (ULONG) param != GL_REPLACE
-        && (ULONG) param != GL_DECAL && (ULONG) param != GL_BLEND
-        && (ULONG) param != GL_ADD)
-    {
-        Core_Error(c, GL_INVALID_ENUM);
+        Tex13_TexEnvi(c, target, pname, param);     /* GL_COMBINE and its values (tex13.c) */
         return;
     }
     u = c->active_unit;
     if (c->tex_env[u] == (ULONG) param)
         return;
     c->tex_env[u] = (ULONG) param;
+    c->comb_x &= ~(1UL << u);
     c->dirty |= D_COMBINE;
 }

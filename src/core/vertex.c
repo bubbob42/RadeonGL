@@ -70,9 +70,9 @@ static void Open(struct Core *c)
     c->vptr = p;
     c->vlimit = (p != NULL) ? p + c->vtx_dw * CORE_IMMD_VERTS : NULL;
     c->nverts = 0;
-    if (c->vnorm)
+    if (c->vslow)
     {
-        /* lit: every vertex to Emit's slow branch, which knows the limit */
+        /* lit or wide: every vertex to Emit's slow branch, which knows the limit */
         c->vlimit_lit = c->vlimit;
         c->vlimit = p;
     }
@@ -93,7 +93,7 @@ static void Close(struct Core *c, ULONG n)
 void Vtx_Split(struct Core *c)
 {
     ULONG carry[4];     /* vertex indices to carry, or ~0 for the first vertex */
-    ULONG save[4 * 16];
+    ULONG save[4 * 32]; /* a slow vertex has up to 25 dwords (core.h lit_first) */
     ULONG keep;
     ULONG ncarry;
     ULONG n;
@@ -187,6 +187,8 @@ void Core_Begin(struct Core *c, ULONG mode)
     units = Core_UnitsOn(c);
     c->units_on = units;
     c->vtx_dw = 4 + c->x_vdw + ((units & 1) ? 2 : 0) + ((units & 2) ? 2 : 0);   /* x_vdw: a normal */
+    if (c->wide_on)
+        c->vtx_dw = Tex13_Dw(c, units);     /* units above 1, cube maps (tex13.c) */
     c->prim = mode;
     c->hwprim = Vtx_HwPrim(mode);
     if (CORE_SCISSOR_EMPTY(c))
@@ -246,9 +248,9 @@ static void Emit(struct Core *c, ULONG x, ULONG y, ULONG z)
         return;
     if (p >= c->vlimit)
     {
-        if (c->vnorm)
+        if (c->vslow)
         {
-            /* lighting: its own limit and vertex layout (Open) */
+            /* lighting, wide: its own limit and vertex layout (Open) */
             if (p >= c->vlimit_lit)
             {
                 Vtx_Split(c);
@@ -402,6 +404,11 @@ static void EmitLit(struct Core *c, ULONG *p, ULONG x, ULONG y, ULONG z)
     ULONG n;
     ULONG k;
 
+    if (c->wide_on)
+    {
+        Tex13_Emit(c, p, x, y, z);  /* units above 1, cube maps, lit or not (tex13.c) */
+        return;
+    }
     b[0] = x;
     b[1] = y;
     b[2] = z;

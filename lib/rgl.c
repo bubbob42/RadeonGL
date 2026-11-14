@@ -87,6 +87,7 @@ const char Back_IdString[] =
 #define DUMP_MAGIC  0x5232444dUL    /* 'R2DM' */
 
 #include "rglint.h"
+#include "rgltable.h"
 
 GLcontext Rgl_CurrentContext = 0;
 struct Rgl *rgl_list = NULL;            /* every context, newest first (W3; rglcompat.c reads it) */
@@ -1577,7 +1578,7 @@ void Hook_GLColorMask(GLcontext context, GLboolean red, GLboolean green, GLboole
 }
 
 void Hook_GLPolygonOffset(GLcontext context, GLfloat factor, GLfloat units) { (void) context; GUARD; Core_PolygonOffset(C, factor, units); }
-void Hook_GLPolygonMode(GLcontext context, GLenum face, GLenum mode) { (void) context; GUARD; Core_PolygonMode(C, face, mode); NOTE("glPolygonMode", mode); }
+void Hook_GLPolygonMode(GLcontext context, GLenum face, GLenum mode) { (void) context; GUARD; Rgltab_PolygonMode(C, face, mode); NOTE("glPolygonMode", mode); }
 void Hook_GLPointSize(GLcontext context, GLfloat size) { (void) context; GUARD; Core_PointSize(C, size); NOTE("glPointSize", 0); }
 void Hook_GLHint(GLcontext context, GLenum target, GLenum mode) { (void) context; GUARD; Core_Hint(C, target, mode); NOTE("glHint", target); }
 

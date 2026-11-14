@@ -92,7 +92,7 @@ static void FetchAttribs(struct Core *c, ULONG i)
             Core_Color4f(c, Comp(p, c->ca.type, 0), Comp(p, c->ca.type, 1),
                          Comp(p, c->ca.type, 2), c->ca.size == 4 ? Comp(p, c->ca.type, 3) : 1.0f);
     }
-    for (u = 0; u < CORE_UNITS; u++)
+    for (u = 0; u < CORE_NARROW; u++)     /* wider draws go tex13.c's way */
     {
         if (!c->ta[u].enabled)
             continue;

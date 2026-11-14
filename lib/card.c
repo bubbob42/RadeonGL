@@ -359,6 +359,56 @@ static BOOL Reset3D(struct Card *k)
 /* Lock bitmap i: mem, bpr and (once the chip is known) gpu. TRUE when it is
  * on the board, or with any_place also when P96 has it elsewhere (the
  * texel writes of a heap off the board go to its backup). */
+#ifdef RGL_TRACE
+/* The trace build: WHERE(n, v) as "r <count> <n> <v>" through exec's
+ * RawPutChar (LVO -516, the route of kprintf and MuForce: 9600 baud, about
+ * 1 ms a character, a busy wait -- callable inside locks and Forbid). The
+ * first CARD_TRACE_MAX lines, then one in 256: a frame of Pelt writes a few
+ * dozen, and the freeze comes in the first frames. */
+#define CARD_TRACE_MAX 8000UL
+static ULONG trace_n = 0;
+
+static void TraceChar(ULONG c)
+{
+    register ULONG d0 __asm("d0") = c;
+    register struct ExecBase *a6 __asm("a6") = SysBase;
+
+    __asm__ __volatile__ ("jsr -516(%%a6)"
+                          : "+d" (d0)
+                          : "a" (a6)
+                          : "d1", "a0", "a1", "cc", "memory");
+}
+
+static void TraceNum(ULONG v, ULONG base, int digits)
+{
+    char buf[12];
+    int i;
+
+    for (i = digits; i-- > 0;)
+    {
+        buf[i] = "0123456789abcdef"[v % base];
+        v /= base;
+    }
+    for (i = 0; i < digits; i++)
+        TraceChar((ULONG) (UBYTE) buf[i]);
+}
+
+void Card_Trace(ULONG n, ULONG v)
+{
+    trace_n++;
+    if (trace_n > CARD_TRACE_MAX && (trace_n & 255) != 0)
+        return;
+    TraceChar('r');
+    TraceChar(' ');
+    TraceNum(trace_n, 10, 6);
+    TraceChar(' ');
+    TraceNum(n, 10, 3);
+    TraceChar(' ');
+    TraceNum(v, 16, 8);
+    TraceChar('\n');
+}
+#endif
+
 static BOOL LockBm(struct Card *k, ULONG i, BOOL any_place)
 {
     struct CardBm *b;
@@ -367,7 +417,9 @@ static BOOL LockBm(struct Card *k, ULONG i, BOOL any_place)
     b = &k->b[i];
     if (b->bm == NULL || b->lock != 0)
         return FALSE;
+    WHERE(50 + i, any_place);
     b->lock = p96LockBitMap(b->bm, (UBYTE *) &ri, sizeof(ri));
+    WHERE(55 + i, b->lock);
     if (b->lock == 0)
         return FALSE;
     b->mem = (UBYTE *) ri.Memory;
@@ -393,7 +445,10 @@ static void UnlockBm(struct Card *k, ULONG i)
 
     b = &k->b[i];
     if (b->bm != NULL && b->lock != 0)
+    {
+        WHERE(60 + i, b->lock);
         p96UnlockBitMap(b->bm, b->lock);
+    }
     b->lock = 0;
     b->mem = NULL;
 }
@@ -796,7 +851,9 @@ static LONG CopyCommands(struct Card *k, ULONG n)
         }
         if (i + c > n)
             return R2_EARG;                     /* a packet past the end */
+        WHERE(83, c);
         p = R2Cs_Room(&k->ring.cs, c);
+        WHERE(84, p);
         if (p == NULL)
             return k->ring.cs.error;
         /* the source in a local: through k the compiler reloaded it for
@@ -844,7 +901,9 @@ static BOOL StopCp(struct Card *k, BOOL closing)
     ULONG tf;
     ULONG reset;
 
+    WHERE(85, closing);
     tf = R2Cp_Stop(&k->hw, &k->saved, TIMEOUT_US, &reset);
+    WHERE(86, tf);
     if (reset)
         k->cp_resets++;
     if (tf != R2_OK && !Reset3D(k))
@@ -1072,6 +1131,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         return R2_OK;
     }
     DisplayPriority(k);
+    WHERE(70, present);
 
     /* 1c. 2026-11-07: a GL screen behind another screen is not drawn -- no
      * one sees it, and its 3D work and copy load the board's memory while
@@ -1110,6 +1170,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     }
 
     /* 3. the present, at the screen bitmap's address of this lock */
+    WHERE(71, n);
     i = n;
     if (present && k->kind == CARD_KIND_BITMAP)
         k->presents++;              /* drawn into the program's bitmap already: nothing to copy */
@@ -1150,6 +1211,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         }
     }
     n = (ULONG) (k->cs.ptr - k->cmd);
+    WHERE(72, n);
     if (k->cs.error != R2_OK)
     {
         k->lost = CARD_LOST_EMIT;
@@ -1192,11 +1254,13 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
 
     /* 5. the CP, on the ring at this lock's address (its microcode again
      * after a reset) */
+    WHERE(73, 0);
     if (R2Cp_WaitIdle(&k->hw, TIMEOUT_US) != R2_OK)
     {
         k->lost = CARD_LOST_CP;
         goto unlock;
     }
+    WHERE(74, k->reload_ucode);
     if (k->reload_ucode)
     {
         R2Cp_LoadMicrocode(&k->hw, R2Cp_Microcode);
@@ -1206,6 +1270,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
             goto unlock;
         }
         k->reload_ucode = 0;
+        WHERE(75, 0);
     }
     WHERE(5, present);
     ring_gpu = Align4k(k->b[CARD_RING].gpu);
@@ -1217,6 +1282,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         k->lost = CARD_LOST_CP;
         goto stop;
     }
+    WHERE(76, ring_gpu);
     k->ring.kick = 2048;
 
 #ifdef CARD_MOVE16
@@ -1243,10 +1309,14 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         src = k->staging + k->copied / 4;
         ToVram(k, dst, src, (k->core->stream_pos - k->copied) / 4);
         k->copied = k->core->stream_pos;
+        WHERE(78, k->copied);
     }
     /* the upload cache's new entries, from its mirror */
     if (k->core->ustaged && (k->core->udirty_n != 0 || k->core->udirty_all))
+    {
         CopyUCache(k);
+        WHERE(79, k->core->udirty_n);
+    }
     WHERE(7, n);
     e = CopyCommands(k, n);
     if (e == R2_OK)
@@ -1261,6 +1331,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
          * Radeon draws on while the 68k builds the next frame; the next
          * lock settles it */
         e = R2Ring_Commit(&k->ring);
+        WHERE(80, seq);
         if (e == R2_OK)
         {
             k->pending = 1;
@@ -1270,9 +1341,11 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         }
     }
     t0 = HwClock(k);
+    WHERE(81, seq);
     if (e == R2_OK)
         e = R2Ring_WaitFence(&k->ring, seq);
     us = HwClock(k) - t0;
+    WHERE(82, us);
     if (us > k->fence_us_max)
         k->fence_us_max = us;
     if (e == R2_OK)

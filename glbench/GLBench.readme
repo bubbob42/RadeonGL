@@ -1,0 +1,79 @@
+Short:        Stress benchmark for minigl.library
+Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
+Author:       marcus.gerards@googlemail.com (Marcus Gerards)
+Type:         util/moni
+Version:      0.1
+Architecture: m68k-amigaos >= 3.1
+Distribution: Aminet
+Requires:     minigl.library 29.1 (RadeonGL 0.12 or later recommended);
+              a 68020 or better with an FPU
+Kurz:         Stresstest-Benchmark fuer minigl.library
+
+GLBench 0.1  --  8 November 2026
+
+
+WHAT IT IS
+
+A stress benchmark for minigl.library 29.1. Seven scenes, each leaning on
+another part of the 3D card, and one score: five keep their shapes on the
+card and leave it the work, two measure the bus. Together the scenes use
+every feature RadeonGL, the minigl.library for the ATI Radeon 8500 to
+9250, offers. Burn runs one scene for ten minutes and checks all the while
+that the picture stays right.
+
+
+THE SCENES
+
+  1 Pelt      a furred ring in a breeze: 20 alpha-tested, blended shells
+              from two textures -- the fill rate
+  2 Lanterns  eight lights over a waving banner kept on the card, two
+              passes, fog -- the card's transform and lighting
+  3 Chrome    sphere-mapped bodies kept on the card, plinths from nested
+              display lists, labels by polygon offset -- texgen
+  4 Embers    soft sparks in four quarters, each blending another way
+              (add, subtract, min, max) -- blending, points, wide lines
+  5 Plasma    a plasma sent every frame, a turning palette, every texture
+              format and environment -- texture uploads
+  6 Swarm     1920 darts kept on the card, the last third for red/cyan
+              glasses -- geometry
+  7 Mirror    every frame read back from the card and drawn again -- the
+              bus, both ways
+
+Frames are counted, not timed: every machine draws the same frames.
+
+
+THE SCORE
+
+Each scene's frames a second against a reference machine's (an A4000
+with a 68060 and a Radeon 9200 behind a Mediator, 640 x 480 x 16); the
+geometric mean of the seven ratios times 1000. In 0.1 the reference
+figures are provisional. The result goes to RAM:GLBench-Result.txt as
+well, with the machine, the library and the screen mode.
+
+
+BURN
+
+Pelt for ten minutes. Every 250 frames one fixed frame is drawn, read back
+and compared with the first: a card running too hot or a bus losing data
+shows up as a picture error. The Radeon has no temperature sensor;
+GLBench reads none.
+
+
+INSTALLING
+
+None: unpack the archive anywhere and double-click GLBench or GLBench-Burn.
+They choose the 68040/68060 or the 68020/68030 build themselves. From a
+Shell, C/GLBench takes options (scenes, frames, screen size, a window,
+pictures of every scene): see GLBench.guide.
+
+
+SOURCE CODE
+
+In the drawer Source (no icon), and with RadeonGL:
+  https://github.com/bubbob42/RadeonGL
+It builds with m68k-amigaos-gcc and the MiniGL 29.1 SDK.
+
+
+HISTORY
+
+0.1  First version: seven scenes, the score, Burn with picture checks.

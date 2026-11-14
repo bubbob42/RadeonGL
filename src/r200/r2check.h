@@ -100,6 +100,8 @@ struct R2ChkTex
     ULONG filter, format, size, pitch, offset;
     ULONG have_offset;
     ULONG format_x;
+    ULONG face[5];          /* a cube map's faces 1..5 (PP_CUBIC_OFFSET_Fn) */
+    ULONG have_face;        /* bit n - 1: face n written */
 };
 
 struct R2ChkAos

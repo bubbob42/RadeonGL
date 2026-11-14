@@ -273,7 +273,7 @@ void Core_LightModelfv(struct Core *c, ULONG pname, const float *v, ULONG n)
             c->lm_twoside = (v[0] != 0.0f) ? 1UL : 0UL;
             break;
         default:
-            Core_Error(c, GL_INVALID_ENUM);
+            Tex13_LightModel(c, pname, v[0]);   /* GL_LIGHT_MODEL_COLOR_CONTROL (tex13.c) */
             return;
     }
     c->light_dirty |= LD_MODEL;
@@ -632,8 +632,10 @@ void Light_Emit(struct Core *c)
         v[0] |= LM_LIGHTING;
     if (c->lm_local || c->tg_sphere)
         v[0] |= LM_LOCAL_VIEWER;    /* a sphere map needs it (Mesa r200UpdateLocalViewer) */
-    if (c->enables & EN_NORMALIZE)
-        v[0] |= LM_NORMALIZE;
+    if ((c->enables & EN_NORMALIZE) || c->rescale)
+        v[0] |= LM_NORMALIZE;       /* GL_RESCALE_NORMAL: for unit normals the same result */
+    if (c->spec_sep)
+        v[0] &= ~LM_COMBINE;        /* the specular colour apart: PP_CNTL adds it after texturing */
     if (c->lm_twoside)
         v[0] |= LM_TWOSIDE;
     v[1] = Sources(c);
@@ -718,6 +720,15 @@ void Core_Extras(struct Core *c)
         c->x_out0 = R_VTX_FP_RGBA << (R_VTX_COLOR_0_SHIFT + 2);
         c->x_pp = 0x00400000UL;                     /* FOG_ENABLE */
         c->x_ucp = c->fog_tcl;
+    }
+    if (c->spec_sep && (c->enables & EN_LIGHTING))
+    {
+        /* separate specular (tex13.c): the TCL's second colour, added after
+         * texturing (Mesa r200UpdateSpecular); with fog it carries the factor
+         * in its alpha as before */
+        c->x_compsel |= R_OUTPUT_COLOR_1;
+        c->x_out0 = R_VTX_FP_RGBA << (R_VTX_COLOR_0_SHIFT + 2);
+        c->x_pp |= 0x00200000UL;                    /* SPECULAR_ENABLE */
     }
     c->x_se = c->wide_line ? (1UL << 20) : 0;       /* WIDELINE_ENABLE */
     c->x_eye = ((c->enables & (EN_LIGHTING | EN_FOG)) || c->tg_eyepos) ? 1UL : 0UL;

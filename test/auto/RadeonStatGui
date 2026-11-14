@@ -1,0 +1,58 @@
+; RadeonStatGui -- RadeonStat where there is no Radeon (FS-UAE's board is
+; uaegfx). The Shell lines must refuse with rc 20, the window must refuse
+; with a requester and touch nothing; SIMULATE opens the window with
+; made-up readings (a load climbing 0-100-0 % every 12 s, 64 MB card,
+; 1920 x 1080 at 50 Hz = 123.7 MHz: the DVI warning shows). Grabs of each
+; step; Pause by its underscore key, the window closed by its close gadget.
+; Both builds.
+; LIMIT 200
+FailAt 1000
+Wait 10
+Echo "=== Shell, no Radeon ===" >DEV:Test/auto.log
+DEV:Probe/C/RadeonStat COUNT=1 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== Shell, SIMULATE ===" >>DEV:Test/auto.log
+DEV:Probe/C/RadeonStat COUNT=2 SIMULATE >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== window, no Radeon: a requester ===" >>DEV:Test/auto.log
+Run >NIL: DEV:Probe/C/RadeonStat GUI
+Wait 5
+DEV:Test/Grab 0 0 800 600 DEV:Test/rstat-norad.ppm
+DEV:Test/InputPoke WIN="RadeonStat" >>DEV:Test/auto.log
+Echo "rc=$RC (0: the requester is up)" >>DEV:Test/auto.log
+; its one gadget is the negative one: left Amiga + B
+DEV:Test/InputPoke WIN="RadeonStat" KEY=53 QUAL=64
+Wait 3
+DEV:Test/InputPoke WIN="RadeonStat" >>DEV:Test/auto.log
+Echo "rc=$RC (5: gone)" >>DEV:Test/auto.log
+Echo "=== window, SIMULATE (GCC) ===" >>DEV:Test/auto.log
+Run >NIL: DEV:Probe/C/RadeonStat GUI SIMULATE
+Wait 8
+DEV:Test/InputPoke WIN="RadeonStat" >>DEV:Test/auto.log
+Echo "rc=$RC (0: the window is up)" >>DEV:Test/auto.log
+DEV:Test/Grab 0 0 800 600 DEV:Test/rstat-sim-1.ppm
+Wait 7
+DEV:Test/Grab 0 0 800 600 DEV:Test/rstat-sim-2.ppm
+; Pause: its underscore key P (raw 25)
+DEV:Test/InputPoke WIN="RadeonStat" KEY=25
+Wait 4
+DEV:Test/Grab 0 0 800 600 DEV:Test/rstat-sim-paused.ppm
+Wait 3
+DEV:Test/Grab 0 0 800 600 DEV:Test/rstat-sim-paused2.ppm
+DEV:Test/InputPoke WIN="RadeonStat" X=6 Y=5
+Wait 3
+DEV:Test/InputPoke WIN="RadeonStat" >>DEV:Test/auto.log
+Echo "rc=$RC (5: closed)" >>DEV:Test/auto.log
+Echo "=== window, SIMULATE (SAS/C), interval from the Shell ===" >>DEV:Test/auto.log
+Run >NIL: DEV:Probe/C/RadeonStat_sasc GUI SIMULATE INTERVAL=2
+Wait 10
+DEV:Test/InputPoke WIN="RadeonStat" >>DEV:Test/auto.log
+Echo "rc=$RC (0: the window is up)" >>DEV:Test/auto.log
+DEV:Test/Grab 0 0 800 600 DEV:Test/rstat-sasc.ppm
+DEV:Test/InputPoke WIN="RadeonStat" X=6 Y=5
+Wait 3
+DEV:Test/InputPoke WIN="RadeonStat" >>DEV:Test/auto.log
+Echo "rc=$RC (5: closed)" >>DEV:Test/auto.log
+Avail >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

@@ -1,5 +1,5 @@
 /*
- * pcprof.h -- a PC sampler for the test clients (GLBench, GLQuake).
+ * pcprof.h -- a PC sampler for the test clients (GLCost, GLQuake).
  *
  * A child process at a higher priority wakes every interval_us
  * (timer.device) and, with the calling task switched out just then, copies

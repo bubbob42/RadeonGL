@@ -1,0 +1,30 @@
+; GLSmoke13Null -- GLSmoke TEX13 through the RadeonGL minigl.library on the
+; null card (uaegfx in FS-UAE, 2026-11-12): GL 1.3 phase 1 every frame --
+; six texture units, GL_COMBINE with dot3 through the crossbar, a cube map
+; with reflection-map texgen, an ARGB32 texture rewritten every frame,
+; ARGB1555 with border clamp, three units from client arrays. Nothing is
+; drawn there; what it checks is the 68k build: every packet passes the
+; library's checker (its log: "RadeonGL null card", "checker errors: 0"),
+; GL error 0, and the program ends. The pictures: gmake test (test_tex13)
+; on the Mac, GLCompat on the card.
+; Needs: gmake glsmoke.
+; LIMIT 300
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLLog DEV:Test/glsmoke13.log
+Echo "=== GLSmoke TEX13 FRAMES=120 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLSmoke TEX13 FRAMES=120 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== GLSmoke TEX13 DEPTH=32 FRAMES=60 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLSmoke TEX13 DEPTH=32 FRAMES=60 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+UnSetEnv RadeonGLLog
+Echo "=== the library's log (the second run) ===" >>DEV:Test/auto.log
+Type DEV:Test/glsmoke13.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

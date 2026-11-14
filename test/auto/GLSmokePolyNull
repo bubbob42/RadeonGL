@@ -1,0 +1,31 @@
+; GLSmokePolyNull -- GLSmoke with glPolygonMode GL_LINE and GL_POINT (back
+; faces culled) through the RadeonGL minigl.library on the null card
+; (uaegfx in FS-UAE, 2026-11-11). Nothing is drawn there; what it checks is
+; that the polygon-mode way's packets pass the library's checker (its log:
+; "RadeonGL null card", "checker errors: 0") frame after frame, with the
+; texture updates, and that the program ends. The pictures: gmake test
+; (test_sim) on the Mac, GLCompat on the card.
+; Needs: gmake glsmoke.
+; LIMIT 300
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLLog DEV:Test/glsmoke-line.log
+Echo "=== GLSmoke POLYMODE=LINE FRAMES=150 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLSmoke POLYMODE=LINE FRAMES=150 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glsmoke-point.log
+Echo "=== GLSmoke POLYMODE=POINT FRAMES=100 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLSmoke POLYMODE=POINT FRAMES=100 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+UnSetEnv RadeonGLLog
+Echo "=== the library's log, GL_LINE ===" >>DEV:Test/auto.log
+Type DEV:Test/glsmoke-line.log >>DEV:Test/auto.log
+Echo "=== the library's log, GL_POINT ===" >>DEV:Test/auto.log
+Type DEV:Test/glsmoke-point.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

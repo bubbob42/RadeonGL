@@ -9,7 +9,9 @@
  * (MEASURED 2026-11-08; the same layout effect as lib/rgllight.c's the
  * night before). The Makefile links this module last. A static key for
  * unlit layouts GLQuake does not use as well (VertexKey's fall-through)
- * grew the inlined VertexKey and was 0.7% slow again: lit only.
+ * grew the inlined VertexKey and was 0.7% slow again (measured with vsync
+ * on, 2026-11-08): lit only. Since 2026-11-12 also unlit draws with no
+ * texture unit on (GLTron's shadows), through VertexKey's first test.
  */
 #include "core.h"
 #include "coreint.h"
@@ -89,7 +91,7 @@ ULONG Core_StaticKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, ULO
         KeyArray(&c->ca, first, h);
     else
         UMIX(h[0], h[1], c->cur_color);
-    for (u = 0; u < CORE_UNITS; u++)
+    for (u = 0; u < CORE_NARROW; u++)
     {
         if (!(units & (1UL << u)))
             continue;
