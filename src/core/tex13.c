@@ -379,13 +379,16 @@ void Tex13_TexParameter(struct Core *c, ULONG target, ULONG pname, LONG param)
 }
 
 /* A clamp mode for TXFILTER's field: GL's wrap value (the mode texture.c
- * chose for REPEAT and CLAMP stays) */
+ * chose for REPEAT and CLAMP stays). GL_CLAMP_TO_BORDER is CLAMP_GL in
+ * the D3D border mode, as Mesa r200SetTexWrap: CLAMP_BORDER in the OGL
+ * border mode read the border left of the texture and the last texel
+ * right of it (MEASURED, GLSmoke13 T5, 2026-11-14) */
 static ULONG ClampOf(ULONG wrap, ULONG old)
 {
     if (wrap == GL_MIRRORED_REPEAT)
         return R_CLAMP_MIRROR;
     if (wrap == GL_CLAMP_TO_BORDER)
-        return R_CLAMP_BORDER;
+        return R_CLAMP_GL;
     return old;
 }
 
@@ -438,6 +441,8 @@ void Tex13_TexRegs(struct Core *c, ULONG u, struct CoreTex *t, struct R2Tex *r)
         ct = ClampOf(t->wrap_t, (r->filter >> R_CLAMP_T_SHIFT) & R_CLAMP_MASK);
         r->filter = (r->filter & ~((R_CLAMP_MASK << R_CLAMP_S_SHIFT) | (R_CLAMP_MASK << R_CLAMP_T_SHIFT)))
                   | (cs << R_CLAMP_S_SHIFT) | (ct << R_CLAMP_T_SHIFT);
+        if (t->wrap_s == GL_CLAMP_TO_BORDER || t->wrap_t == GL_CLAMP_TO_BORDER)
+            r->filter |= R_BORDER_MODE_D3D;
     }
     /* anisotropy: the aniso filters (Mesa r200SetTexFilter) and the ratio */
     if (t->aniso > 1)
@@ -1713,6 +1718,23 @@ ULONG Tex13_Fmt1(struct Core *c, ULONG units)
         if (units & (1UL << u))
             f |= Comps(c, u) << (3 * u);
     return f;
+}
+
+/* RE_CNTL: STQn_D3D for each drawn cube unit's coordinate set (set u,
+ * as Tex13_Fmt1 lays them out), the rest as R2E_RasterDefaults left it */
+void Tex13_ReCntl(struct Core *c, ULONG units)
+{
+    ULONG d3d;
+    ULONG u;
+
+    d3d = 0;
+    for (u = 0; u < CORE_UNITS; u++)
+        if ((units & c->cube_on) & (1UL << u))
+            d3d |= R_VTX_STQ0_D3D << (2 * u);
+    if (d3d == c->hw_stq_d3d)
+        return;
+    (void) R2E_Reg(c->cs, R_RE_CNTL, R_PERSPECTIVE_ENABLE | R_SCISSOR_ENABLE | d3d);
+    c->hw_stq_d3d = d3d;
 }
 
 void Tex13_Emit(struct Core *c, ULONG *p, ULONG x, ULONG y, ULONG z)

@@ -524,6 +524,7 @@ struct Core
     ULONG spec_sep;                         /* GL_SEPARATE_SPECULAR_COLOR */
     ULONG rescale;                          /* GL_RESCALE_NORMAL */
     ULONG tg_r_mode[CORE_UNITS];            /* glTexGen(GL_R): GL_REFLECTION_MAP ... */
+    ULONG hw_stq_d3d;                       /* RE_CNTL's STQn_D3D bits as last sent (cube maps) */
 };
 
 struct PmWork;
@@ -875,6 +876,7 @@ void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float o
 void  Tex13_Update(struct Core *c);     /* wide_on, vslow, x_route, comb_x, tex_x from the state */
 ULONG Tex13_Dw(struct Core *c, ULONG units);        /* a wide vertex's dwords */
 ULONG Tex13_Fmt1(struct Core *c, ULONG units);      /* SE_VTX_FMT_1 for it */
+void Tex13_ReCntl(struct Core *c, ULONG units);     /* RE_CNTL's STQn_D3D for the cube units */
 void  Tex13_Emit(struct Core *c, ULONG *p, ULONG x, ULONG y, ULONG z);  /* one wide vertex */
 void  Tex13_DrawArrays(struct Core *c, ULONG mode, LONG first, LONG count);
 void  Tex13_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, const void *idx);

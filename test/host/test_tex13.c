@@ -45,6 +45,8 @@ static void Fresh(void)
     struct CoreEnv e;
 
     Core_Free(&core);
+    memset(&core, 0, sizeof(core));     /* Core_Init's promise (core.h) */
+    memset(&e, 0, sizeof(e));           /* alloc_raw and the rest: none */
     memset(vram, 0, VRAM_SIZE);
     R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, 1);
     t.width = W_;
@@ -667,7 +669,8 @@ static void test_sampling_regs(void)
     f = LastReg(R_PP_TXFILTER_0);
     fx = LastReg(R_PP_TXFORMAT_X_0);
     CHECK_HEX((f >> R_CLAMP_S_SHIFT) & 7, R_CLAMP_MIRROR);
-    CHECK_HEX((f >> R_CLAMP_T_SHIFT) & 7, R_CLAMP_BORDER);
+    CHECK_HEX((f >> R_CLAMP_T_SHIFT) & 7, R_CLAMP_GL);     /* border clamp: CLAMP_GL, D3D border mode */
+    CHECK_HEX(f & R_BORDER_MODE_D3D, R_BORDER_MODE_D3D);
     CHECK_HEX((f & R_MAX_ANISO_MASK) >> R_MAX_ANISO_SHIFT, 3);
     CHECK_HEX(f & R_MIN_FILTER_MASK, R_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR);
     CHECK_HEX((f & R_MAX_MIP_LEVEL_MASK) >> R_MAX_MIP_LEVEL_SHIFT, 2);

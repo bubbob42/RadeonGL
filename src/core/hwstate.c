@@ -383,6 +383,12 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
     R2E_VertexFormat(c->cs, R_VTX_Z0 | c->x_fmt0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
                      fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT) | c->x_out0,
                      fmt1, compsel);
+    /* A cube map's third coordinate is r, not q: RE_CNTL's STQn_D3D for its
+     * coordinate set, or the rasterizer hands the sampler s/q, t/q and no r
+     * -- every face read as +Z (MEASURED, GLSmoke13 T4, 2026-11-14; Mesa
+     * set_re_cntl_d3d does the same for cube, 3D and rectangle textures) */
+    if (c->wide_on || c->hw_stq_d3d != 0)
+        Tex13_ReCntl(c, units);
     c->hw_units = units;
     c->dirty &= ~D_VTXFMT;
 }
@@ -457,6 +463,7 @@ static LONG ValidateOnce(struct Core *c)
     {
         R2E_TclDefaults(cs);
         R2E_RasterDefaults(cs);
+        c->hw_stq_d3d = 0;          /* RE_CNTL without them */
         d = D_ALL;                  /* the defaults overwrote every block */
         Hw_Forget(c);
         Light_Reset(c);             /* the lighting controls as the defaults left them */

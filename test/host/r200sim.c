@@ -218,7 +218,7 @@ static int Cmp(ULONG func, ULONG a, ULONG b)
 
 /* One coordinate to a texel index along an axis of n texels for a clamp
  * mode (TXFILTER's field): -1 = the border colour */
-static LONG Wrap(float c, ULONG n, ULONG mode, int npot)
+static LONG Wrap(float c, ULONG n, ULONG mode, int npot, int d3d)
 {
     LONG i;
     LONG m;
@@ -226,6 +226,14 @@ static LONG Wrap(float c, ULONG n, ULONG mode, int npot)
     i = (LONG) (c * (float) n + (c < 0 ? -1.0f : 0.0f));
     if (npot)
         mode = 2;
+    /* the D3D border mode: CLAMP_GL and CLAMP_BORDER read the border on
+     * both sides (Mesa's GL_CLAMP_TO_BORDER). In the OGL mode CLAMP_BORDER
+     * read it left only, the last texel right (MEASURED on the card,
+     * GLSmoke13 T5, 2026-11-14) */
+    if (d3d && (mode == 4 || mode == 6))
+        return (i < 0 || i >= (LONG) n) ? -1 : i;
+    if (mode == 4 && i >= (LONG) n)
+        return (LONG) n - 1;
     switch (mode)
     {
         case 0:                         /* wrap */
@@ -322,8 +330,10 @@ static void Texel(struct Sim *s, ULONG u, float sc, float tc, float rc, float *o
             pitch = (w * cpp + 31) & ~31UL;
         }
     }
-    xi = Wrap(sc, w, (filt >> R_CLAMP_S_SHIFT) & 7, (fmt & R_TXFORMAT_NON_POWER2) != 0);
-    yi = Wrap(tc, h, (filt >> R_CLAMP_T_SHIFT) & 7, (fmt & R_TXFORMAT_NON_POWER2) != 0);
+    xi = Wrap(sc, w, (filt >> R_CLAMP_S_SHIFT) & 7, (fmt & R_TXFORMAT_NON_POWER2) != 0,
+              (filt & R_BORDER_MODE_D3D) != 0);
+    yi = Wrap(tc, h, (filt >> R_CLAMP_T_SHIFT) & 7, (fmt & R_TXFORMAT_NON_POWER2) != 0,
+              (filt & R_BORDER_MODE_D3D) != 0);
     if (xi < 0 || yi < 0)
     {
         bc = REG(s, R_PP_BORDER_COLOR_0 + u * R_PP_TXUNIT_STRIDE);     /* A R G B */
@@ -549,7 +559,10 @@ static void Frag(struct Sim *s, LONG x, LONG y, float z, const float *col, float
         if (pp & (R_TEX_0_ENABLE << u))
         {
             route = (REG(s, R_PP_TXFORMAT_0 + u * R_PP_TXUNIT_STRIDE) >> R_TXFORMAT_ST_ROUTE_SHIFT) & 7;
-            Texel(s, u, st[route][0], st[route][1], st[route][2], r[u]);
+            /* without RE_CNTL's STQn_D3D the third value is q: the
+             * sampler gets no r (the card read every cube face as +Z) */
+            Texel(s, u, st[route][0], st[route][1],
+                  (REG(s, R_RE_CNTL) & (R_VTX_STQ0_D3D << (2 * route))) ? st[route][2] : 1.0f, r[u]);
         }
     Combine(s, col, r, frag);
     if (pp & R_ALPHA_TEST_ENABLE)

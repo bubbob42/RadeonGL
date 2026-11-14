@@ -237,6 +237,7 @@
 #define R_RE_CNTL               0x1c50
 #define   R_SCISSOR_ENABLE        0x2UL
 #define   R_PERSPECTIVE_ENABLE    0x8UL
+#define   R_VTX_STQ0_D3D          0x00010000UL  /* set n: << 2n; s, t, r (not q) interpolated */
 #define R_RB3D_DEPTHXY_OFFSET   0x1d60
 #define R_RB3D_STENCILREFMASK   0x1d7c
 #define   R_STENCIL_MASK_SHIFT    16
@@ -462,6 +463,8 @@
 #define   R_CLAMP_MIRROR          1UL
 #define   R_CLAMP_LAST            2UL
 #define   R_CLAMP_BORDER          4UL
+#define   R_CLAMP_GL              6UL
+#define   R_BORDER_MODE_D3D       (1UL << 31)   /* outside [0, 1] the border colour, both sides */
 #define   R_TXFORMAT_WIDTH_MASK   (15UL << 8)
 #define   R_TXFORMAT_HEIGHT_MASK  (15UL << 12)
 #define   R_TXFORMAT_F5_WIDTH_SHIFT  16  /* cube face 5 */
