@@ -240,6 +240,8 @@ struct Card
     ULONG wait_spin_us;         /* spin this long before the first sleep */
     ULONG wait_sleep_us;        /* each sleep; 0 = spin only */
     ULONG wait_sleeps;          /* sleeps taken, for the log */
+    ULONG wait_last_us;         /* 2026-11-15: the last wait that slept, start to fence (the next one's guess) */
+    ULONG wait_spun_end;        /* waits whose end was spun out, not slept (for the log) */
 };
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);

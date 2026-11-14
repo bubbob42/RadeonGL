@@ -2234,12 +2234,16 @@ static BOOL OpenTimer(struct Card *k, char *why, ULONG whylen)
  * flush), so the other tasks of the same priority run meanwhile.
  * wait_sleep_us 0: the plain spin. Here, behind the hot code, and through
  * r2ring.h only: r2ring.o and CardFlush keep their places. */
+#define WAIT_END_US 600         /* spun before a wait's guessed end */
+
 static LONG WaitFenceSleep(struct Card *k, ULONG seq)
 {
     struct R2Ring *r;
     struct timerequest *t;
     ULONG start;
     ULONG gone;
+    ULONG end;
+    ULONG slept;
     LONG err;
 
     r = &k->ring;
@@ -2258,12 +2262,18 @@ static LONG WaitFenceSleep(struct Card *k, ULONG seq)
         return R2_OK;
     r->stats.stalls++;
     start = HwClock(k);
+    /* 2026-11-15 (Herald: 500 us steps are coarse at the end of a ~6 ms
+     * wait): the end the last wait had is the guess -- sleep until
+     * WAIT_END_US before it, spin the rest; a wait that runs far past the
+     * guess sleeps again */
+    end = (k->wait_last_us > WAIT_END_US) ? k->wait_last_us - WAIT_END_US : 0;
+    slept = 0;
     while (!R2Ring_FenceDone(r, seq))
     {
         gone = HwClock(k) - start;
         if (gone > r->timeout_us)
             return R2_ETIMEOUT;
-        if (gone >= k->wait_spin_us)
+        if (gone >= k->wait_spin_us && (gone < end || gone > end + 2 * WAIT_END_US))
         {
             t = k->treq;
             t->tr_node.io_Command = TR_ADDREQUEST;
@@ -2271,7 +2281,15 @@ static LONG WaitFenceSleep(struct Card *k, ULONG seq)
             t->tr_time.tv_micro = k->wait_sleep_us;
             DoIO((struct IORequest *) t);
             k->wait_sleeps++;
+            slept = 1;
         }
+    }
+    if (slept)
+    {
+        gone = HwClock(k) - start;
+        if (end != 0 && gone >= end)
+            k->wait_spun_end++;
+        k->wait_last_us = gone;
     }
     return R2_OK;
 }

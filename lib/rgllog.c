@@ -256,7 +256,8 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     {
         Put(f, " us (sleeping in steps of "); PutU(f, k->wait_sleep_us);
         Put(f, " us after "); PutU(f, k->wait_spin_us); Put(f, " us: slept ");
-        PutU(f, k->wait_sleeps); Put(f, " times)\n");
+        PutU(f, k->wait_sleeps); Put(f, " times; the end spun out ");
+        PutU(f, k->wait_spun_end); Put(f, " times, the last wait us "); PutU(f, k->wait_last_us); Put(f, ")\n");
     }
     else
         Put(f, " us (spinning: RadeonGLWaitSleep=0)\n");
