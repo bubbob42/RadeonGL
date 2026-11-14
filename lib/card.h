@@ -232,6 +232,14 @@ struct Card
     ULONG nview;                /* views in use */
     ULONG view_opened, view_refused, view_dropped, view_moved;
     char view_why[64];          /* the last refusal, for the log */
+
+    /* 2026-11-15 (Herald): the waits for the Radeon's fence sleep on
+     * timer.device after a short spin, so the other tasks of the same
+     * priority run meanwhile. RadeonGLWaitSleep=us the sleep step (0: the
+     * old spin, no sleep) */
+    ULONG wait_spin_us;         /* spin this long before the first sleep */
+    ULONG wait_sleep_us;        /* each sleep; 0 = spin only */
+    ULONG wait_sleeps;          /* sleeps taken, for the log */
 };
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
