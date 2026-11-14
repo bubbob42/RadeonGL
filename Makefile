@@ -1160,7 +1160,10 @@ CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow
 # 2026-11-14, the panning tear's cure B (docs/concept-panning-tear.md: all
 # of it in cardflip.o, linked late; one call in card.o, +16 bytes in front
 # of the pad): 10684 - 16.
-RGL_DISPATCH_PAD := 10668
+# 2026-11-14, context-fail-log (Reflector: a context refused after the card
+# opened left no log): three calls in rgl.o, +52 bytes in front of the pad;
+# the words are in rgllog.o, behind the hot code: 10668 - 52.
+RGL_DISPATCH_PAD := 10616
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
