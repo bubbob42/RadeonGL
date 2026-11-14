@@ -502,6 +502,24 @@ static BOOL BeamPacket(struct Card *k, struct CardFlip *f, ULONG crtc, ULONG dis
     return TRUE;
 }
 
+/* Step R2 (2026-11-15, docs/step-r-design.md): a refresh measured from
+ * the beam has gone by since the record of third d -- the blank that
+ * takes its pan's offset has begun, in every latch model, so the Radeon
+ * needs no wait and no reference. Only in the record's own mode (crtc,
+ * displayed and total lines, horizontal total), and only once FlipLine
+ * trusts its bound (FLIP_LINE_TRUST samples; FlipLine_SafeUs 0 before):
+ * an upper bound on the line time, so the refresh it gives is no shorter
+ * than the real one (test_flip: 0.95 T tears, the bound does not) */
+static BOOL BeamRefreshed(struct CardFlip *f, ULONG d, ULONG us)
+{
+    if (d >= CARD_FLIP_N || f->h_disp[d] == 0)
+        return FALSE;
+    if (f->line.crtc != f->h_crtc[d] || f->line.disp != f->h_disp[d] || f->line.vtot != f->h_vtot[d]
+        || f->line.htot != f->h_htot[d])
+        return FALSE;
+    return FlipBeam_Refresh(us, FlipLine_SafeUs(&f->line));
+}
+
 /* CardFlip_Safe: this flush draws into a third a pan left, no verdict
  * since. The reference -- the helper's line, or (it read in the blank) a
  * later one read here -- and the Radeon's wait, for CardFlip_Beam to decide
@@ -529,6 +547,12 @@ static void BeamRef(struct Card *k, struct CardFlip *f)
     {
         f->beam_left &= ~(1UL << d);
         f->beam_aged++;
+        return;
+    }
+    if (BeamRefreshed(f, d, FlipUs(FlipTicks() - f->pan_ticks)))
+    {
+        f->beam_left &= ~(1UL << d);    /* step R2: a refresh gone by, no reference needed */
+        f->beam_refresh++;
         return;
     }
     crtc = f->h_crtc[d];
@@ -1766,9 +1790,9 @@ void CardFlip_Log(struct LogOut *f, struct Card *k)
         LogU(f, fl->rest_n != 0 ? fl->rest_us_sum / fl->rest_n : 0UL);
         LogPut(f, "; references taken at the kick ");
         LogU(f, fl->ref_kick);
-        LogPut(f, "; the refresh rule (R2) would have passed ");
-        LogU(f, fl->would_refresh);
-        LogPut(f, " of the Radeon's waits\n  line time <= ns ");
+        LogPut(f, "; no wait by the measured refresh (R2) ");
+        LogU(f, fl->beam_refresh);
+        LogPut(f, "\n  line time <= ns ");
         LogU(f, (FlipLine_Lam(&fl->line) * 125UL) / 32UL);
         LogPut(f, " (a refresh and the guard <= us ");
         LogU(f, FlipLine_SafeUs(&fl->line));
@@ -1908,6 +1932,11 @@ void CardFlip_Beam(struct Card *k)
         f->beam_aged++;
         return;
     }
+    if (BeamRefreshed(f, f->beam_third, us))
+    {
+        f->beam_refresh++;          /* step R2: a refresh gone by since the record */
+        return;
+    }
     /* the mode the wait was built for, read here in the lock as the vsync
      * copy reads its window (a screen switch outside the lock -- a
      * non-present flush is not held back by the hidden-screen test --
@@ -1925,11 +1954,6 @@ void CardFlip_Beam(struct Card *k)
         f->beam_passed++;
         return;
     }
-    /* R1 counts what R2 would pass: a refresh gone by since the record */
-    if (f->line.crtc == f->h_crtc[f->beam_third] && f->line.disp == f->h_disp[f->beam_third]
-        && f->line.vtot == f->h_vtot[f->beam_third] && f->line.htot == f->h_htot[f->beam_third]
-        && FlipBeam_Refresh(us, FlipLine_SafeUs(&f->line)))
-        f->would_refresh++;
     /* the wait first in this flush's part of the ring, and to the CP at
      * once: the engine is idle (the lock), so it stands at the wait while
      * the beam is still before the blank the 68k saw coming -- reached

@@ -2746,8 +2746,10 @@ static void TestRunR(void)
            "built %ld), reference at the kick %ld (%ld), B waited in %ld%% of the frames (%ld%%)\n",
            st.b_late, tears[0], st.ref_kick, tears[2], Pct(st.b_waits, st.frames), Pct(tears[1], st.frames));
 
-    /* R2 (its own build, later): B also passes once FlipLine's refresh has
-     * gone by since the record */
+    /* R2 (branch step-r2, as the library builds it there: cardflip.c
+     * BeamRefreshed in BeamRef and CardFlip_Beam): B also passes once
+     * FlipLine's refresh has gone by since the record, in the record's own
+     * mode. The R1 rows above are the same model without that rule */
     for (ri = 0; ri < R_REGIMES; ri++)
     {
         RunRegime(ri, RX_R2, 2000, &st);

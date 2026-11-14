@@ -157,7 +157,7 @@ struct CardFlip
     ULONG pan_cp_off, pan_cp_off_us;    /* ScrollVPort with the CP stopped: calls, us summed */
     ULONG pan_cp_on, pan_cp_on_us;      /* ... with the CP left running, idle */
     ULONG ref_kick;             /* a record's reference taken at the kick (the pan's line was none) */
-    ULONG would_refresh;        /* the Radeon's waits R2's refresh rule would have passed */
+    ULONG beam_refresh;         /* step R2: no wait, a refresh measured from the beam had gone by */
     ULONG line_samples, line_resets;
     ULONG rest_n, rest_us_min, rest_us_sum;  /* a left third, the pan to the kick into it */
     ULONG pred[3];              /* the line predicted at the kick from sample A: within 32, 128, more */
