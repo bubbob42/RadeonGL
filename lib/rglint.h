@@ -70,6 +70,7 @@ void Port_Count(void);
 
 /* rgllog.c (linked behind the hot code): the delete log and a refusal */
 void Rgl_WriteLog(struct Rgl *r);
+void Rgl_ViewsAttach(struct Rgl *r);    /* cardview.c: R4, the back end's bitmap views */
 void Rgl_Refused(struct Rgl *r, const char *why);
 extern ULONG Rgl_UnimplEarly[];         /* rgl.c: slots called before any context */
 /* rglcompat.c (linked last): glGet with the context's buffering known */

@@ -47,13 +47,27 @@
 #define CORE_LIGHTS       8       /* GL_LIGHT0..7, the R200's TCL lights */
 #define CORE_DRAW_DW      64      /* an array draw's packets after the state */
 #define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
-#define CORE_UCACHE_BYTES (2048UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
-#define CORE_UCACHE_MIN   (1024UL * 1024)  /* when the heap has no room for the above */
+#define CORE_UCACHE_BYTES (4096UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
+#define CORE_UCACHE_MIN   (1024UL * 1024)  /* when the heap has no room for the above (halved down to it) */
+/* 4 MB since 2026-11-14 (the user): Reflector's Billiards model keeps ~2.3 MB
+ * of static arrays, and in 2 MB it missed almost every block in every frame
+ * (290 hits, 1090 misses). A heap or fast RAM without room for 4 MB gets 2,
+ * then 1 (Core_Init, Core_SetVram). */
 /* 2 MB since 2026-11-06: GLQuake's static world (GL_RGL_static_arrays) takes
  * 663 KB, 775 KB with its T-junction points kept; with the models and indices
  * of a frame that overflowed 1 MB, and what did not fit went through the
  * stream every frame (MEASURED A4000D: +10 KB a frame, -6% at 320 x 240). */
-#define CORE_UQ           1024            /* cache entries, oldest first */
+#define CORE_UQ           4096            /* cache entries at the start, oldest first */
+#define CORE_UQ_BYTES     1024            /* the cache has one entry per KB: 4096 at 4 MB */
+#define CORE_UQ_MAX       32768           /* uslot holds an entry's index + 1 in a UWORD */
+/* 2026-11-14 (docs/concept-dynamic-upload-cache.md, the user): the cache
+ * starts at CORE_UCACHE_BYTES and grows when it keeps missing blocks it had
+ * to drop (ucgrow.c): the entries, their lookup table and the mirror grow
+ * with it, CORE_UQ / CORE_USLOTS are only the start's sizes. */
+/* 4096 since 2026-11-14: with the 4 MB cache GLQuake's ~1425 blocks fit by
+ * their bytes, and 1024 entries ran out first -- every allocation then
+ * failed against this frame's entries, and demo1 lost 8.75% (ab_u4m: 9243
+ * misses against 2134). Allocated beside struct Core (core.c), not in it. */
 #define CORE_UDIRTY       32              /* staged: ranges for the back end to copy */
 #define CORE_USLOTS       16384           /* their lookup table (a power of two): a key
                                            * looks in 4 slots from its own (array.c
@@ -134,7 +148,13 @@ struct CoreTex
     ULONG pitch[CORE_MAX_LEVELS];   /* bytes per row of each level */
     ULONG min_filter, mag_filter, wrap_s, wrap_t;
     ULONG use_epoch;        /* the epoch it was last drawn in (0: never) */
+    ULONG view;             /* R4: a back end's bitmap view (texview.c), its handle; 0 none */
 };
+
+/* R4 (texview.c): the formats a back end's bitmap view may have */
+#define CORE_VIEW_RGB565    1
+#define CORE_VIEW_ARGB1555  2
+#define CORE_VIEW_ARGB8888  3
 
 /* Client vertex arrays (glVertexPointer ...). */
 struct CoreArray
@@ -365,10 +385,13 @@ struct Core
     APTR ushadow_mem;               /* as env.alloc_raw (or alloc) gave it (16 bytes more), for env.free */
     ULONG udirty_off[CORE_UDIRTY], udirty_len[CORE_UDIRTY];  /* bytes in the region */
     ULONG udirty_n, udirty_all;
-    struct CoreUEntry uq[CORE_UQ];
+    struct CoreUEntry *uq;          /* uq_mask + 1 entries (ucgrow.c allocates them with the cache) */
     ULONG uq_head, uq_n;
+    ULONG uq_mask;                  /* entries - 1 (a power of two) */
     ULONG ufull_epoch;              /* the epoch in which UAlloc found no room */
-    UWORD uslot[CORE_USLOTS];       /* uq index + 1, 0 = empty */
+    UWORD *uslot;                   /* uslot_mask + 1 slots: uq index + 1, 0 = empty */
+    ULONG uslot_mask;
+    ULONG *ughost;                  /* uq_mask + 1 key pairs the cache dropped or refused (ucgrow.c) */
     ULONG no_ucache;                /* tests, RadeonGLUploadCache=0 */
     /* glHint(GL_RGL_STATIC_ARRAYS_HINT): GL_NICEST keys the world format
      * (positions + two texture units, no colour array) by the arrays'
@@ -465,6 +488,28 @@ struct Core
     struct R2Cs *pm_real;                   /* the stream cs was before */
     struct R2Cs pm_cs;                      /* the collecting stream */
     struct PmWork *pm;                      /* its buffers, allocated at the first glPolygonMode */
+    /* 2026-11-14, R4 (GL_RGL_bitmap_view, texview.c): a back end's board
+     * bitmap as a texture. open checks the view (a struct the back end
+     * knows: lib/rglview.h) for w x h texels, rgba: the alpha byte counts;
+     * gives its first texel's GPU address, the row pitch in bytes, the
+     * format (CORE_VIEW_*) and a handle; 0 = taken, else refused. close
+     * gives the handle back. NULL: no views (GL_INVALID_OPERATION). */
+    LONG (*view_open)(APTR env, const void *view, ULONG w, ULONG h, ULONG rgba,
+                      ULONG *gpu, ULONG *pitch, ULONG *fmt, ULONG *handle);
+    void (*view_close)(APTR env, ULONG handle);
+    ULONG views;                    /* textures that are views now */
+    /* 2026-11-14, the upload cache grows and shrinks (ucgrow.c,
+     * docs/concept-dynamic-upload-cache.md) */
+    ULONG ucache_region;            /* the heap block's bytes (>= ucache_size: a refused mirror) */
+    ULONG ucache_start;             /* the size it started with: never shrunk below */
+    ULONG ucache_max;               /* the largest it reached */
+    ULONG ucache_fixed;             /* RadeonGLUploadCache=n: this size, no growing */
+    ULONG ug_run;                   /* frames in a row with too many capacity misses */
+    ULONG ug_calm;                  /* frames left before a grow may be tried */
+    ULONG ug_last_look, ug_last_cap;    /* the counters at the end of the last frame */
+    ULONG ug_why;                   /* the last grow refused: UG_HEAP, UG_FASTRAM, UG_CEILING */
+    ULONG stat_uc_cap;              /* capacity misses: keys the cache had dropped or refused */
+    ULONG stat_uc_grows, stat_uc_shrinks, stat_uc_refused;
 };
 
 struct PmWork;
@@ -526,6 +571,16 @@ void  Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR e
 /* A staged back end copied the upload cache's dirty ranges (udirty_*, or
  * all of ushadow when udirty_all) to the region in the heap: clear them. */
 void  Core_UCacheCopied(struct Core *c);
+
+/* The upload cache's size (ucgrow.c, 2026-11-14). Core_UCacheFrame: the end
+ * of a frame, the GPU idle (Core_GpuIdle just called): the cache may grow.
+ * Core_UCacheFix: RadeonGLUploadCache=n, n MB and no growing; before the
+ * first draw, after Core_SetVram. Core_UCacheShrink: a texture found no
+ * room; the cache gives half of itself back (waits for the GPU): TRUE if it
+ * did, so the texture may try again. */
+void  Core_UCacheFrame(struct Core *c);
+void  Core_UCacheFix(struct Core *c, ULONG bytes);
+ULONG Core_UCacheShrink(struct Core *c);
 
 /* The heap or the render target moved (P96 moved an unlocked bitmap): every
  * texture's GPU address follows the heap, the target takes its new
@@ -663,6 +718,9 @@ void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
 void Core_TexSubImage2D(struct Core *c, ULONG target, LONG level, LONG x, LONG y,
                         LONG w, LONG h, ULONG format, ULONG type, const void *pixels);
 struct CoreTex *Core_Texture(struct Core *c, ULONG unit);   /* bound and complete, or NULL */
+/* R4 (texview.c): a view's bitmap found at another address by the back end
+ * (at a flush): every texture of that view takes it */
+void Core_TexViewMoved(struct Core *c, ULONG handle, ULONG gpu);
 
 /* --- Frame (frame.c) --------------------------------------------------------------- */
 
@@ -750,9 +808,11 @@ void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const voi
  * GL_EXT_texture_env_add: GL_ADD is implemented (hwstate.c) and accepted. */
 #define CORE_EXTENSIONS "GL_ARB_multitexture GL_MGL_ARB_multitexture GL_EXT_compiled_vertex_array " \
                         "GL_MGL_packed_pixels GL_EXT_texture_env_add " \
-                        "GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag GL_RGL_resize_error"
+                        "GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag GL_RGL_resize_error " \
+                        "GL_RGL_bitmap_view"
 extern const char Core_Extensions[];            /* compat.c: CORE_EXTENSIONS, linked late */
 extern const char Core_GetPad[];                /* get.c: keeps the hot code in place */
+extern const char Core_InitPad[];               /* core.c: the same */
 #define RGL_PALETTE_EXTENSIONS " GL_EXT_color_table GL_EXT_paletted_texture GL_EXT_shared_texture_palette"
 void Core_ColorTable(struct Core *c, ULONG target, ULONG internal, LONG width, ULONG format,
                      ULONG type, const void *data);

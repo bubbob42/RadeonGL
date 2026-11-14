@@ -26,8 +26,14 @@
 #define FENCE_REG   R_SCRATCH_REG2
 #define SCREEN_GPU  0x01000000UL
 
+#define BIG_GPU     0x02000000UL     /* test_ucache_grow's heap: past SCREEN_GPU's range */
+#define BIG_SIZE    0x02000000UL
+
 static ULONG stream[400000];
-static ULONG vram[TEX_SIZE / 4];
+static ULONG vram[BIG_SIZE / 4];
+static ULONG heap_gpu = TEX_GPU;    /* the heap Fresh gives the core (BIG_* for the */
+static ULONG heap_size = TEX_SIZE;  /* growing cache's tests, TEX_* for every other) */
+static ULONG raw_fail_from;         /* HostAllocRaw refuses this many bytes and more (0: never) */
 static struct Core core;
 static struct R2Cs cs;
 static ULONG idle_waits;
@@ -48,6 +54,8 @@ static APTR HostAllocRaw(APTR env, ULONG size)
     APTR p;
 
     (void) env;
+    if (raw_fail_from != 0 && size >= raw_fail_from)
+        return NULL;
     p = malloc(size);
     if (p != NULL)
         memset(p, 0xa5, size);
@@ -100,7 +108,7 @@ static void Fresh(ULONG swap)
     R2Cs_InitBuffer(&cs, stream, sizeof(stream) / 4, swap);
     Target(&t);
     Env(&e);
-    CHECK_INT(Core_Init(&core, &cs, &e, &t, TEX_GPU, vram, TEX_SIZE), GL_NO_ERROR);
+    CHECK_INT(Core_Init(&core, &cs, &e, &t, heap_gpu, vram, heap_size), GL_NO_ERROR);
     idle_waits = 0;
 }
 
@@ -108,9 +116,9 @@ static void Fresh(ULONG swap)
 static LONG Peek(APTR ctx, ULONG gpu, ULONG *val)
 {
     (void) ctx;
-    if (gpu < TEX_GPU || gpu - TEX_GPU + 4 > TEX_SIZE)
+    if (gpu < heap_gpu || gpu - heap_gpu + 4 > heap_size)
         return -1;
-    *val = vram[(gpu - TEX_GPU) / 4];
+    *val = vram[(gpu - heap_gpu) / 4];
     return 0;
 }
 
@@ -120,7 +128,7 @@ static void Cfg(struct R2ChkCfg *cfg)
     cfg->range[0].gpu = COLOR_GPU; cfg->range[0].size = W_ * H_ * 2;
     cfg->range[0].kinds = R2K_COLOR | R2K_TEXTURE;     /* the present reads it */
     cfg->range[1].gpu = DEPTH_GPU; cfg->range[1].size = W_ * H_ * 2; cfg->range[1].kinds = R2K_DEPTH;
-    cfg->range[2].gpu = TEX_GPU;   cfg->range[2].size = TEX_SIZE;
+    cfg->range[2].gpu = heap_gpu;  cfg->range[2].size = heap_size;
     cfg->range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;    /* textures, the stream */
     cfg->range[3].gpu = SCREEN_GPU; cfg->range[3].size = 1024 * 768 * 4; cfg->range[3].kinds = R2K_COLOR;
     cfg->nranges = 4;
@@ -263,7 +271,7 @@ static ULONG HeapV(ULONG gpu)
 {
     ULONG v;
 
-    v = vram[(gpu - TEX_GPU) / 4];
+    v = vram[(gpu - heap_gpu) / 4];
     return cs.swap ? R2Cs_Swap32(v) : v;
 }
 
@@ -703,6 +711,132 @@ static void test_lit_locked(void)
     Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
 }
 
+/* 2026-11-14, Reflector's report (0.9, null card): a lit, textured,
+ * coloured model of 64,703 vertices drawn in runs, each run its own lock of
+ * up to ~11,000 vertices, under GL_RGL_STATIC_ARRAYS_HINT -- the checker
+ * found indices past the arrays (only with the hint, only in the big scene).
+ * Six locks of 10,700 such vertices in ONE frame are more than the upload
+ * cache holds; every draw must still check clean, in that frame and the
+ * next (when the first ones hit). */
+#define RF_NV   10700
+#define RF_RUNS 6
+static float rf_pos[RF_NV * RF_RUNS * 3];
+static float rf_nrm[RF_NV * RF_RUNS * 3];
+static float rf_st[RF_NV * RF_RUNS * 2];
+static UBYTE rf_col[RF_NV * RF_RUNS * 4];
+static UWORD rf_idx[RF_RUNS][(RF_NV - 2) * 3];
+
+static int UcRingOrdered(void);
+
+/* One draw of the test below, checked as the library's flushes check: the
+ * draws before it while their bytes are still there, and after a stream
+ * wrap (a flush and an idle wait in the library, StreamWrap) only what
+ * follows it */
+static int RfDraw(LONG n, const UWORD *idx)
+{
+    struct R2ChkState st;
+    ULONG wraps;
+    ULONG pos;
+    int ok;
+
+    ok = (Checked(&st) == R2CE_OK);
+    wraps = core.stat_stream_wraps;
+    pos = (ULONG) (cs.ptr - stream);
+    Core_DrawElements(&core, GL_TRIANGLES, n, GL_UNSIGNED_SHORT, idx);
+    if (core.stat_stream_wraps != wraps)
+        check_from = pos;
+    return ok;
+}
+
+static void test_static_lit_overflow(void)
+{
+    static const UBYTE white[4] = { 255, 255, 255, 255 };
+    struct R2ChkState st;
+    ULONG i, r, k, frame, n;
+
+    for (i = 0; i < RF_NV * RF_RUNS; i++)
+    {
+        rf_pos[i * 3 + 0] = (float) (i % 100) * 0.01f - 0.5f;
+        rf_pos[i * 3 + 1] = (float) ((i / 100) % 100) * 0.01f - 0.5f;
+        rf_pos[i * 3 + 2] = -5.0f;
+        rf_nrm[i * 3 + 2] = 1.0f;
+        rf_st[i * 2 + 0] = (float) (i % 7) * 0.1f;
+        rf_st[i * 2 + 1] = (float) (i % 5) * 0.1f;
+        rf_col[i * 4 + 0] = (UBYTE) i;
+        rf_col[i * 4 + 3] = 255;
+    }
+    for (r = 0; r < RF_RUNS; r++)
+        for (k = 0; k < RF_NV - 2; k++)
+        {
+            rf_idx[r][k * 3 + 0] = (UWORD) (r * RF_NV + k);
+            rf_idx[r][k * 3 + 1] = (UWORD) (r * RF_NV + k + 1);
+            rf_idx[r][k * 3 + 2] = (UWORD) (r * RF_NV + k + 2);
+        }
+    Fresh(1);
+    Core_Viewport(&core, 0, 0, W_, H_);
+    Core_MatrixMode(&core, GL_PROJECTION);
+    Core_LoadIdentity(&core);
+    Core_Frustum(&core, -1, 1, -1, 1, 1, 100);
+    Core_MatrixMode(&core, GL_MODELVIEW);
+    Core_LoadIdentity(&core);
+    Core_Enable(&core, GL_LIGHTING, 1);
+    Core_Enable(&core, GL_LIGHT0, 1);
+    Core_Enable(&core, GL_COLOR_MATERIAL, 1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 4);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_VertexPointer(&core, 3, GL_FLOAT, 0, rf_pos);
+    Core_NormalPointer(&core, GL_FLOAT, 0, rf_nrm);
+    Core_TexCoordPointer(&core, 2, GL_FLOAT, 0, rf_st);
+    Core_ColorPointer(&core, 4, GL_UNSIGNED_BYTE, 0, rf_col);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    Core_EnableClientState(&core, GL_NORMAL_ARRAY, 1);
+    Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+    Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    for (frame = 0; frame < 3; frame++)
+    {
+        Core_GpuIdle(&core);            /* the frame before has run */
+        check_from = (ULONG) (cs.ptr - stream);     /* this frame's draws */
+        for (r = 0; r < RF_RUNS; r++)
+        {
+            Core_LockArrays(&core, (LONG) (r * RF_NV), RF_NV);
+            /* two parts a lock, a texture bind between them, texturing
+             * toggled on the second (Reflector's two cases) */
+            n = ((RF_NV - 2) / 2) * 3;
+            Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+            if (!RfDraw((LONG) n, rf_idx[r]))
+                printf("  (before frame %lu run %lu, first part)\n", (unsigned long) frame, (unsigned long) r);
+            Core_BindTexture(&core, GL_TEXTURE_2D, 4);
+            if (frame == 2)
+                Core_Enable(&core, GL_TEXTURE_2D, 0);
+            if (!RfDraw((LONG) ((RF_NV - 2) * 3 - n), rf_idx[r] + n))
+                printf("  (before frame %lu run %lu, second part)\n", (unsigned long) frame, (unsigned long) r);
+            Core_Enable(&core, GL_TEXTURE_2D, 1);
+            Core_UnlockArrays(&core);
+            if (!UcRingOrdered())
+            {
+                printf("  (the ring's order broke: frame %lu, run %lu, full %d)\n", (unsigned long) frame,
+                       (unsigned long) r, (int) (core.ufull_epoch == core.epoch));
+                CHECK(0);
+                break;
+            }
+        }
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        if (Checked(&st) != R2CE_OK)
+        {
+            printf("  (frame %lu: uc hits %lu misses %lu, written %lu)\n", (unsigned long) frame,
+                   (unsigned long) core.stat_uc_hits, (unsigned long) core.stat_uc_misses,
+                   (unsigned long) core.stat_uc_written);
+            CHECK(0);
+        }
+    }
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+    check_from = 0;
+}
+
 /* The last LOAD_VBPNTR in the stream: the vertices' address (0: none) */
 static ULONG LastVbGpu(void)
 {
@@ -1003,6 +1137,131 @@ static void test_tex32(void)
     Draw1();
     CHECK_INT(Checked(&st), R2CE_OK);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
+/* 2026-11-14, R4 (texview.c): a texture that IS a board bitmap's
+ * rectangle, through a test back end. The view's address lies inside the
+ * test heap's map, so the checker reads it as any texture. */
+struct TvView
+{
+    ULONG gpu, pitch, fmt, ok;
+};
+static ULONG tv_opens, tv_closes, tv_last_rgba;
+
+static LONG TvOpen(APTR env, const void *view, ULONG w, ULONG h, ULONG rgba, ULONG *gpu, ULONG *pitch,
+                   ULONG *fmt, ULONG *handle)
+{
+    const struct TvView *v;
+
+    (void) env;
+    (void) w;
+    (void) h;
+    v = (const struct TvView *) view;
+    tv_last_rgba = rgba;
+    if (!v->ok)
+        return 1;
+    *gpu = v->gpu;
+    *pitch = v->pitch;
+    *fmt = v->fmt;
+    *handle = ++tv_opens;
+    return 0;
+}
+
+static void TvClose(APTR env, ULONG handle)
+{
+    (void) env;
+    (void) handle;
+    tv_closes++;
+}
+
+static void test_texview(void)
+{
+    static const UBYTE px[2 * 2 * 4] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    struct TvView v16, v32, bad;
+    struct R2ChkState st;
+    struct CoreTex *t;
+
+    Fresh(1);
+    tv_opens = tv_closes = 0;
+    v16.gpu = TEX_GPU + 0x200000UL; v16.pitch = 1280; v16.fmt = CORE_VIEW_RGB565; v16.ok = 1;
+    v32.gpu = TEX_GPU + 0x2c0000UL; v32.pitch = 2560; v32.fmt = CORE_VIEW_ARGB8888; v32.ok = 1;
+    bad = v16; bad.ok = 0;
+    Core_BindTexture(&core, GL_TEXTURE_2D, 9);
+    /* no back end offering views: refused */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 300, 200, 0, GL_RGL_BITMAP_VIEW, GL_UNSIGNED_BYTE, &v16);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_OPERATION);
+    core.view_open = TvOpen;
+    core.view_close = TvClose;
+    /* refused by the back end: an error, the texture incomplete */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 300, 200, 0, GL_RGL_BITMAP_VIEW, GL_UNSIGNED_BYTE, &bad);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_OPERATION);
+    CHECK(Core_Texture(&core, 0) == NULL);
+    /* a 16-bit view: drawn from its address, NPOT, its pitch */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 300, 200, 0, GL_RGL_BITMAP_VIEW, GL_UNSIGNED_BYTE, &v16);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    t = core.tex[9];
+    CHECK(t != NULL && t->view != 0 && t->bytes == 0);
+    CHECK_INT(core.views, 1);
+    CHECK_INT(tv_last_rgba, 0);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Draw1();
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0), v16.gpu);
+    CHECK_HEX(LastReg(R_PP_TXFORMAT_0) & 0x1fUL, R_TXFORMAT_RGB565);
+    CHECK(LastReg(R_PP_TXFORMAT_0) & R_TXFORMAT_NON_POWER2);
+    CHECK(!(LastReg(R_PP_TXFORMAT_0) & R_TXFORMAT_ALPHA_IN_MAP));
+    CHECK_HEX(LastReg(R_PP_TXPITCH_0), 1280UL - 32);
+    CHECK_HEX(LastReg(R_PP_TXSIZE_0), 299UL | (199UL << 16));
+    CHECK_INT(Checked(&st), R2CE_OK);
+    /* a sub-image into a view: refused */
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    CHECK_INT(Core_GetError(&core), GL_INVALID_OPERATION);
+    /* the bitmap moved: the next draw takes the new address */
+    Core_TexViewMoved(&core, t->view, TEX_GPU + 0x240000UL);
+    Draw1();
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0), TEX_GPU + 0x240000UL);
+    /* a 32-bit view as GL_RGBA: its alpha counts; the 16-bit one given back */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 640, 480, 0, GL_RGL_BITMAP_VIEW, GL_UNSIGNED_BYTE, &v32);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(tv_closes, 1);
+    CHECK_INT(core.views, 1);
+    CHECK_INT(tv_last_rgba, 1);
+    Draw1();
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0), v32.gpu);
+    CHECK_HEX(LastReg(R_PP_TXFORMAT_0) & 0x1fUL, R_TXFORMAT_ARGB8888);
+    CHECK(LastReg(R_PP_TXFORMAT_0) & R_TXFORMAT_ALPHA_IN_MAP);
+    CHECK_HEX(LastReg(R_PP_TXPITCH_0), 2560UL - 32);
+    /* a view on unit 0 and an ordinary texture on unit 1 together */
+    Core_ActiveTexture(&core, GL_TEXTURE1_ARB);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 10);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_ActiveTexture(&core, GL_TEXTURE0_ARB);
+    Draw1();
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0), v32.gpu);
+    CHECK_HEX(LastReg(R_PP_TXOFFSET_0 + R_PP_TXOFFSET_STRIDE), core.tex[10]->gpu);
+    CHECK_INT(Checked(&st), R2CE_OK);
+    /* an ordinary upload into the view's texture: the view given back, the
+     * heap used again */
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    CHECK_INT(tv_closes, 2);
+    CHECK_INT(core.views, 0);
+    CHECK(t->view == 0 && t->bytes != 0);
+    /* deleting a view gives it back */
+    Core_BindTexture(&core, GL_TEXTURE_2D, 11);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB, 64, 64, 0, GL_RGL_BITMAP_VIEW, GL_UNSIGNED_BYTE, &v16);
+    CHECK_INT(core.views, 1);
+    {
+        ULONG name = 11;
+
+        Core_DeleteTextures(&core, 1, &name);
+    }
+    CHECK_INT(tv_closes, 3);
+    CHECK_INT(core.views, 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    core.view_open = NULL;
+    core.view_close = NULL;
 }
 
 /* --- minigl.library 29.1's other calls (compat.c, 2026-11-08) ------------------------ */
@@ -3524,7 +3783,7 @@ static void test_hazard_restamp(void)
     found = 0;
     for (i = 0; i < core.uq_n; i++)
     {
-        e = &core.uq[(core.uq_head + i) % CORE_UQ];
+        e = &core.uq[(core.uq_head + i) & core.uq_mask];
         if (core.heap.gpu + core.ucache_off + e->pos == core.lk_gpu)
         {
             found = 1;
@@ -4002,14 +4261,14 @@ static int UcRingOrdered(void)
     prev = 0;
     for (i = 0; i < core.uq_n; i++)
     {
-        q = (core.uq_head + i) % CORE_UQ;
+        q = (core.uq_head + i) & core.uq_mask;
         rel = (core.uq[q].pos + core.ucache_size - core.ucache_pos) % core.ucache_size;
         if (rel < prev)
             return 0;
         prev = rel;
         for (j = i + 1; j < core.uq_n; j++)
         {
-            r = (core.uq_head + j) % CORE_UQ;
+            r = (core.uq_head + j) & core.uq_mask;
             if (core.uq[q].pos < core.uq[r].pos + core.uq[r].bytes
                 && core.uq[r].pos < core.uq[q].pos + core.uq[q].bytes)
                 return 0;
@@ -4435,17 +4694,17 @@ static void test_vram_hooks(void)
     /* out of reach: the upload is lost and counted, no end without a begin */
     vram_now = NULL;
     rgba[0] ^= 0xff;
-    memcpy(vram, vram2, sizeof(vram));
+    memcpy(vram, vram2, sizeof(vram2));
     Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     CHECK_INT(core.stat_vram_lost, 1);
     CHECK_INT(vram_begins, 2);
     CHECK_INT(vram_ends, 1);
-    CHECK(memcmp(vram, vram2, sizeof(vram)) == 0);
+    CHECK(memcmp(vram, vram2, sizeof(vram2)) == 0);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
 
     /* the locked-array stream goes into staging, not the heap */
     vram_now = vram2;
-    memcpy(vram, vram2, sizeof(vram));
+    memcpy(vram, vram2, sizeof(vram2));
     idx[0] = 0; idx[1] = 1; idx[2] = 2;
     Core_LockArrays(&core, 0, 3);
     Core_DrawElements(&core, GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, idx);
@@ -4454,7 +4713,7 @@ static void test_vram_hooks(void)
     for (i = 0, n = 0; i < 3 * 4; i++)
         n += (staging[i] != 0) ? 1 : 0;
     CHECK(n >= 3);                          /* the colours at least (vertex 0 is 0,0,0) */
-    CHECK(memcmp(vram, vram2, sizeof(vram)) == 0);  /* the heap untouched */
+    CHECK(memcmp(vram, vram2, sizeof(vram2)) == 0);  /* the heap untouched */
     CHECK_INT(core.stat_stream_bytes, 3 * 4 * 4 + 2 * 4);  /* 3 vertices, 3 indices */
 
     /* a rebase: textures follow the heap, the target its new place, and
@@ -4598,6 +4857,274 @@ static void test_ucache_staged_tails(void)
     CHECK(core.stat_uc_hits > 0 && core.stat_uc_misses > 0);
     CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
     vram_now = NULL;
+}
+
+/* --- The upload cache grows and shrinks (ucgrow.c, 2026-11-14) ------------------ */
+
+/* UG_NB blocks of UG_BV points, each from its own array (16-bit indices
+ * reach 65,536 vertices: one lock each). Drawn in a cycle bigger than the
+ * cache, every block misses on a key the cache dropped: capacity misses. */
+#define UG_BV 16384
+#define UG_NB 48
+static float ug_pos[UG_NB][UG_BV * 3];
+static UWORD ug_idx[UG_BV];
+static UBYTE ug_tex[512 * 512 * 4];
+
+static void UgBig(void)
+{
+    ULONG b, i;
+
+    heap_gpu = BIG_GPU;
+    heap_size = BIG_SIZE;
+    Fresh(1);
+    for (i = 0; i < UG_BV; i++)
+        ug_idx[i] = (UWORD) i;
+    for (b = 0; b < UG_NB; b++)
+        for (i = 0; i < UG_BV; i++)
+        {
+            ug_pos[b][i * 3 + 0] = (float) (i % 128) / 128.0f - 0.5f;
+            ug_pos[b][i * 3 + 1] = (float) (i / 128) / 128.0f - 0.5f;
+            ug_pos[b][i * 3 + 2] = (float) b * 0.001f;
+        }
+    Core_Viewport(&core, 0, 0, W_, H_);
+    Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+    /* positions alone are keyed by their address under the hint (array.c
+     * Core_StaticKey), as Reflector's models are */
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+}
+
+static void UgDefault(void)
+{
+    Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_DONT_CARE);
+    raw_fail_from = 0;
+    heap_gpu = TEX_GPU;
+    heap_size = TEX_SIZE;
+    check_from = 0;
+    Fresh(1);
+}
+
+/* One frame of nb blocks (dyn: every key new, as GL_FASTEST's new
+ * generation makes them -- GLQuake's new data in every frame),
+ * checked, then the end of the frame (the GPU idle) as rgl.c has it. The
+ * misses of the frame. */
+static ULONG UgFrame(ULONG nb, ULONG dyn)
+{
+    struct R2ChkState st;
+    ULONG b, m;
+    int ok;
+
+    Core_GpuIdle(&core);
+    check_from = (ULONG) (cs.ptr - stream);
+    m = core.stat_uc_misses;
+    ok = 1;
+    if (dyn)
+    {
+        Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_FASTEST);
+        Core_Hint(&core, GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST);
+    }
+    for (b = 0; b < nb; b++)
+    {
+        Core_VertexPointer(&core, 3, GL_FLOAT, 0, ug_pos[b]);
+        Core_LockArrays(&core, 0, UG_BV);
+        ok &= RfDraw(UG_BV, ug_idx);
+        Core_UnlockArrays(&core);
+    }
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK(ok && Checked(&st) == R2CE_OK);
+    Core_GpuIdle(&core);
+    Core_UCacheFrame(&core);
+    return core.stat_uc_misses - m;
+}
+
+/* Blocks that make about 6 MB of re-drawn vertices, more than the 4 MB
+ * the cache starts with */
+static ULONG UgBlocks(void)
+{
+    ULONG w, nb;
+
+    w = core.stat_uc_written;
+    (void) UgFrame(1, 0);
+    w = core.stat_uc_written - w;           /* a block and its index list */
+    nb = (6UL << 20) / (w ? w : 1);
+    return nb > UG_NB ? UG_NB : (nb < 2 ? 2 : nb);
+}
+
+static void test_ucache_grow(void)
+{
+    ULONG nb, f, grew, m;
+    LONG err;
+    ULONG i, shr;
+
+    UgBig();
+    CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);         /* the fixed safe start */
+    CHECK_INT(core.ucache_start, CORE_UCACHE_BYTES);
+    CHECK_INT(core.uq_mask + 1, CORE_UQ);
+    CHECK_INT(core.uslot_mask + 1, CORE_USLOTS);
+    nb = UgBlocks();
+    /* the cycle thrashes 4 MB: capacity misses, a grow after 8 frames */
+    grew = 0;
+    for (f = 0; f < 30 && grew == 0; f++)
+    {
+        (void) UgFrame(nb, 0);
+        if (core.stat_uc_grows != 0)
+            grew = f + 1;
+    }
+    CHECK(grew >= 8 && grew <= 12);
+    CHECK(core.stat_uc_cap > 0);
+    CHECK_INT(core.stat_uc_grows, 1);
+    CHECK_INT(core.ucache_size, 2 * CORE_UCACHE_BYTES);
+    CHECK_INT(core.ucache_max, 2 * CORE_UCACHE_BYTES);
+    CHECK_INT(core.uq_mask + 1, 2 * CORE_UQ);
+    CHECK_INT(core.uslot_mask + 1, 2 * CORE_USLOTS);
+    /* empty after the grow: one frame fills it, then everything hits */
+    (void) UgFrame(nb, 0);
+    m = UgFrame(nb, 0);
+    CHECK_INT(m, 0);
+    CHECK_INT(UgFrame(nb, 0), 0);
+    CHECK_INT(core.stat_uc_grows, 1);                       /* and no more */
+
+    /* textures fill the heap: the cache gives back down to its start, and
+     * the texture that caused a shrink gets its room */
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    shr = 0;
+    err = GL_NO_ERROR;
+    for (i = 10; i < 200 && err == GL_NO_ERROR; i++)
+    {
+        Core_BindTexture(&core, GL_TEXTURE_2D, i);
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, ug_tex);
+        err = Core_GetError(&core);
+        if (core.stat_uc_shrinks != shr)
+        {
+            CHECK_INT(err, GL_NO_ERROR);                    /* room after the shrink */
+            shr = core.stat_uc_shrinks;
+        }
+    }
+    CHECK_INT(err, GL_OUT_OF_MEMORY);       /* full even with the cache at its start */
+    CHECK_INT(core.stat_uc_shrinks, 1);
+    CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
+    CHECK_INT(core.ug_calm, 300);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 0);
+    (void) UgFrame(nb, 0);                  /* draws still clean, from the smaller cache */
+
+    /* calm over (forced), the cycle thrashes again: a grow is tried and
+     * refused, the heap has not twice the cache free */
+    core.ug_calm = 0;
+    for (f = 0; f < 12; f++)
+        (void) UgFrame(nb, 0);
+    CHECK_INT(core.stat_uc_grows, 1);
+    CHECK(core.stat_uc_refused >= 1);
+    CHECK_INT(core.ug_why, UG_CEILING);
+    CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
+    UgDefault();
+}
+
+/* GLQuake's pattern: new bytes in every frame. Misses, but none on a key
+ * the cache had: it never grows. */
+static void test_ucache_nogrow(void)
+{
+    ULONG nb, f;
+
+    UgBig();
+    nb = UgBlocks();
+    for (f = 0; f < 20; f++)
+        (void) UgFrame(nb, 1);
+    CHECK_INT(core.stat_uc_cap, 0);
+    CHECK_INT(core.stat_uc_grows, 0);
+    CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
+    UgDefault();
+}
+
+/* A grow refused by fast RAM (the tables): the old cache goes on working;
+ * RadeonGLUploadCache=n fixes the size either way */
+static void test_ucache_refused_fixed(void)
+{
+    ULONG nb, f, h;
+
+    UgBig();
+    nb = UgBlocks();
+    raw_fail_from = (CORE_UQ * 2) * sizeof(struct CoreUEntry);  /* the 8 MB cache's entries */
+    for (f = 0; f < 12; f++)
+        (void) UgFrame(nb, 0);
+    CHECK_INT(core.stat_uc_grows, 0);
+    CHECK_INT(core.stat_uc_refused, 1);
+    CHECK_INT(core.ug_why, UG_FASTRAM);
+    CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
+    raw_fail_from = 0;
+    /* the old cache still hits: a cycle that fits */
+    h = core.stat_uc_hits;
+    (void) UgFrame(2, 0);
+    (void) UgFrame(2, 0);
+    CHECK(core.stat_uc_hits > h);
+
+    UgBig();
+    Core_UCacheFix(&core, 2UL << 20);
+    CHECK_INT(core.ucache_size, 2UL << 20);
+    CHECK_INT(core.ucache_fixed, 1);
+    CHECK_INT(core.ucache_start, 2UL << 20);
+    CHECK_INT(core.ucache_max, 2UL << 20);
+    CHECK_INT(core.heap.peak, core.heap.used);
+    CHECK_INT(core.uq_mask + 1, CORE_UQ / 2);
+    nb = UgBlocks();
+    for (f = 0; f < 12; f++)
+        (void) UgFrame(nb, 0);
+    CHECK(core.stat_uc_cap > 0);
+    CHECK_INT(core.stat_uc_grows, 0);
+    CHECK_INT(core.ucache_size, 2UL << 20);
+    UgBig();
+    Core_UCacheFix(&core, 12UL << 20);      /* bigger than the start: allowed when fixed */
+    CHECK_INT(core.ucache_size, 12UL << 20);
+    CHECK_INT(core.uq_mask + 1, 8192);      /* a power of two, one per KB at most */
+    nb = UgBlocks();
+    (void) UgFrame(nb, 0);
+    CHECK_INT(UgFrame(nb, 0), 0);           /* 6 MB fit */
+    UgDefault();
+}
+
+/* Staged: the grow replaces the fast-RAM mirror too, and the next frames
+ * draw what GL draws (the flush copies from the new mirror) */
+static void test_ucache_grow_staged(void)
+{
+    ULONG d, i, n, frame;
+    ULONG *old;
+
+    heap_gpu = BIG_GPU;
+    heap_size = BIG_SIZE;
+    UcSetup();
+    vram_now = vram;
+    Core_SetVram(&core, HostVramBegin, HostVramEnd, staging);
+    CHECK_INT(core.ustaged, 1);
+    CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
+    old = core.ushadow;
+    for (frame = 0; frame < 6; frame++)
+    {
+        if (frame == 3)
+        {
+            /* as if the frames before had thrashed it (test_ucache_grow) */
+            core.ug_run = 7;
+            core.stat_uc_cap += 100;
+            Core_UCacheFrame(&core);
+            CHECK_INT(core.stat_uc_grows, 1);
+            CHECK_INT(core.ucache_size, 2 * CORE_UCACHE_BYTES);
+            CHECK(core.ushadow != NULL && core.ushadow != old);
+            CHECK_INT((ULONG) ((size_t) core.ushadow & 15), 0);
+        }
+        collect_from = (ULONG) (cs.ptr - stream);
+        n = 0;
+        for (d = 0; d < 30; d++)
+        {
+            UcDraw(d, d * 250, 1500);
+            for (i = 0; i < 96; i++)
+                uc_all[n++] = uc_idx[d][i];
+        }
+        HostFlushStaged();
+        CHECK(SameAsGl(GL_TRIANGLES, uc_all, n));
+        Core_GpuIdle(&core);
+    }
+    collect_from = 0;
+    CHECK_INT(core.stat_stream_wraps, 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    vram_now = NULL;
+    UgDefault();
 }
 
 static void test_frames_through_ring(void)
@@ -5499,9 +6026,11 @@ int main(void)
     test_lighting();
     test_texgen();
     test_lit_locked();
+    test_static_lit_overflow();
     test_unlit_static_locked();
     test_compat();
     test_tex32();
+    test_texview();
     test_textures();
     test_state();
     test_state_max();
@@ -5535,6 +6064,10 @@ int main(void)
     test_scissor_empty();
     test_ucache_staged();
     test_ucache_staged_tails();
+    test_ucache_grow();
+    test_ucache_nogrow();
+    test_ucache_refused_fixed();
+    test_ucache_grow_staged();
     test_packfast();
     test_frames_through_ring();
     test_polygon_mode();

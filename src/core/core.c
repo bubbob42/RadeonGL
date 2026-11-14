@@ -20,6 +20,12 @@ static void Ident(float *m)
         m[i] = (i % 5 == 0) ? 1.0f : 0.0f;
 }
 
+/* 2026-11-14: Core_Init's cache setup with a local size (the gcc 6.5.0b
+ * workaround below) came out 28 bytes shorter; these keep the hot code
+ * after core_core.o where ab_dyn.sh measured and accepted it
+ * (tools/hot_layout.py). Remove with the next accepted layout change. */
+const char Core_InitPad[28] = "layout pad";
+
 ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
                 const struct CoreTarget *t, ULONG heap_gpu, ULONG *heap_cpu,
                 ULONG heap_size)
@@ -29,6 +35,8 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
 #endif
     ULONG i;
     ULONG u;
+    ULONG ub;
+    ULONG uoff;
 
     /* c is all zero bits already (core.h): the library's struct Rgl comes
      * MEMF_CLEAR, so a second clear of these 72 KB only cost time
@@ -69,16 +77,33 @@ ULONG Core_Init(struct Core *c, struct R2Cs *cs, const struct CoreEnv *env,
     /* the upload cache: only beside a stream, and only if all of it fits */
     if (c->stream_size != 0)
     {
-        c->ucache_size = CORE_UCACHE_BYTES;
-        c->ucache_off = Heap_Alloc(c, c->ucache_size, 32);
-        if (c->ucache_off == 0xffffffffUL)
+        /* a small heap: half the size, down to CORE_UCACHE_MIN. The size
+         * in a local, stored once at the end: written as c->ucache_size
+         * all along, m68k-amigaos-gcc 6.5.0b (-O2, 030 and 060 builds)
+         * stored what was left in d0 -- Core_UTables' result, 1 -- as
+         * ucache_start and ucache_region (Reflector's log, 2026-11-14:
+         * "started 0"; seen in the disassembly) */
+        uoff = 0xffffffffUL;
+        for (ub = CORE_UCACHE_BYTES; ub >= CORE_UCACHE_MIN; ub /= 2)
         {
-            c->ucache_size = CORE_UCACHE_MIN;   /* a small heap: the old size */
-            c->ucache_off = Heap_Alloc(c, c->ucache_size, 32);
+            uoff = Heap_Alloc(c, ub, 32);
+            if (uoff != 0xffffffffUL)
+                break;
         }
-        if (c->ucache_off == 0xffffffffUL)
-            c->ucache_size = 0;
-        c->ucache_on = (c->ucache_size != 0) ? 1 : 0;   /* in place until Core_SetVram */
+        if (ub < CORE_UCACHE_MIN)
+            ub = 0;
+        /* its entries, their lookup table and the ghosts (ucgrow.c) */
+        if (ub != 0 && !Core_UTables(c, ub))
+        {
+            Heap_Free(c, uoff);
+            ub = 0;
+        }
+        c->ucache_off = uoff;
+        c->ucache_size = ub;
+        c->ucache_region = ub;
+        c->ucache_start = ub;
+        c->ucache_max = ub;
+        c->ucache_on = (ub != 0) ? 1 : 0;   /* in place until Core_SetVram */
     }
 
     /* GL's initial state */
@@ -152,6 +177,7 @@ void Core_Free(struct Core *c)
         c->ushadow_mem = NULL;
         c->ushadow = NULL;
     }
+    Core_UTablesFree(c);
     c->ucache_on = 0;
     c->ustaged = 0;
     c->ucache_size = 0;
@@ -202,13 +228,24 @@ void Core_SetVram(struct Core *c, ULONG *(*begin)(APTR env), void (*end)(APTR en
                  * entry points. Precondition: called before any cached
                  * draw, with the cache empty (the library calls it once,
                  * right after Core_Init, rgl.c) */
-                if (c->env.alloc_raw != NULL)
-                    c->ushadow_mem = c->env.alloc_raw(c->env.env, c->ucache_size + 16);
-                else
-                    c->ushadow_mem = c->env.alloc(c->env.env, c->ucache_size + 16);
+                /* 2026-11-14: fast RAM without room for the whole region's
+                 * mirror gets a smaller cache (the video RAM past it stays
+                 * unused); Core_Free frees ucache_size + 16 */
+                for (;;)
+                {
+                    if (c->env.alloc_raw != NULL)
+                        c->ushadow_mem = c->env.alloc_raw(c->env.env, c->ucache_size + 16);
+                    else
+                        c->ushadow_mem = c->env.alloc(c->env.env, c->ucache_size + 16);
+                    if (c->ushadow_mem != NULL || c->ucache_size / 2 < CORE_UCACHE_MIN)
+                        break;
+                    c->ucache_size /= 2;
+                }
                 if (c->ushadow_mem != NULL)
                     c->ushadow = (ULONG *) ((UBYTE *) c->ushadow_mem
                                  + ((16UL - ((ULONG) ((size_t) (const void *) c->ushadow_mem & 15))) & 15UL));
+                c->ucache_start = c->ucache_size;   /* what the mirror allowed (ucgrow.c's floor) */
+                c->ucache_max = c->ucache_size;
             }
             if (c->ushadow != NULL)
             {

@@ -656,7 +656,7 @@ glquake glquake-data clean-glquake:
 
 # The GL core's modules (src/core): defined here, before the probe rules
 # that list them as prerequisites (those expand when the Makefile is read).
-CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen fog arraylit compat polymode
+CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen fog arraylit compat polymode texview ucgrow
 CORE_HDRS       := $(wildcard src/core/*.h)
 
 # --- Probes: the day-one tools for the real machine (docs/probes.md) --------
@@ -1133,7 +1133,7 @@ RGL_DEFS   ?=
 # functions and cost GLQuake ~0.8% (lib/rgllight.c, MEASURED 2026-11-07)
 # The 2026-11-07 modules (lighting, texgen, fog) likewise go after the hot
 # ones, so that GLQuake's code keeps its places.
-CORE_LATE  := light texgen fog arraylit compat polymode
+CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow
 # The dispatch object shrinks by a stub for every slot that becomes a hook
 # (the 29.1 calls of 2026-11-08: 708 bytes less), and the core in front of
 # core_vertex.o changed (hwstate.o +24, state.o -12). Its padding keeps
@@ -1153,14 +1153,18 @@ CORE_LATE  := light texgen fog arraylit compat polymode
 # rgl.o and card.o: 1592 + 8920 - 36. Everything from rgl_dispatch.o on
 # stays at 0.12's places; rgl.o's hooks and card.o (CardFlush, ToVram)
 # moved: a GLQuake A/B is due before this layout is accepted.
-RGL_DISPATCH_PAD := 10476
+# 2026-11-14: the 4 MB upload cache's fallbacks grew core_core.o by 20
+# bytes: 10476 - 20 keeps the core behind it in place. (The upload-cache
+# fix adds 32 bytes to core_array.o, which moves r2emit.o's hot code: a
+# GLQuake A/B, ab_ufix.)
+RGL_DISPATCH_PAD := 10684
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
               $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES))) \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_LATE))) \
               build/rgl/rgllight.o build/rgl/rglread.o build/rgl/rglcompat.o build/rgl/rgldlist.o build/rgl/rglglut.o \
-              build/rgl/rgltable.o build/rgl/cardflip.o build/rgl/rgllog.o build/rgl/rglport.o
+              build/rgl/rgltable.o build/rgl/cardflip.o build/rgl/rgllog.o build/rgl/rglport.o build/rgl/cardview.o
 
 build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c lib/cardflip.c Makefile
 	@mkdir -p build/rgl
@@ -1168,7 +1172,7 @@ build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dis
 	    --prefix Rgl_ --direct Rgl_Unimpl --flags 0 --context '&Rgl_CurrentContext' --pad $(RGL_DISPATCH_PAD) \
 	    --include rgl.h --hooks $(RGL_HOOKS)
 
-build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rglport.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
+build/rgl/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rglport.h lib/rglview.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) $(R200_HDRS) \
                src/RadeonGL_rev.h
 	@mkdir -p build/rgl
 	$(GCC_CC) $(RGL_CFLAGS) -c $< -o $@
@@ -1211,7 +1215,7 @@ RGL030_LIB    := dist/Libs/RadeonGL030/minigl.library
 RGL030_CFLAGS := $(filter-out -DRGL_CPU_040,$(subst -m68060,-m68030,$(RGL_CFLAGS)))
 RGL030_OBJS   := $(patsubst build/rgl/%,build/rgl030/%,$(RGL_OBJS))
 
-build/rgl030/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) \
+build/rgl030/%.o: lib/%.c lib/backend.h lib/rgl.h lib/rglint.h lib/rglview.h lib/rgltable.h lib/nullcard.h lib/card.h lib/cardflip.h lib/cardflip_sm.h build/rgl/rgl_dispatch.h $(CORE_HDRS) \
                   $(R200_HDRS) src/RadeonGL_rev.h
 	@mkdir -p build/rgl030
 	$(GCC_CC) $(RGL030_CFLAGS) -c $< -o $@
@@ -1261,6 +1265,13 @@ $(GLSMOKE030): glsmoke/glsmoke.c
 
 GLCOST := dist/GLSmoke/GLCost
 GLFILL := dist/GLSmoke/GLFill
+GLVIEW := dist/GLSmoke/GLView
+
+# 2026-11-14: R4, GL_RGL_bitmap_view checked on the card (pixels back)
+$(GLVIEW): glsmoke/glview.c lib/rglview.h
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -I$(P96_INC) -o $@ glsmoke/glview.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 
 # 2026-11-14: fill rate of big quads, Doom64's wipe and its variants
 $(GLFILL): glsmoke/glfill.c
@@ -1327,7 +1338,7 @@ $(GLGLUT): glsmoke/glglut.c
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke
@@ -1525,7 +1536,8 @@ release-stage: rgl-lib $(GLSMOKE) $(GLSMOKE030) dist/Probe/C/R200Info dist/Probe
 	cp LICENSE $(REL_FILES)/Licences/RadeonGL.txt
 	cp sdk/minigl-29.1/licences/License_MiniGL_Library.txt $(REL_FILES)/Licences/MiniGL.txt
 	cp sdk/radeon-firmware/LICENSE $(REL_FILES)/Licences/R200-Microcode.txt
-	@for f in RadeonGL MiniGL R200-Microcode; do cp $(REL_ICON_TXT) $(REL_FILES)/Licences/$$f.txt.info; done
+	@# the licences are plain text: 3.2's text icon (the user, 2026-11-14)
+	@for f in RadeonGL MiniGL R200-Microcode; do cp icons/text.info $(REL_FILES)/Licences/$$f.txt.info; done
 	cp $(REL_DRAWER_ICON) $(REL_FILES)/Licences.info
 	cp $(REL_DRAWER_ICON) $(RELDRAWER)/Files/RadeonGL.info
 	@# LhA records the HOST file mode as protection bits: nothing read-only

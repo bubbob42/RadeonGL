@@ -27,6 +27,18 @@ void  Vtx_Split(struct Core *c);
 
 /* The upload cache forgets everything (array.c). */
 void  UCache_Clear(struct Core *c);
+ULONG Core_UFull(struct Core *c, ULONG next);    /* arraylit.c: UAlloc found no room */
+/* ucgrow.c (late): the cache's sizes */
+#define UG_HEAP     1               /* a grow refused: no heap block that big */
+#define UG_FASTRAM  2               /* ... no fast RAM for the mirror or the tables */
+#define UG_CEILING  3               /* ... more than half of the free heap */
+ULONG Core_UTables(struct Core *c, ULONG bytes);    /* entries, slots, ghosts for bytes: FALSE if refused */
+void  Core_UTablesFree(struct Core *c);
+void  Core_UMissed(struct Core *c, const ULONG *vh, const ULONG *ih, ULONG refused);
+/* R4, texview.c: glTexImage2D(GL_RGL_BITMAP_VIEW) into t (released
+ * already), and a view's texture given back (from Release) */
+void  Core_TexView(struct Core *c, struct CoreTex *t, LONG internal, LONG w, LONG h, const void *view);
+void  Core_TexViewRelease(struct Core *c, struct CoreTex *t);
 
 /* One step of the upload cache's two hashes (array.c, arraylit.c) */
 #define UROL(v, n) (((v) << (n)) | ((v) >> (32 - (n))))

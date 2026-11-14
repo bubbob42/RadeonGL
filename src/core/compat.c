@@ -1047,15 +1047,16 @@ void Core_PrioritizeTextures(struct Core *c, LONG n, const ULONG *names)
 }
 
 /* Bytes of the card's memory the textures take now, and at most so far:
- * the heap less the stream and the upload cache, which take theirs at
- * the start and keep it. */
+ * the heap less the stream and the upload cache's block (which grows and
+ * shrinks since 2026-11-14, ucgrow.c: the peak during a grow counts the
+ * old block and the new one). */
 void Core_TexMemStat(struct Core *c, LONG *current, LONG *peak)
 {
     ULONG fixed;
     ULONG used;
     ULONG most;
 
-    fixed = c->stream_size + c->ucache_size;
+    fixed = c->stream_size + c->ucache_region;
     used = (c->heap.used > fixed) ? c->heap.used - fixed : 0;
     most = (c->heap.peak > fixed) ? c->heap.peak - fixed : 0;
     if (current != NULL)

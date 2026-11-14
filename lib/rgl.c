@@ -681,6 +681,7 @@ static void *CreateContext(const struct Ask *a)
         rgl_busy = 0;
         return NULL;
     }
+    Rgl_ViewsAttach(r);             /* R4: GL_RGL_bitmap_view (cardview.c) */
     if (r->real)
     {
         Card_Attach(&r->rad, &r->core);
@@ -701,9 +702,17 @@ static void *CreateContext(const struct Ask *a)
         r->no_lock = 1;
         r->core.stream_size = 0;
     }
-    /* RadeonGLUploadCache=0: every locked upload written again (A/B) */
-    if (GetVar((STRPTR) "RadeonGLUploadCache", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
-        r->core.no_ucache = 1;
+    /* RadeonGLUploadCache=0: every locked upload written again (A/B);
+     * =n: n MB, never grown or shrunk (ucgrow.c; tests, and a way back) */
+    if (GetVar((STRPTR) "RadeonGLUploadCache", (STRPTR) flag, sizeof(flag), 0) > 0)
+    {
+        for (i = 0, n = 0; i < sizeof(flag) && flag[i] >= '0' && flag[i] <= '9'; i++)
+            n = n * 10 + (flag[i] - '0');
+        if (i > 0 && n == 0)
+            r->core.no_ucache = 1;
+        else if (n > 0 && n <= 256)
+            Core_UCacheFix(&r->core, (ULONG) n << 20);
+    }
     if (!r->real && a->win != NULL)
     {
         r->win = a->win;            /* the program's window gives the input */
@@ -814,12 +823,16 @@ void Hook_MGLSwitchDisplay(GLcontext context)
         /* end of frame: one flush shows it, then every texture is free */
         (void) Card_Flush(&r->rad, TRUE);
         Core_GpuIdle(&r->core);
+        Core_UCacheFrame(&r->core);     /* the GPU idle: the cache may grow */
         r->frame++;
         return;
     }
     /* end of frame: a fence, hand it over, wait (the null card is instant) */
     if (R2Ring_Fence(&r->ring, &seq) == R2_OK && R2Ring_WaitFence(&r->ring, seq) == R2_OK)
+    {
         Core_GpuIdle(&r->core);     /* every texture is free to rewrite */
+        Core_UCacheFrame(&r->core);
+    }
     dw = r->card.dwords - r->last_dwords;
     if (dw > r->frame_dw_max)
         r->frame_dw_max = dw;

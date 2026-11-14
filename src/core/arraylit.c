@@ -116,3 +116,19 @@ ULONG Core_StaticKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, ULO
     }
     return 1;
 }
+
+/* The upload cache (array.c UAlloc) has no room in this epoch. 2026-11-14 (Reflector's 64,703-vertex model under
+ * the static hint, the checker: indices past the arrays): the search had
+ * moved the entries it passed over (this epoch's) to the queue's tail, but
+ * ucache_pos stayed where the search began -- the queue no longer ran in
+ * the ring's order from it, and UClear, which looks at the head only, then
+ * gave a later allocation room on top of an entry this epoch still draws
+ * from. The position goes to where the search stopped, after the entries
+ * it moved: the order holds again (test_static_lit_overflow). */
+ULONG Core_UFull(struct Core *c, ULONG next)
+{
+    if (next != 0)
+        c->ucache_pos = (next >= c->ucache_size) ? 0 : next;
+    c->ufull_epoch = c->epoch;
+    return 0xffffffffUL;
+}

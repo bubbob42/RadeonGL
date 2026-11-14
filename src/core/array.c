@@ -810,9 +810,10 @@ static ULONG VertexKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, U
     return 0;
 }
 
+/* a key's first slot, before uslot_mask (the callers mask it) */
 static ULONG USlot(ULONG h1, ULONG h2)
 {
-    return (h1 ^ (h1 >> 11) ^ (h2 >> 17)) & (CORE_USLOTS - 1);
+    return h1 ^ (h1 >> 11) ^ (h2 >> 17);
 }
 
 /* 2026-11-07: a key's entry is in one of UPROBE slots from USlot on. With
@@ -833,7 +834,7 @@ static struct CoreUEntry *ULook(struct Core *c, ULONG h1, ULONG h2, ULONG ndw)
     s = USlot(h1, h2);
     for (i = 0; i < UPROBE; i++)
     {
-        q = c->uslot[(s + i) & (CORE_USLOTS - 1)];
+        q = c->uslot[(s + i) & c->uslot_mask];
         if (q != 0)
         {
             e = &c->uq[q - 1];
@@ -844,17 +845,22 @@ static struct CoreUEntry *ULook(struct Core *c, ULONG h1, ULONG h2, ULONG ndw)
     return NULL;
 }
 
-/* Drop the oldest entry; FALSE if the current epoch drew it. */
+/* Drop the oldest entry; FALSE if the current epoch drew it. Its key goes
+ * to the ghosts: missed again, the cache was too small (ucgrow.c). */
 static ULONG UPop(struct Core *c)
 {
     struct CoreUEntry *e;
+    ULONG *g;
 
     e = &c->uq[c->uq_head];
     if (e->epoch == c->epoch)
         return 0;
     if (c->uslot[e->slot] == c->uq_head + 1)
         c->uslot[e->slot] = 0;
-    c->uq_head = (c->uq_head + 1) % CORE_UQ;
+    g = c->ughost + 2 * ((e->h1 ^ (e->h2 >> 9)) & c->uq_mask);
+    g[0] = e->h1;
+    g[1] = e->h2;
+    c->uq_head = (c->uq_head + 1) & c->uq_mask;
     c->uq_n--;
     return 1;
 }
@@ -868,14 +874,14 @@ static void URotate(struct Core *c)
     ULONG q;
 
     e = &c->uq[c->uq_head];
-    q = (c->uq_head + c->uq_n) % CORE_UQ;
+    q = (c->uq_head + c->uq_n) & c->uq_mask;
     if (q != c->uq_head)
     {
         c->uq[q] = *e;
         if (c->uslot[e->slot] == c->uq_head + 1)
             c->uslot[e->slot] = (UWORD) (q + 1);
     }
-    c->uq_head = (c->uq_head + 1) % CORE_UQ;
+    c->uq_head = (c->uq_head + 1) & c->uq_mask;
 }
 
 /* [lo, hi) cleared of entries from the oldest on: 0 when it is free, 1
@@ -917,6 +923,8 @@ static LONG UClear(struct Core *c, ULONG lo, ULONG hi, ULONG *turns, ULONG *next
  * world in a frame -- the models, the weapon -- went to the stream
  * uncached, to miss again in the next frame (MEASURED on the A4000D,
  * GLQuake demo1: 1425 blocks, 7 MB of 14.7 streamed). */
+/* No room in this epoch: Core_UFull (arraylit.c, linked behind the hot
+ * code so this object keeps its size: tools/hot_layout.py) */
 static ULONG UAlloc(struct Core *c, ULONG bytes)
 {
     ULONG start;
@@ -931,7 +939,7 @@ static ULONG UAlloc(struct Core *c, ULONG bytes)
      * twice for each draw after that) */
     if (c->ufull_epoch == c->epoch)
         return 0xffffffffUL;
-    if (c->uq_n == CORE_UQ && !UPop(c))
+    if (c->uq_n > c->uq_mask && !UPop(c))
         return 0xffffffffUL;
     start = c->ucache_pos;
     turns = 2 * c->uq_n;        /* a pass to clear the marks, one to evict */
@@ -944,20 +952,14 @@ static ULONG UAlloc(struct Core *c, ULONG bytes)
             while ((r = UClear(c, start, c->ucache_size, &turns, &next)) == 1)
                 ;
             if (r < 0)
-            {
-                c->ufull_epoch = c->epoch;
-                return 0xffffffffUL;
-            }
+                return Core_UFull(c, next);
             start = 0;
         }
         r = UClear(c, start, start + bytes, &turns, &next);
         if (r == 0)
             break;
         if (r < 0)
-        {
-            c->ufull_epoch = c->epoch;
-            return 0xffffffffUL;
-        }
+            return Core_UFull(c, next);
         start = next;
     }
     c->ucache_pos = start + bytes;
@@ -974,9 +976,9 @@ static void UInsert(struct Core *c, const ULONG *h, ULONG ndw, ULONG pos, ULONG 
     ULONG slot;
     ULONG best;
 
-    if (c->uq_n == CORE_UQ && !UPop(c))
+    if (c->uq_n > c->uq_mask && !UPop(c))
         return;
-    q = (c->uq_head + c->uq_n) % CORE_UQ;
+    q = (c->uq_head + c->uq_n) & c->uq_mask;
     e = &c->uq[q];
     e->h1 = h[0];
     e->h2 = h[1];
@@ -991,7 +993,7 @@ static void UInsert(struct Core *c, const ULONG *h, ULONG ndw, ULONG pos, ULONG 
     slot = s;
     for (i = 0; i < UPROBE; i++)
     {
-        t = (s + i) & (CORE_USLOTS - 1);
+        t = (s + i) & c->uslot_mask;
         if (c->uslot[t] == 0)
         {
             slot = t;
@@ -1003,7 +1005,7 @@ static void UInsert(struct Core *c, const ULONG *h, ULONG ndw, ULONG pos, ULONG 
         best = 0;
         for (i = 0; i < UPROBE; i++)
         {
-            t = (s + i) & (CORE_USLOTS - 1);
+            t = (s + i) & c->uslot_mask;
             if (c->epoch - c->uq[c->uslot[t] - 1].epoch >= best)
             {
                 best = c->epoch - c->uq[c->uslot[t] - 1].epoch;
@@ -1026,8 +1028,10 @@ void UCache_Clear(struct Core *c)
     c->ucache_pos = 0;
     c->udirty_n = 0;
     c->udirty_all = 0;
-    for (i = 0; i < CORE_USLOTS; i++)
+    for (i = 0; c->uslot != NULL && i <= c->uslot_mask; i++)
         c->uslot[i] = 0;
+    for (i = 0; i < 2 * (c->uq_mask + 1) && c->ughost != NULL; i++)
+        c->ughost[i] = 0;               /* a new region: nothing was dropped yet */
 }
 
 /* Staged: bytes at pos of the region wait in ushadow for the back end. */
@@ -1243,7 +1247,14 @@ static ULONG DrawCached(struct Core *c, ULONG mode, ULONG n, const UWORD *ix16, 
      * frame). The lookups first also keep a list that hits from being
      * evicted by its own draw's vertices. */
     want = ((vmiss && vkey) ? vbytes : 0) + (imiss ? ibytes : 0);
-    k = (want != 0) ? UAlloc(c, want) : 0xffffffffUL;
+    k = 0xffffffffUL;
+    if (want != 0)
+    {
+        k = UAlloc(c, want);
+        /* misses on keys the cache dropped or refused: it is too small
+         * (ucgrow.c, linked behind the hot code) */
+        Core_UMissed(c, (vmiss && vkey) ? vh : NULL, imiss ? ih : NULL, k == 0xffffffffUL);
+    }
     if (k != 0xffffffffUL)
     {
         if (vmiss && vkey)

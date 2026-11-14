@@ -140,6 +140,21 @@ static void PutCache(struct LogOut *f, const struct Core *c)
     {
         Put(f, "; streamed as dynamic (no key): "); PutU(f, c->stat_dyn_v); Put(f, " vertex blocks");
     }
+    /* its size (ucgrow.c, 2026-11-14) */
+    Put(f, "; size KB: started "); PutU(f, c->ucache_start >> 10);
+    Put(f, ", now "); PutU(f, c->ucache_size >> 10);
+    Put(f, ", largest "); PutU(f, c->ucache_max >> 10);
+    if (c->ucache_fixed)
+        Put(f, " (fixed: RadeonGLUploadCache)");
+    Put(f, "; capacity misses "); PutU(f, c->stat_uc_cap);
+    Put(f, ", grown "); PutU(f, c->stat_uc_grows);
+    Put(f, ", shrunk for textures "); PutU(f, c->stat_uc_shrinks);
+    if (c->stat_uc_refused != 0)
+    {
+        Put(f, ", grows refused "); PutU(f, c->stat_uc_refused);
+        Put(f, c->ug_why == UG_HEAP ? " (last: no heap block)"
+               : c->ug_why == UG_FASTRAM ? " (last: no fast RAM)" : " (last: over half the free heap)");
+    }
     Put(f, "\n");
 }
 
@@ -216,6 +231,7 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     }
     Put(f, ", with no CRTC running: "); PutU(f, k->vsync_off); Put(f, "\n");
     CardFlip_Log(f, k);                 /* triple buffering (cardflip.c) */
+    CardView_Log(f, k);                 /* R4: bitmap views (cardview.c) */
     Put(f, "frames dropped: "); PutU(f, k->dropped); Put(f, " (bitmaps moved "); PutU(f, k->moved);
     Put(f, ", off the board "); PutU(f, k->offboard); Put(f, ")\n");
     Put(f, "frames not drawn, the GL screen behind another: "); PutU(f, k->hidden); Put(f, "\n");

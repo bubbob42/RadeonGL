@@ -744,6 +744,13 @@
 #endif
 /* 2026-11-07, extension GL_RGL_resize_error: glGetString of it = why the
  * last mglResizeContext that kept the old size did so ("" if none did) */
+/* 2026-11-14, R4, extension GL_RGL_bitmap_view (texview.c, lib/rglview.h):
+ * glTexImage2D's format for a texture that IS a rectangle of a board
+ * bitmap; pixels points to a struct RglBitMapView { bitmap, x, y } */
+#ifndef GL_RGL_BITMAP_VIEW
+#define GL_RGL_BITMAP_VIEW                       0x52474c06UL
+#endif
+
 /* GL 1.2's packed BGRA: with GL_UNSIGNED_INT_8_8_8_8_REV a pixel is one
  * native 32-bit word 0xAARRGGBB -- the R200's ARGB8888 texel (2026-11-14,
  * Herald: its pixels are those words already) */

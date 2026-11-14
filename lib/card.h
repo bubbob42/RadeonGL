@@ -87,6 +87,18 @@ struct CardBm
     ULONG p96;                  /* from p96AllocBitMap: freed with p96FreeBitMap */
 };
 
+/* R4 (cardview.c): a board bitmap's rectangle drawn from as a texture */
+#define CARD_NVIEW 4
+struct CardView
+{
+    struct BitMap *bm;          /* NULL: free */
+    LONG x, y;
+    ULONG w, h, bpp, bpr;
+    ULONG gpu;                  /* the rectangle's first texel, as the frame was built */
+    LONG lock;
+    UBYTE *mem;
+};
+
 struct Card
 {
     ULONG kind;                 /* CARD_KIND_* */
@@ -213,7 +225,29 @@ struct Card
     ULONG flip_on;
     struct CardFlip *flip;      /* asked for three buffers: the state (kept over a resize) */
     ULONG scr_intui;            /* the GL screen is Intuition's (CloseScreen, not p96CloseScreen) */
+
+    /* 2026-11-14, R4 (lib/cardview.c, GL_RGL_bitmap_view): board bitmaps
+     * drawn from as textures, locked with the targets at every flush */
+    struct CardView view[CARD_NVIEW];
+    ULONG nview;                /* views in use */
+    ULONG view_opened, view_refused, view_dropped, view_moved;
+    char view_why[64];          /* the last refusal, for the log */
 };
+
+/* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
+ * 0 = taken (gpu, pitch in bytes, CORE_VIEW_* format, handle 1..CARD_NVIEW) */
+LONG CardView_Open(struct Card *k, const void *view, ULONG w, ULONG h, ULONG rgba,
+                   ULONG *gpu, ULONG *pitch, ULONG *fmt, ULONG *handle);
+void CardView_Close(struct Card *k, ULONG handle);
+/* the flush: the views' address ranges for the checker (from range n on;
+ * the new count), the locks (FALSE: one off the board), whether one moved
+ * (TRUE: the frame is dropped; the core has the new address), the unlocks */
+ULONG CardView_Ranges(struct Card *k, struct R2ChkCfg *cfg, ULONG n);
+BOOL CardView_Lock(struct Card *k);
+BOOL CardView_Moved(struct Card *k);
+void CardView_Unlock(struct Card *k);
+struct LogOut;
+void CardView_Log(struct LogOut *f, struct Card *k);
 
 extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
 /* Breadcrumbs for the debug trap catcher (trapcatch.h, RGL_TRAPCATCH):
