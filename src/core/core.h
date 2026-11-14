@@ -507,7 +507,7 @@ struct Core
     ULONG ug_run;                   /* frames in a row with too many capacity misses */
     ULONG ug_calm;                  /* frames left before a grow may be tried */
     ULONG ug_last_look, ug_last_cap;    /* the counters at the end of the last frame */
-    ULONG ug_why;                   /* the last grow refused: UG_HEAP, UG_FASTRAM, UG_CEILING */
+    ULONG ug_why;                   /* the last grow refused: UG_HEAP, UG_FASTRAM */
     ULONG stat_uc_cap;              /* capacity misses: keys the cache had dropped or refused */
     ULONG stat_uc_grows, stat_uc_shrinks, stat_uc_refused;
 };

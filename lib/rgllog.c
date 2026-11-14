@@ -152,8 +152,7 @@ static void PutCache(struct LogOut *f, const struct Core *c)
     if (c->stat_uc_refused != 0)
     {
         Put(f, ", grows refused "); PutU(f, c->stat_uc_refused);
-        Put(f, c->ug_why == UG_HEAP ? " (last: no heap block)"
-               : c->ug_why == UG_FASTRAM ? " (last: no fast RAM)" : " (last: over half the free heap)");
+        Put(f, c->ug_why == UG_FASTRAM ? " (last: no fast RAM)" : " (last: no heap block that big)");
     }
     Put(f, "\n");
 }

@@ -158,12 +158,18 @@ def check_text(text, label="readme"):
     # The header runs to the first blank line; a field after that is body text
     # as far as Aminet is concerned, and simply will not be seen.
     fields = {}
-    for line in lines:
+    for n, line in enumerate(lines, 1):
         if not line.strip():
             break
         m = FIELD_RE.match(line)
         if m:
             fields[m.group(1)] = m.group(2).rstrip()
+        else:
+            # every field is ONE line (Aminet, Requires: included: "only one
+            # line allowed" -- the user, 2026-11-14, after RadeonGL's and
+            # GLQuakeR200's four- and two-line Requires:)
+            problems.append("header line %d continues a field: every header "
+                            "field must fit on one line: %r" % (n, line[:44]))
 
     for want in MANDATORY:
         if want not in fields:

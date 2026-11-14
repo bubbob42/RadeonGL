@@ -6,10 +6,7 @@ Version:      0.14
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
-Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
-              Picasso96 3.6+ (Radeon.card); a 68040 or 68060 with FPU,
-              or a 68020/68030 with 68881/68882 (a second build);
-              AmigaOS 3.1+ (tested on 3.2).
+Requires:     R200 Radeon 8500-9250, Picasso96 3.6+, 68020+ with FPU
 Kurz:         minigl.library fuer R200-Radeons an P96
 
 RadeonGL 0.14  --  13.11.2026

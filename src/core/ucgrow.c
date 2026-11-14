@@ -10,8 +10,10 @@
  *
  *   grow    too many capacity misses (UG_BLOCKS a frame, or UG_SHARE of
  *           the lookups) for UG_RUN frames in a row: twice the size, at the
- *           end of a frame with the GPU idle, if that is at most half of the
- *           heap free then (D1) and fast RAM has the bigger mirror (D3);
+ *           end of a frame with the GPU idle, if the heap has a block that
+ *           big (D1, revised: half of the free heap never let a 16 MB heap
+ *           grow past 4 MB -- GLGrow on the A4000D) and fast RAM has the
+ *           bigger mirror (D3);
  *   shrink  a texture found no room: half, down to the start size (D2),
  *           then the texture tries again (texture.c);
  *   calm    no grow for UG_CALM frames after a shrink or a refused grow;
@@ -274,9 +276,7 @@ void Core_UCacheFrame(struct Core *c)
         return;
     c->ug_run = 0;
     want = 2 * c->ucache_size;
-    if (want > (c->heap.size - c->heap.used) / 2)
-        c->ug_why = UG_CEILING;
-    else if (Resize(c, want, 1))
+    if (Resize(c, want, 1))
     {
         c->stat_uc_grows++;
         return;

@@ -31,7 +31,6 @@ ULONG Core_UFull(struct Core *c, ULONG next);    /* arraylit.c: UAlloc found no 
 /* ucgrow.c (late): the cache's sizes */
 #define UG_HEAP     1               /* a grow refused: no heap block that big */
 #define UG_FASTRAM  2               /* ... no fast RAM for the mirror or the tables */
-#define UG_CEILING  3               /* ... more than half of the free heap */
 ULONG Core_UTables(struct Core *c, ULONG bytes);    /* entries, slots, ghosts for bytes: FALSE if refused */
 void  Core_UTablesFree(struct Core *c);
 void  Core_UMissed(struct Core *c, const ULONG *vh, const ULONG *ih, ULONG refused);

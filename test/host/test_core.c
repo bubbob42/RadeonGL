@@ -5007,13 +5007,13 @@ static void test_ucache_grow(void)
     (void) UgFrame(nb, 0);                  /* draws still clean, from the smaller cache */
 
     /* calm over (forced), the cycle thrashes again: a grow is tried and
-     * refused, the heap has not twice the cache free */
+     * refused, the heap has no block twice the cache's size */
     core.ug_calm = 0;
     for (f = 0; f < 12; f++)
         (void) UgFrame(nb, 0);
     CHECK_INT(core.stat_uc_grows, 1);
     CHECK(core.stat_uc_refused >= 1);
-    CHECK_INT(core.ug_why, UG_CEILING);
+    CHECK_INT(core.ug_why, UG_HEAP);
     CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
     UgDefault();
 }

@@ -1266,12 +1266,19 @@ $(GLSMOKE030): glsmoke/glsmoke.c
 GLCOST := dist/GLSmoke/GLCost
 GLFILL := dist/GLSmoke/GLFill
 GLVIEW := dist/GLSmoke/GLView
+GLGROW := dist/GLSmoke/GLGrow
 
 # 2026-11-14: R4, GL_RGL_bitmap_view checked on the card (pixels back)
 $(GLVIEW): glsmoke/glview.c lib/rglview.h
 	@mkdir -p dist/GLSmoke
 	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
 	    -I$(MGL_SDK_INC) -I$(P96_INC) -o $@ glsmoke/glview.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+
+# 2026-11-14: the upload cache grows and gives back on the card (ucgrow.c)
+$(GLGROW): glsmoke/glgrow.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -o $@ glsmoke/glgrow.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 
 # 2026-11-14: fill rate of big quads, Doom64's wipe and its variants
 $(GLFILL): glsmoke/glfill.c
@@ -1338,7 +1345,7 @@ $(GLGLUT): glsmoke/glglut.c
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLGROW) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke
