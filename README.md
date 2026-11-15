@@ -107,9 +107,12 @@ needs.
   switch while it runs (GLQuake's Video Options > Display sync). The card
   shows a new third only from the next vertical blank on, so since 0.15
   the Radeon waits for that blank before it draws into the third just
-  left (0.14 tore). Panning is the fastest way without tearing: GLQuake's
-  demo1 at 1280 x 720 runs at 31.5 fps (the copy with vertical sync 29.9,
-  without it 32.2), at 1920 x 1080 at 27.9 (22.4, 28.7).
+  left (0.14 tore); since 0.16 the program's own task pans, at the start
+  of the next frame, and the Radeon waits only until a refresh has passed
+  since the pan. Panning is the fastest way without tearing: GLQuake's
+  demo1 at 1280 x 720 runs at 32.4 fps (0.15: 31.3; the copy with
+  vertical sync 29.9, without it 32.2), at 1920 x 1080 at 30.6 (0.15:
+  27.9; 22.4, 28.7).
 - **Windows and bitmaps:** a context in the program's window
   (`mglCreateContextFromWindow`), in a window of its own on the default
   public screen (`mglChooseWindowMode`), or drawing straight into the

@@ -149,6 +149,12 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.16 (15.11.2026)
+  - panning faster, still tear-free: the program's task pans (GLQuake
+    demo1 32.4 fps at 1280 x 720, 30.6 at 1920 x 1080; 0.15: 31.3, 27.9)
+  - the waits for the card sleep instead of spinning (RadeonGLWaitSleep)
+  - a context refused after the card opened says why in the log
+
 0.15 (14.11.2026)
   - fixed: panning tore the picture (0.14 was wrong to call it tear-free)
   - the upload cache starts at 4 MB and grows with the scene

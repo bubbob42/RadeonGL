@@ -508,11 +508,13 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     macht es GLQuakes Video Options > Display sync). Die Karte zeigt ein
     neues Drittel erst ab der nächsten vertikalen Austastlücke; seit 0.15
     wartet die Radeon auf diese Lücke, bevor sie in das eben verlassene
-    Drittel zeichnet (vorher zerriss pan das Bild). Auf dem Testrechner
-    (GLQuake demo1) ist pan der schnellste Weg ohne Zerreißen: 31,5
-    Bilder pro Sekunde bei 1280 x 720 (Kopieren mit vertikaler
-    Synchronisation 29,9, csb 21,6; Kopieren ohne Synchronisation, das
-    zerreißt, 32,2) und 27,9 bei 1920 x 1080 (22,4, 17,0; 28,7).
+    Drittel zeichnet (vorher zerriss pan das Bild), seit 0.16 nur, bis
+    seit dem Verschieben ein Bildaufbau vergangen ist. Auf dem
+    Testrechner (GLQuake demo1) ist pan der schnellste Weg ohne
+    Zerreißen: 32,4 Bilder pro Sekunde bei 1280 x 720 (0.15: 31,3;
+    Kopieren mit vertikaler Synchronisation 29,9, csb 21,6; Kopieren ohne
+    Synchronisation, das zerreißt, 32,2) und 30,6 bei 1920 x 1080 (0.15:
+    27,9; 22,4, 17,0; 28,7).
 
 @{b}RadeonGLHelperPri@{ub}  (Vorgabe: nicht gesetzt für pan, +1 für csb)
     pan: Nicht gesetzt verschiebt der Task des Programms selbst, zu Beginn
@@ -821,6 +823,28 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.16 (15.11.2026)
+    * drei Puffer durch Verschieben sind schneller, weiterhin ohne
+      Zerreißen: Der Task des Programms verschiebt jetzt selbst, zu
+      Beginn des nächsten Bildes, sobald die Karte das letzte fertig hat,
+      und das Bild erscheint ein Bild früher. Die Radeon wartet auf die
+      Austastlücke nur noch, bis seit dem Verschieben ein Bildaufbau
+      vergangen ist, am Strahl gemessen. GLQuake demo1 auf dem
+      Testrechner: 31,4 Bilder pro Sekunde bei 1024 x 768, 32,4 bei
+      1280 x 720, 30,6 bei 1920 x 1080 (0.15 in den Messungen derselben
+      Nacht: 30,4, 31,3, 27,9), bei den ersten beiden Größen so schnell
+      wie mit Zerreißen. In einem Blindtest ohne Zerreißen gesehen. Ein
+      gesetztes RadeonGLHelperPri holt den Hilfstask von 0.15 zurück
+    * beim Warten auf die Karte schläft RadeonGL nach 200 Mikrosekunden
+      auf dem timer.device, statt aktiv zu warten (die letzten 600 vor
+      dem erwarteten Ende wartet es aktiv); andere Tasks gleicher
+      Priorität laufen derweil weiter (Herald: ein Task der Priorität 0
+      kam während eines Gleitens nach 11 bis 60 ms statt nach 114 bis
+      185 ms dran). RadeonGLWaitSleep=n setzt den Schritt in
+      Mikrosekunden (Vorgabe 500, 0: wartet aktiv wie bisher)
+    * ein Kontext, der nach dem Öffnen der Karte abgelehnt wird (etwa
+      mangels Fast-RAM), nennt den Grund jetzt im Log (Reflector)
 
 0.15 (14.11.2026)
     * behoben: drei Puffer durch Verschieben zerrissen das Bild. Die

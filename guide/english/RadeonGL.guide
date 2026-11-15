@@ -471,11 +471,12 @@ that is not set means the default.
     variable and switch while it runs (GLQuake's Video Options > Display
     sync does). The card shows a new third only from the next vertical
     blank on; since 0.15 the Radeon waits for that blank before it draws
-    into the third just left (before, panning tore). On the test machine
-    (GLQuake demo1) panning is the fastest way without tearing: 31.5 fps
-    at 1280 x 720 (the copy with vertical sync 29.9, csb 21.6; the copy
-    without sync, which tears, 32.2) and 27.9 at 1920 x 1080 (22.4, 17.0;
-    28.7).
+    into the third just left (before, panning tore), since 0.16 only
+    until a refresh has passed since the pan. On the test machine
+    (GLQuake demo1) panning is the fastest way without tearing: 32.4 fps
+    at 1280 x 720 (0.15: 31.3; the copy with vertical sync 29.9, csb
+    21.6; the copy without sync, which tears, 32.2) and 30.6 at
+    1920 x 1080 (0.15: 27.9; 22.4, 17.0; 28.7).
 
 @{b}RadeonGLHelperPri@{ub}  (default: not set for pan, +1 for csb)
     pan: not set, the program's own task pans at the start of the next
@@ -765,6 +766,26 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.16 (15.11.2026)
+    * three buffers by panning are faster, still without tearing: the
+      program's own task now pans, at the start of the next frame, once
+      the card has finished the last one, and the picture shows a frame
+      sooner. The Radeon waits for the blank only until a refresh,
+      measured from the beam, has passed since the pan. GLQuake demo1 on
+      the test machine: 31.4 fps at 1024 x 768, 32.4 at 1280 x 720, 30.6
+      at 1920 x 1080 (0.15 in the same night's measurements: 30.4, 31.3,
+      27.9), at the first two sizes as fast as with the tearing. Seen
+      without tearing in a blind test. RadeonGLHelperPri set brings back
+      0.15's helper task
+    * the waits for the card sleep on timer.device after 200 us instead
+      of spinning (the last 600 us before the expected end are spun), so
+      other tasks of the same priority run meanwhile (Herald: a
+      priority-0 task got its turn after 11 to 60 ms instead of 114 to
+      185 during a glide). RadeonGLWaitSleep=n sets the step in us
+      (default 500, 0: the old spin)
+    * a context refused after the card was opened (for example for lack
+      of fast RAM) now says why in the log (Reflector)
 
 0.15 (14.11.2026)
     * fixed: three buffers by panning tore the picture. The card shows a
