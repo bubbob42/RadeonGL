@@ -1163,17 +1163,20 @@ CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow
 # 2026-11-14, context-fail-log (Reflector: a context refused after the card
 # opened left no log): three calls in rgl.o, +52 bytes in front of the pad;
 # the words are in rgllog.o, behind the hot code: 10668 - 52.
-# 2026-11-15, sleep-wait-2 (Herald: the fence waits spun; WaitFenceSleep,
-# the RadeonGLWaitSleep read, the own-task test, the spun end): card.o
-# 22620, +336 against 0.15. Both merged: 10668 - 52 - 336.
-RGL_DISPATCH_PAD := 10280
+# 2026-11-15, sleep-wait-2 (Herald: the fence waits spun). As a static in
+# card.c GCC put the wait ahead of CardFlush (+356; GLQuake +0.43% in
+# ab_main1), so it moved into cardwait.o, linked last, with the
+# RadeonGLWaitSleep read; struct Card keeps 0.15's copy code (card.h,
+# layout_spare). card.o is 0.15's 22284 bytes again: 10668 - 52.
+RGL_DISPATCH_PAD := 10616
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
               $(addprefix build/rgl/r2_,$(addsuffix .o,$(R200_MODULES))) \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_LATE))) \
               build/rgl/rgllight.o build/rgl/rglread.o build/rgl/rglcompat.o build/rgl/rgldlist.o build/rgl/rglglut.o \
-              build/rgl/rgltable.o build/rgl/cardflip.o build/rgl/rgllog.o build/rgl/rglport.o build/rgl/cardview.o
+              build/rgl/rgltable.o build/rgl/cardflip.o build/rgl/rgllog.o build/rgl/rglport.o build/rgl/cardview.o \
+              build/rgl/cardwait.o
 
 build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c lib/cardflip.c Makefile
 	@mkdir -p build/rgl

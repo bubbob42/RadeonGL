@@ -237,11 +237,19 @@ struct Card
      * timer.device after a short spin, so the other tasks of the same
      * priority run meanwhile. RadeonGLWaitSleep=us the sleep step (0: the
      * old spin, no sleep) */
+    ULONG wait_init;            /* the two below read (RadeonGLWaitSleep) at the first wait */
     ULONG wait_spin_us;         /* spin this long before the first sleep */
     ULONG wait_sleep_us;        /* each sleep; 0 = spin only */
     ULONG wait_sleeps;          /* sleeps taken, for the log */
     ULONG wait_last_us;         /* 2026-11-15: the last wait that slept, start to fence (the next one's guess) */
     ULONG wait_spun_end;        /* waits whose end was spun out, not slept (for the log) */
+    /* 2026-11-15: GCC copies a struct Card in the four Card_Open* paths,
+     * 16 dwords a loop pass plus the rest one by one. 0.15's 411 dwords left
+     * 11; the six wait dwords alone would shrink each copy by 20 bytes and
+     * move the hot CardFlush behind them (tools/hot_layout.py). 427 dwords
+     * (16 more) keeps 0.15's copy code to the byte. Adding fields: take them
+     * from here. */
+    ULONG layout_spare[10];
 };
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
@@ -386,6 +394,11 @@ void Card_Close(struct Card *k);
 
 /* A register read (cardflip.c's beam check around ScrollVPort; reads only) */
 ULONG Card_ReadReg(struct Card *k, ULONG reg);
+/* The fence wait that sleeps on timer.device after a short spin (cardwait.c,
+ * linked late): Settle and the waited present. It takes R2Ring_WaitFence's
+ * arguments (the ring is a card's own, k->ring), so the calls in card.c
+ * keep their size and the hot code its place */
+LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq);
 
 /* rglport.c: every flush to the Radeon, for the public port (rglport.h) */
 void Port_Flushed(void);
