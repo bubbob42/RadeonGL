@@ -514,12 +514,15 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Synchronisation 29,9, csb 21,6; Kopieren ohne Synchronisation, das
     zerreißt, 32,2) und 27,9 bei 1920 x 1080 (22,4, 17,0; 28,7).
 
-@{b}RadeonGLHelperPri@{ub}  (Vorgabe: -1 für pan, +1 für csb)
-    Die Priorität des Tasks, der die drei Puffer zeigt, gegenüber der des
-    Programms. pan wartet, bis die Karte das Bild fertig hat; unterhalb
-    des Programms kostet dieses Warten das Programm nichts (oberhalb war
-    pan 26,6 Bilder pro Sekunde statt 32,1). ChangeScreenBuffer läuft
-    oberhalb am besten.
+@{b}RadeonGLHelperPri@{ub}  (Vorgabe: nicht gesetzt für pan, +1 für csb)
+    pan: Nicht gesetzt verschiebt der Task des Programms selbst, zu Beginn
+    des nächsten Bildes, sobald die Karte das letzte fertig hat: kein
+    zusätzlicher Task, und das Bild erscheint ein Bild früher. Gesetzt
+    zeigt ein Hilfstask die drei Puffer mit dieser Priorität gegenüber der
+    des Programms, wie in 0.15 (dort war -1 die Vorgabe; oberhalb des
+    Programms lief pan mit 26,6 Bildern pro Sekunde statt 32,1).
+    ChangeScreenBuffer nutzt immer den Hilfstask und läuft oberhalb des
+    Programms am besten (+1).
 
         SetEnv SAVE RadeonGLFlip csb
 @endnode

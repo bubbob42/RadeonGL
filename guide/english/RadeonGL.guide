@@ -477,11 +477,14 @@ that is not set means the default.
     without sync, which tears, 32.2) and 27.9 at 1920 x 1080 (22.4, 17.0;
     28.7).
 
-@{b}RadeonGLHelperPri@{ub}  (default: -1 for pan, +1 for csb)
-    The priority of the task that shows the three buffers, against the
-    program's. Panning waits for the card to finish the frame; below the
-    program that wait costs the program nothing (above it, panning was
-    26.6 fps instead of 32.1). ChangeScreenBuffer works best above it.
+@{b}RadeonGLHelperPri@{ub}  (default: not set for pan, +1 for csb)
+    pan: not set, the program's own task pans at the start of the next
+    frame, once the card has finished the last one: no extra task, and
+    the picture shows a frame sooner. Set, a helper task shows the three
+    buffers at that priority against the program's, as in 0.15 (where -1
+    was the default; above the program, panning was 26.6 fps instead of
+    32.1). ChangeScreenBuffer always uses the helper and works best above
+    the program (+1).
 
         SetEnv SAVE RadeonGLFlip csb
 @endnode
