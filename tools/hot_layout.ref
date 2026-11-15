@@ -1,8 +1,8 @@
 # hot functions' offsets in minigl.library's code hunk (tools/hot_layout.py)
-Hook_GLVertex4f                    7234
-Hook_GLVertex3fv                   7512
-ToVram                            13404
-CardFlush.part.14                 31954
+Hook_GLVertex4f                    7284
+Hook_GLVertex3fv                   7562
+ToVram                            13456
+CardFlush.part.14                 32006
 Core_Enable                       54210
 Mat_Mul                           57696
 ValidateOnce                      62698

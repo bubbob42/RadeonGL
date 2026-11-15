@@ -653,6 +653,7 @@ static void *CreateContext(const struct Ask *a)
     {
         if (!NullCardOpen(r, (ULONG) w, (ULONG) h, check, heap_max, &t))
         {
+            Rgl_NoContext(r, RGL_NOCTX_NULLMEM, 0);
             FreeRgl(r);
             rgl_busy = 0;
             return NULL;
@@ -673,10 +674,12 @@ static void *CreateContext(const struct Ask *a)
     env.env = r;
     /* r->core is all zero (Core_Init's promise, core.h): AllocVec
      * MEMF_CLEAR above, untouched until here */
-    if (Core_Init(&r->core, r->real ? &r->rad.cs : &r->ring.cs, &env, &t,
-                  r->real ? r->rad.heap_gpu : HEAP_GPU, r->real ? NULL : r->heap_mem,
-                  r->real ? r->rad.heap_size : r->heap_size) != GL_NO_ERROR)
+    res = (ULONG) Core_Init(&r->core, r->real ? &r->rad.cs : &r->ring.cs, &env, &t,
+                            r->real ? r->rad.heap_gpu : HEAP_GPU, r->real ? NULL : r->heap_mem,
+                            r->real ? r->rad.heap_size : r->heap_size);
+    if (res != GL_NO_ERROR)
     {
+        Rgl_NoContext(r, RGL_NOCTX_CORE, res);
         FreeRgl(r);
         rgl_busy = 0;
         return NULL;
@@ -720,6 +723,7 @@ static void *CreateContext(const struct Ask *a)
     }
     else if (!r->real && a->bm == NULL && !NullCardWindow(r))
     {
+        Rgl_NoContext(r, RGL_NOCTX_WINDOW, 0);
         FreeRgl(r);
         rgl_busy = 0;
         return NULL;

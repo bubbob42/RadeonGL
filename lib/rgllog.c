@@ -360,6 +360,37 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     PutSlots(r, f);
 }
 
+/* A context the library could not make, the card already open (the null
+ * card's memory, Core_Init, the null card's window): why, in the log only
+ * -- the program hears NULL and says so itself. Reflector, 2026-11-08: on
+ * an 8 MB machine mglCreateContextFromBitMap returned NULL and there was
+ * no log at all. */
+void Rgl_NoContext(struct Rgl *r, ULONG step, ULONG err)
+{
+    struct LogOut *f;
+
+    f = LogOpen(r);
+    if (f == NULL)
+        return;
+    Put(f, "RadeonGL: no context: ");
+    if (step == RGL_NOCTX_NULLMEM)
+        Put(f, "no memory for the null card's command ring and texture heap (4 MB of fast RAM at least)");
+    else if (step == RGL_NOCTX_CORE)
+        Put(f, "the GL state could not be set up (Core_Init: its tables in fast RAM)");
+    else if (step == RGL_NOCTX_WINDOW)
+        Put(f, "the null card's window did not open");
+    else
+        Put(f, "an unknown step");
+    if (err != 0)
+    {
+        Put(f, " (GL error ");
+        PutX(f, err);
+        Put(f, ")");
+    }
+    Put(f, "\n");
+    LogClose(f);
+}
+
 /* A context refused on a Radeon: why, in the log and a requester -- not
  * for a window or bitmap context, whose program falls back to its own
  * drawing without a word (Reflector, Herald). */
