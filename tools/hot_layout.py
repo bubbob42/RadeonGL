@@ -29,6 +29,7 @@ other hot functions, add them here and --update.
 """
 
 import os
+import struct
 import re
 import subprocess
 import sys
@@ -43,25 +44,125 @@ NM = os.environ.get("GCC_NM", os.path.join(os.environ.get("PREFIX", os.path.expa
 TEXT = re.compile(r"^ \.text\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(\S+)$")
 
 
+def code_hunk_symbols(path):
+    """[[(offset, name), ...] per HUNK_CODE] of an Amiga object, read from its
+    own HUNK_SYMBOL / HUNK_EXT tables. GCC can split one object into two code
+    hunks (.text and .text.unlikely, both shown as ".text": core_array.o's
+    upload-cache functions and PackFast's clone sit in the second), and nm
+    gives no hunk, so each symbol must be taken from the hunk it is in."""
+    d = open(path, "rb").read()
+    o = 0
+    out = []
+    cur = None
+
+    def L():
+        return struct.unpack(">I", d[o:o + 4])[0]
+
+    def name(n):
+        return d[o:o + 4 * n].split(b"\0", 1)[0].decode("latin-1")
+
+    while o < len(d):
+        t = L() & 0x3fffffff
+        o += 4
+        if t in (0x3E7, 0x3E8):                     # UNIT, NAME
+            n = L()
+            o += 4 + 4 * n
+        elif t in (0x3E9, 0x3EA):                   # CODE, DATA
+            n = L() & 0x3fffffff
+            o += 4 + 4 * n
+            cur = [] if t == 0x3E9 else None
+            if t == 0x3E9:
+                out.append(cur)
+        elif t == 0x3EB:                            # BSS
+            o += 4
+            cur = None
+        elif t in (0x3EC, 0x3ED, 0x3EE, 0x3F7, 0x3F8, 0x3F9):   # RELOC32/16/8, DREL32/16/8
+            while True:
+                n = L()
+                o += 4
+                if n == 0:
+                    break
+                o += 4 + 4 * n
+        elif t == 0x3FC:                            # RELOC32SHORT
+            while True:
+                n = struct.unpack(">H", d[o:o + 2])[0]
+                o += 2
+                if n == 0:
+                    break
+                o += 2 + 2 * n
+            if o & 2:
+                o += 2
+        elif t == 0x3EF:                            # EXT
+            while True:
+                w = L()
+                o += 4
+                if w == 0:
+                    break
+                typ, n = w >> 24, w & 0xffffff
+                nm = name(n)
+                o += 4 * n
+                if typ < 128:                       # definitions (GCC writes locals as $21)
+                    v = L()
+                    o += 4
+                    if (typ & 0x1f) == 1 and cur is not None:
+                        cur.append((v, nm))
+                elif typ == 130:                    # COMMON
+                    o += 4
+                    c = L()
+                    o += 4 + 4 * c
+                else:                               # references
+                    c = L()
+                    o += 4 + 4 * c
+        elif t == 0x3F0:                            # SYMBOL
+            while True:
+                n = L()
+                o += 4
+                if n == 0:
+                    break
+                nm = name(n)
+                o += 4 * n
+                v = L()
+                o += 4
+                if cur is not None:
+                    cur.append((v, nm))
+        elif t == 0x3F1:                            # DEBUG
+            n = L()
+            o += 4 + 4 * n
+        elif t == 0x3F2:                            # END
+            pass
+        else:
+            raise SystemExit("%s: hunk type $%x at %d not known" % (path, t, o - 4))
+    return out
+
+
 def offsets(mapfile):
-    """{function: offset in the code hunk} for every part of every hot function."""
-    found = {}
-    seen = set()
+    """{function: offset in the code hunk} for every part of every hot function.
+    2026-11-15: the k-th code hunk of an object is the k-th ".text" line of
+    that object in the map. Until then only the first line counted and a
+    symbol of the second hunk was placed against the first's base: core_array.o's
+    ULook and PackFast clone looked unchanged while that hunk moved."""
+    bases = {}
+    order = []
     for line in open(mapfile):
         m = TEXT.match(line.rstrip("\n"))
-        if not m or int(m.group(2), 16) == 0:
+        if not m:
             continue
-        base, obj = int(m.group(1), 16), m.group(3)
-        if obj in seen or not os.path.exists(obj):
+        obj = m.group(3)
+        if obj not in bases:
+            bases[obj] = []
+            order.append(obj)
+        bases[obj].append(int(m.group(1), 16))
+    found = {}
+    for obj in order:
+        if not os.path.exists(obj):
             continue
-        seen.add(obj)
-        out = subprocess.run([NM, "-n", obj], capture_output=True, text=True).stdout
-        for sym in out.splitlines():
-            p = sym.split()
-            if len(p) == 3 and p[1] in "tT":
-                name = p[2].lstrip("_")
+        for k, syms in enumerate(code_hunk_symbols(obj)):
+            if k >= len(bases[obj]):
+                break
+            for v, nm in syms:
+                name = nm.lstrip("_")
                 if name.split(".")[0] in HOT:
-                    found[name] = base + int(p[0], 16)
+                    found[name] = bases[obj][k] + v
     return found
 
 
