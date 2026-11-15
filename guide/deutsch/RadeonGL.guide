@@ -450,6 +450,17 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     bei 1280 x 720 stieg auf dem Testrechner von 19,9 auf 23,5 Bilder/s.
     Aus ist zum Vergleichen da, oder falls Bilder fehlerhaft werden.
 
+@{b}RadeonGLWaitSleep@{ub}  (Vorgabe: 500)
+    Während ein Programm darauf wartet, dass die Radeon ein Bild fertig
+    hat (beim Zeigen eines Fenster- oder Bitmap-Kontexts, oder bei einer
+    Sperre, die das letzte Bild zu Ende laufen lassen muss), schläft
+    RadeonGL nach den ersten 200 Mikrosekunden in Schritten von so vielen
+    und wartet nur die letzten 600 vor dem erwarteten Ende aktiv. So
+    laufen andere Programme gleicher Priorität weiter: Heralds Karten
+    rollen sanft, und sein Hilfsprogramm für das Mausrad bekommt trotzdem
+    den Prozessor. 0 wartet die ganze Zeit aktiv, wie RadeonGL 0.15 und
+    früher.
+
 @{b}RadeonGLMove16@{ub}  (Vorgabe: aus)
     Nur mit 68060. 1 oder 2 kopiert die Daten jedes Bildes in 16-Byte-
     Bursts (MOVE16) in den Speicher der Karte: 1 leert vorher den
