@@ -1162,7 +1162,8 @@ CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow
 # of the pad): 10684 - 16.
 # 2026-11-15, sleep-wait (Herald: the fence waits spun): card.o +336 bytes
 # in front of the pad (WaitFenceSleep, the RadeonGLWaitSleep read): 10668 - 336.
-RGL_DISPATCH_PAD := 10332
+# The own-task test (no sleep on another program's card): +32: 10332 - 32.
+RGL_DISPATCH_PAD := 10300
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \

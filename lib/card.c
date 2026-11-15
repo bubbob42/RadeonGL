@@ -2243,7 +2243,13 @@ static LONG WaitFenceSleep(struct Card *k, ULONG seq)
     LONG err;
 
     r = &k->ring;
-    if (k->wait_sleep_us == 0)
+    /* only with this task's own timer request: SettleOthers settles the
+     * card another program left running (card_running), in THIS task --
+     * a DoIO on that card's request would wait for a reply that goes to
+     * its owner, holding a Picasso96 lock (the A4000D dropped off during
+     * the night's A/B with the user's Herald drawing too). Not ours: spin,
+     * as before */
+    if (k->wait_sleep_us == 0 || k->tport == NULL || k->tport->mp_SigTask != (APTR) FindTask(NULL))
         return R2Ring_WaitFence(r, seq);
     err = R2Ring_Commit(r);
     if (err != R2_OK)
