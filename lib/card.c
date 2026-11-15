@@ -939,6 +939,8 @@ static BOOL StopCp(struct Card *k, BOOL closing)
  * off. The caller holds a lock, so P96 draws nothing meanwhile. After a
  * reset the commands built since that flush assumed state the engine has
  * lost: the next flush drops them (drop_next). */
+static LONG WaitFenceSleep(struct Card *k, ULONG seq);
+
 static void Settle(struct Card *k, BOOL closing)
 {
     ULONG t0;
@@ -949,7 +951,7 @@ static void Settle(struct Card *k, BOOL closing)
     if (!R2Ring_FenceDone(&k->ring, k->pend_seq))
         k->ov_waits++;
     t0 = HwClock(k);
-    if (R2Ring_WaitFence(&k->ring, k->pend_seq) != R2_OK)
+    if (WaitFenceSleep(k, k->pend_seq) != R2_OK)
         k->lost = CARD_LOST_FENCE;
     us = HwClock(k) - t0;
     if (us > k->fence_us_max)
@@ -1379,7 +1381,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     t0 = HwClock(k);
     WHERE(81, seq);
     if (e == R2_OK)
-        e = R2Ring_WaitFence(&k->ring, seq);
+        e = WaitFenceSleep(k, seq);
     us = HwClock(k) - t0;
     WHERE(82, us);
     if (us > k->fence_us_max)
@@ -2189,6 +2191,10 @@ BOOL Card_ModeSize(ULONG id, ULONG *w, ULONG *h)
 static BOOL OpenTimer(struct Card *k, char *why, ULONG whylen)
 {
     struct EClockVal ev;
+    char flag[12];
+    LONG n;
+    ULONG i;
+    ULONG v;
 
     k->tport = CreateMsgPort();
     k->treq = (k->tport != NULL)
@@ -2206,7 +2212,86 @@ static BOOL OpenTimer(struct Card *k, char *why, ULONG whylen)
     if (clk_Freq == 0)
         clk_Freq = 709379;
     k->clock_base = Ticks();
+    /* 2026-11-15 (Herald): the fence waits sleep after 200 us of spinning,
+     * in steps of RadeonGLWaitSleep us (default 500; 0: the old spin) */
+    k->wait_spin_us = 200;
+    k->wait_sleep_us = 500;
+    n = GetVar((STRPTR) "RadeonGLWaitSleep", (STRPTR) flag, sizeof(flag), 0);
+    if (n > 0)
+    {
+        for (i = 0, v = 0; i < (ULONG) n && flag[i] >= '0' && flag[i] <= '9'; i++)
+            v = v * 10 + (ULONG) (flag[i] - '0');
+        if (i > 0)
+            k->wait_sleep_us = (v > 20000) ? 20000 : v;
+    }
     return TRUE;
+}
+
+/* 2026-11-15 (Herald: a priority-0 task ran only every 115-160 ms while a
+ * bitmap context's presents spun for the Radeon): R2Ring_WaitFence, but
+ * after wait_spin_us without the fence it sleeps on timer.device between
+ * the reads (the card's request -- nothing else of it is out during a
+ * flush), so the other tasks of the same priority run meanwhile.
+ * wait_sleep_us 0: the plain spin. Here, behind the hot code, and through
+ * r2ring.h only: r2ring.o and CardFlush keep their places. */
+#define WAIT_END_US 600         /* spun before a wait's guessed end */
+
+static LONG WaitFenceSleep(struct Card *k, ULONG seq)
+{
+    struct R2Ring *r;
+    struct timerequest *t;
+    ULONG start;
+    ULONG gone;
+    ULONG end;
+    ULONG slept;
+    LONG err;
+
+    r = &k->ring;
+    /* only with this task's own timer request: SettleOthers settles the
+     * card another program left running (card_running), in THIS task --
+     * a DoIO on that card's request would wait for a reply that goes to
+     * its owner, holding a Picasso96 lock (the A4000D dropped off during
+     * the night's A/B with the user's Herald drawing too). Not ours: spin,
+     * as before */
+    if (k->wait_sleep_us == 0 || k->tport == NULL || k->tport->mp_SigTask != (APTR) FindTask(NULL))
+        return R2Ring_WaitFence(r, seq);
+    err = R2Ring_Commit(r);
+    if (err != R2_OK)
+        return err;
+    if (R2Ring_FenceDone(r, seq))
+        return R2_OK;
+    r->stats.stalls++;
+    start = HwClock(k);
+    /* 2026-11-15 (Herald: 500 us steps are coarse at the end of a ~6 ms
+     * wait): the end the last wait had is the guess -- sleep until
+     * WAIT_END_US before it, spin the rest; a wait that runs far past the
+     * guess sleeps again */
+    end = (k->wait_last_us > WAIT_END_US) ? k->wait_last_us - WAIT_END_US : 0;
+    slept = 0;
+    while (!R2Ring_FenceDone(r, seq))
+    {
+        gone = HwClock(k) - start;
+        if (gone > r->timeout_us)
+            return R2_ETIMEOUT;
+        if (gone >= k->wait_spin_us && (gone < end || gone > end + 2 * WAIT_END_US))
+        {
+            t = k->treq;
+            t->tr_node.io_Command = TR_ADDREQUEST;
+            t->tr_time.tv_secs = 0;
+            t->tr_time.tv_micro = k->wait_sleep_us;
+            DoIO((struct IORequest *) t);
+            k->wait_sleeps++;
+            slept = 1;
+        }
+    }
+    if (slept)
+    {
+        gone = HwClock(k) - start;
+        if (end != 0 && gone >= end)
+            k->wait_spun_end++;
+        k->wait_last_us = gone;
+    }
+    return R2_OK;
 }
 
 /* What every kind of context needs once its target is there: the ring, the

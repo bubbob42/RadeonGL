@@ -251,7 +251,16 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     PutU(f, k->dwords); Put(f, "\n");
     Put(f, "lock per flush: mean "); PutU(f, k->lock_flushes ? k->lock_us_sum / k->lock_flushes : 0);
     Put(f, " us, max "); PutU(f, k->lock_us_max); Put(f, " us; fence wait max ");
-    PutU(f, k->fence_us_max); Put(f, " us\n");
+    PutU(f, k->fence_us_max);
+    if (k->wait_sleep_us != 0)
+    {
+        Put(f, " us (sleeping in steps of "); PutU(f, k->wait_sleep_us);
+        Put(f, " us after "); PutU(f, k->wait_spin_us); Put(f, " us: slept ");
+        PutU(f, k->wait_sleeps); Put(f, " times; the end spun out ");
+        PutU(f, k->wait_spun_end); Put(f, " times, the last wait us "); PutU(f, k->wait_last_us); Put(f, ")\n");
+    }
+    else
+        Put(f, " us (spinning: RadeonGLWaitSleep=0)\n");
 #ifdef CARD_OVERLAP_STAT
     Put(f, "overlap estimate: "); PutU(f, k->ov_n);
     Put(f, " unlocks after a fence; the GPU's tail at the unlock: mean ");

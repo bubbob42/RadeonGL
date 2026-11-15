@@ -1163,7 +1163,10 @@ CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow
 # 2026-11-14, context-fail-log (Reflector: a context refused after the card
 # opened left no log): three calls in rgl.o, +52 bytes in front of the pad;
 # the words are in rgllog.o, behind the hot code: 10668 - 52.
-RGL_DISPATCH_PAD := 10616
+# 2026-11-15, sleep-wait-2 (Herald: the fence waits spun; WaitFenceSleep,
+# the RadeonGLWaitSleep read, the own-task test, the spun end): card.o
+# 22620, +336 against 0.15. Both merged: 10668 - 52 - 336.
+RGL_DISPATCH_PAD := 10280
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
