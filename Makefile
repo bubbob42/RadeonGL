@@ -1176,7 +1176,7 @@ RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/c
               $(addprefix build/rgl/core_,$(addsuffix .o,$(CORE_LATE))) \
               build/rgl/rgllight.o build/rgl/rglread.o build/rgl/rglcompat.o build/rgl/rgldlist.o build/rgl/rglglut.o \
               build/rgl/rgltable.o build/rgl/cardflip.o build/rgl/rgllog.o build/rgl/rglport.o build/rgl/cardview.o \
-              build/rgl/cardwait.o
+              build/rgl/cardwait.o build/rgl/cardheap.o
 
 build/rgl/rgl_dispatch.c build/rgl/rgl_dispatch.h: $(MGL_DISPATCH) tools/gen_dispatch.py lib/rgl.c lib/rgllight.c lib/rglread.c lib/rglcompat.c lib/rgldlist.c lib/rglglut.c lib/cardflip.c Makefile
 	@mkdir -p build/rgl

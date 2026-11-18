@@ -2249,14 +2249,15 @@ static ULONG OpenRest(struct Card *k, ULONG check, char *why, ULONG whylen)
     top = k->heap_top;
     step = 2UL << 20;
     ok = FALSE;
-    for (size = top; !ok && !Card_HeapNarrow && size >= k->heap_min; size -= step)
+    for (size = top; !ok && !Card_HeapNarrow && size >= k->heap_min;
+         size = (size > step) ? size - step : (size >> 1))
     {
+        /* 2026-11-18: below 2 MB in halves (a window's or bitmap's floor is
+         * 1 MB: Herald's blank cards under VRAM pressure) */
         if (HeapTry(k, size, CARD_HEAP_WIDE) || HeapTry(k, size, CARD_HEAP_BLIT)
             || (k->kind == CARD_KIND_SCREEN && size == top && !Card_NoHeap32
                 && HeapTry(k, size, CARD_HEAP_WB32)))
             ok = TRUE;
-        if (size < step)
-            break;
     }
     for (size = top; !ok && Card_HeapNarrow && size >= k->heap_min; size >>= 1)
     {
@@ -2265,8 +2266,9 @@ static ULONG OpenRest(struct Card *k, ULONG check, char *why, ULONG whylen)
     }
     if (!ok)
     {
-        Why(why, whylen, (k->heap_min >= (4UL << 20)) ? "no texture heap of 4 MB or more on the board"
-                                                      : "no texture heap of 2 MB or more on the board");
+        /* + the board's free memory as Picasso96 sees it (cardheap.c) */
+        Card_HeapWhy(k, why, whylen, (k->heap_min >= (4UL << 20)) ? "no 4096 KB texture heap onboard"
+                                                                  : "no 1024 KB texture heap onboard");
         return CARD_FAILED;
     }
 
@@ -2614,7 +2616,8 @@ static ULONG OpenWindowKind(struct Card *k, struct Window *win, ULONG own, const
     if (k->heap_top > (16UL << 20))
         k->heap_top = 16UL << 20;
     k->heap_top &= ~((2UL << 20) - 1);
-    k->heap_min = 2UL << 20;
+    k->heap_min = 1UL << 20;        /* 2026-11-18: was 2 MB (Herald under VRAM pressure): the
+                                     * 512 KB stream + 512 KB for textures, no upload cache */
     res = CARD_FAILED;
     if (OpenTimer(k, why, whylen) && AllocTarget(k, why, whylen) && AllocShow(k, why, whylen))
         res = OpenRest(k, check, why, whylen);
@@ -2810,7 +2813,7 @@ static ULONG CardOpenBitMap(struct Card *k, struct BitMap *bm, const struct Card
             if (k->heap_top > (16UL << 20))
                 k->heap_top = 16UL << 20;
             k->heap_top &= ~((2UL << 20) - 1);
-            k->heap_min = 2UL << 20;
+            k->heap_min = 1UL << 20;        /* 2026-11-18: was 2 MB, as a window's */
             if (BitMapRows(k, why, whylen) && OpenTimer(k, why, whylen) && AllocTarget(k, why, whylen))
                 res = OpenRest(k, check, why, whylen);
         }

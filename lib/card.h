@@ -399,6 +399,10 @@ ULONG Card_ReadReg(struct Card *k, ULONG reg);
  * arguments (the ring is a card's own, k->ring), so the calls in card.c
  * keep their size and the hot code its place */
 LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq);
+/* The words when no texture heap fits on the board: what (the floor tried)
+ * and the board's free memory as Picasso96 reports it (cardheap.c, linked
+ * late; card.c keeps the text so its code stays where it was) */
+void Card_HeapWhy(struct Card *k, char *why, ULONG whylen, const char *what);
 
 /* rglport.c: every flush to the Radeon, for the public port (rglport.h) */
 void Port_Flushed(void);
