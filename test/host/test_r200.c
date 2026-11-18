@@ -1082,9 +1082,17 @@ static LONG HardRun(struct R2Cs *cs)
     return e;
 }
 
+static void HardState(struct R2Cs *cs);
+
 static void HardSetup(struct R2Cs *cs)
 {
     R2Cs_InitBuffer(cs, hb, 8192, 0);
+    HardState(cs);
+}
+
+/* a frame's state, as RadeonGL sets it */
+static void HardState(struct R2Cs *cs)
+{
     R2E_TclDefaults(cs);
     R2E_RasterDefaults(cs);
     R2E_ColorTarget(cs, COLOR_GPU, 640, 0);
@@ -1279,6 +1287,81 @@ static void test_checker_hardening(void)
     CHECK_INT(HardRun(&cs), R2CE_INDX);
 }
 
+/* The panning tear's wait (2026-11-14, lib/cardflip.c BeamPacket and
+ * CardFlip_Beam): built byte-reversed into exactly four dwords, the vsync
+ * copy's own pair; the checker passes it alone (BeamPacket runs it so on
+ * the flush's checker state), in a state a frame left, at the head of a
+ * frame and twice in one stream (the ring of two flushes), for every
+ * displayed line count on both CRTCs, and no window is left behind */
+static void test_beam_wait(void)
+{
+    ULONG pkt[4];
+    struct R2Cs cs;
+    struct R2ChkState st;
+    struct R2ChkError err;
+    ULONG crtc;
+    ULONG disp;
+    ULONG bad;
+
+    for (crtc = 0; crtc < 2; crtc++)
+    {
+        R2Cs_InitBuffer(&cs, pkt, 4, 1);
+        CHECK_INT(R2E_WaitVline(&cs, crtc, 0, 768), R2_OK);
+        CHECK_INT(cs.error, R2_OK);
+        CHECK(cs.ptr == pkt + 4);
+        CHECK_HEX(pkt[0], R2Cs_Swap32(R2_PKT0(crtc ? R_CRTC2_GUI_TRIG_VLINE : R_CRTC_GUI_TRIG_VLINE, 0)));
+        CHECK_HEX(pkt[1], R2Cs_Swap32((768UL << R_TRIG_VLINE_END_SHIFT) | R_TRIG_VLINE_INV | R_TRIG_VLINE_STALL));
+        CHECK_HEX(pkt[2], R2Cs_Swap32(R2_PKT0(R_WAIT_UNTIL, 0)));
+        CHECK_HEX(pkt[3], R2Cs_Swap32(R_WAIT_CRTC_VLINE | (crtc ? R_ENG_DISPLAY_CRTC2 : 0)));
+        R2Chk_Reset(&st);
+        CHECK_INT(CheckBuf(pkt, 4, 1, 0, &st, &err), R2CE_OK);
+        CHECK_INT(st.have & (R2CHK_HAVE_VLINE1 | R2CHK_HAVE_VLINE2), 0);
+        CHECK_INT(R2Chk_End(&st, &err), R2CE_OK);
+        bad = 0;
+        for (disp = 2; disp <= R_TRIG_VLINE_LINE_MASK; disp++)
+        {
+            R2Cs_InitBuffer(&cs, pkt, 4, 1);
+            (void) R2E_WaitVline(&cs, crtc, 0, disp);
+            R2Chk_Reset(&st);
+            if (cs.error != R2_OK || cs.ptr != pkt + 4 || CheckBuf(pkt, 4, 1, 0, &st, &err) != R2CE_OK
+                || (st.have & (R2CHK_HAVE_VLINE1 | R2CHK_HAVE_VLINE2)) != 0)
+                bad++;
+        }
+        CHECK_INT(bad, 0);
+    }
+    /* one dword short: the buffer says so (BeamPacket then refuses) */
+    R2Cs_InitBuffer(&cs, pkt, 3, 1);
+    (void) R2E_WaitVline(&cs, 0, 0, 768);
+    CHECK(cs.error != R2_OK);
+
+    /* on the state a frame left, checked in pieces as the flush does */
+    R2Cs_InitBuffer(&cs, hb, 8192, 1);
+    HardState(&cs);
+    HardTri(&cs);
+    R2Chk_Reset(&st);
+    CHECK_INT(CheckBuf(hb, (ULONG) (cs.ptr - hb), 1, 0, &st, &err), R2CE_OK);
+    R2Cs_InitBuffer(&cs, pkt, 4, 1);
+    (void) R2E_WaitVline(&cs, 0, 0, 768);
+    CHECK_INT(CheckBuf(pkt, 4, 1, 0, &st, &err), R2CE_OK);
+    R2Cs_InitBuffer(&cs, hb, 8192, 1);
+    HardTri(&cs);
+    CHECK_INT(CheckBuf(hb, (ULONG) (cs.ptr - hb), 1, 0, &st, &err), R2CE_OK);
+    CHECK_INT(R2Chk_End(&st, &err), R2CE_OK);
+
+    /* at a frame's head, and again before the next one in the same stream */
+    R2Cs_InitBuffer(&cs, hb, 8192, 1);
+    (void) R2E_WaitVline(&cs, 1, 0, 1080);
+    HardState(&cs);
+    HardTri(&cs);
+    (void) R2E_WaitVline(&cs, 1, 0, 1080);
+    HardTri(&cs);
+    CHECK_INT(cs.error, R2_OK);
+    R2Chk_Reset(&st);
+    CHECK_INT(CheckBuf(hb, (ULONG) (cs.ptr - hb), 1, 0, &st, &err), R2CE_OK);
+    CHECK_INT(st.have & (R2CHK_HAVE_VLINE1 | R2CHK_HAVE_VLINE2), 0);
+    CHECK_INT(R2Chk_End(&st, &err), R2CE_OK);
+}
+
 int main(void)
 {
     test_headers();
@@ -1292,6 +1375,7 @@ int main(void)
     test_arrays();
     test_rejects();
     test_checker_hardening();
+    test_beam_wait();
     test_ring_basic();
     RingStress(1, 97, 0, 0, "swap, NOP filler, slow GPU");
     RingStress(0, 97, R2RING_TYPE2_FILL, 0, "no swap, PACKET2 filler, slow GPU");

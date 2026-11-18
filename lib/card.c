@@ -472,6 +472,8 @@ static void UnlockAll(struct Card *k)
 
     for (i = CARD_NBM; i-- > 0;)
         UnlockBm(k, i);
+    if (k->nview != 0)
+        CardView_Unlock(k);         /* R4: the bitmap views (cardview.c) */
 }
 
 /* A friend bitmap of the screen of at least bytes, rows of CARD_ROW bytes. */
@@ -947,7 +949,7 @@ static void Settle(struct Card *k, BOOL closing)
     if (!R2Ring_FenceDone(&k->ring, k->pend_seq))
         k->ov_waits++;
     t0 = HwClock(k);
-    if (R2Ring_WaitFence(&k->ring, k->pend_seq) != R2_OK)
+    if (Card_WaitFenceSleep(&k->ring, k->pend_seq) != R2_OK)
         k->lost = CARD_LOST_FENCE;
     us = HwClock(k) - t0;
     if (us > k->fence_us_max)
@@ -1103,6 +1105,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         k->cfg.range[2].size = k->heap_size;
         k->cfg.range[2].kinds = R2K_TEXTURE | R2K_VERTEX | R2K_INDEX;
         k->cfg.nranges = 3;
+        if (k->nview != 0)
+            k->cfg.nranges = CardView_Ranges(k, &k->cfg, 3);
         e = R2Chk_Run(&k->cfg, &k->chk, k->cmd, n, 1, 0, &k->err);
         if (e != R2CE_OK)
         {
@@ -1121,7 +1125,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
      * buffer, the program's bitmap), on the board */
     if (!LockBm(k, CARD_TARGET, FALSE) || !LockBm(k, CARD_RING, FALSE)
         || !LockBm(k, CARD_HEAP, FALSE)
-        || ((k->kind == CARD_KIND_BITMAP || k->flip_on) && !LockBm(k, CARD_SCREEN, FALSE)))
+        || ((k->kind == CARD_KIND_BITMAP || k->flip_on) && !LockBm(k, CARD_SCREEN, FALSE))
+        || (k->nview != 0 && !CardView_Lock(k)))
     {
         UnlockAll(k);
         SettleAlone(k, FALSE);
@@ -1174,7 +1179,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     /* 2. did a bitmap move since this frame was built? */
     TargetAt(k, &color, &depth);
     heap = k->b[CARD_HEAP].gpu + k->heap_delta;
-    if (color != k->color_gpu || depth != k->depth_gpu || heap != k->heap_gpu)
+    if (color != k->color_gpu || depth != k->depth_gpu || heap != k->heap_gpu
+        || (k->nview != 0 && CardView_Moved(k)))
     {
         UnlockAll(k);
         k->moved++;
@@ -1261,6 +1267,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         k->cfg.range[3].size = k->b[CARD_SCREEN].bpr * k->show_h;
         k->cfg.range[3].kinds = R2K_COLOR;
         k->cfg.nranges = 4;
+        if (k->nview != 0)          /* R4: the present restores a view's TXOFFSET */
+            k->cfg.nranges = CardView_Ranges(k, &k->cfg, 4);
         e = R2Chk_Run(&k->cfg, &k->chk, k->cmd + i, n - i, 1, i, &k->err);
         if (e != R2CE_OK)
         {
@@ -1344,6 +1352,8 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         WHERE(79, k->core->udirty_n);
     }
     WHERE(7, n);
+    if (k->flip_on)
+        CardFlip_Beam(k);           /* a third a pan left: the Radeon waits for the blank */
     e = CopyCommands(k, n);
     if (e == R2_OK)
         e = R2Ring_Fence(&k->ring, &seq);
@@ -1369,7 +1379,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
     t0 = HwClock(k);
     WHERE(81, seq);
     if (e == R2_OK)
-        e = R2Ring_WaitFence(&k->ring, seq);
+        e = Card_WaitFenceSleep(&k->ring, seq);
     us = HwClock(k) - t0;
     WHERE(82, us);
     if (us > k->fence_us_max)
@@ -2198,6 +2208,7 @@ static BOOL OpenTimer(struct Card *k, char *why, ULONG whylen)
     k->clock_base = Ticks();
     return TRUE;
 }
+
 
 /* What every kind of context needs once its target is there: the ring, the
  * texture heap, the fast-RAM buffers, and the chip checked inside one lock.

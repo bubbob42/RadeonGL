@@ -40,7 +40,8 @@ struct CardFlip
     struct Process *helper;     /* NULL: the pans run in the GL task */
     LONG sig;                   /* the owner's signal: a pan is done; -1 none */
     volatile ULONG asked;       /* pans asked for (a sequence) */
-    volatile ULONG done;        /* ... done: ScrollVPort returned, the left third is off the display */
+    volatile ULONG done;        /* ... done: ScrollVPort returned; the left third is off the display by */
+                                /* the bookkeeping, on show until the next blank (cure B: beam_*) */
     volatile ULONG pan_to;      /* the third the next pan shows */
     volatile ULONG quit;        /* the helper is to end */
     volatile ULONG alive;       /* the helper runs */
@@ -90,6 +91,79 @@ struct CardFlip
     ULONG pan_pending;          /* ... with the offset update still pending */
     ULONG pan_eighths[8];       /* the return lines by eighths of the displayed lines */
     ULONG wait_us_max, wait_us_sum;     /* the safe waits' */
+
+    /* 2026-11-14, the panning tear's cure (docs/concept-panning-tear.md,
+     * B; the rule: cardflip_sm.h FlipBeam_*): the third a helper pan left
+     * is on show until the next blank, so the first flush that draws into
+     * it lets the Radeon wait for that blank, unless one is known to have
+     * passed since the pan */
+    ULONG beam_left;            /* bit n = third n left by a pan, no verdict since */
+    ULONG left_seq[CARD_FLIP_N];    /* ... by the pan of this number (asked) */
+    ULONG beam_go;              /* this flush: CardFlip_Beam decides at the kick, */
+    ULONG beam_third;           /* ... for this third */
+    /* the helper's, from the pan that took the display off third n (it
+     * keeps the third the display is on itself: a pan it never ran, the
+     * game asking again after WaitPan's 100 ms, leaves no false record) */
+    volatile ULONG h_shown;     /* the third the display was last panned onto */
+    volatile ULONG h_ok[CARD_FLIP_N];       /* the beam line after the pan is a reference, */
+    volatile ULONG h_line[CARD_FLIP_N];     /* ... the line, */
+    volatile ULONG h_disp[CARD_FLIP_N];     /* ... the lines displayed, */
+    volatile ULONG h_crtc[CARD_FLIP_N];     /* ... of CRTC (0) or CRTC2 (1), */
+    volatile ULONG h_ticks[CARD_FLIP_N];    /* ... and the E clock after the read */
+    ULONG ref_line;             /* this flush's verdict: the reference, */
+    ULONG pan_ticks;            /* ... its pan's E clock (no earlier than the register write) */
+    ULONG beam_pkt[4];          /* the Radeon's wait (R2E_WaitVline), in the ring's byte order, */
+    ULONG pkt_ok;               /* ... built and through the checker for */
+    ULONG pkt_crtc, pkt_disp;   /* ... this CRTC and these lines */
+    /* for the log */
+    ULONG beam_waits;           /* flushes the Radeon waited for the blank */
+    ULONG beam_passed;          /* no wait: a blank had passed since the pan (by the beam) */
+    ULONG beam_aged;            /* no wait: the pan was a refresh period old */
+    ULONG beam_late;            /* the helper's line was no reference (in the blank or its last */
+                                /* FLIP_BEAM_GUARD lines, or no CRTC): polled for one */
+    ULONG beam_polls;           /* ... 1 ms sleeps of those polls */
+    ULONG beam_timed;           /* the 68k waited out the refresh period instead (no reference, */
+                                /* no CRTC, the wait refused) */
+    ULONG beam_refused;         /* the Radeon's wait did not pass the checker */
+    ULONG beam_out;             /* the pan had not come back (WaitPan's 100 ms): no verdict */
+    ULONG beam_mode;            /* at the kick the CRTC's mode was another (or none): no wait */
+    ULONG beam_odd;             /* at the kick a line no counter gives: waited */
+    volatile ULONG pan_cmp;     /* pans whose CRTC(2)_OFFSET was compared (a CRTC was on) */
+    volatile ULONG pan_same;    /* ... unchanged when ScrollVPort returned (the write is not in the */
+                                /* call: the rule's premise fails) */
+    volatile ULONG pan_crtc;    /* the last compared pan's CRTC (0, 1 = CRTC2), */
+    volatile ULONG pan_off0, pan_off1;  /* ... its offset before and after, */
+    volatile ULONG pan_cntl;    /* ... and its OFFSET_CNTL after */
+
+    /* 2026-11-14, step R1 (docs/step-r-design.md): without a helper the GL
+     * task pans at the flush's start, once the engine is idle. Appended
+     * here: card.c reads only panel and sm.draw, card.o stays as it was */
+    struct FlipLine line;       /* the beam's line time, an upper bound (R1: the log only) */
+    ULONG a_valid;              /* this flush's pan read the beam: the kick reads it again */
+    ULONG a_line, a_ticks;      /* ... that line (sample A when in the picture), the E clock before it */
+    ULONG a_crtc, a_disp, a_vtot, a_htot;   /* ... in this mode */
+    ULONG last_left;            /* the third this flush's pan left: its record may take the kick's line */
+    volatile ULONG bn_left;     /* BeamNote filed a record with a good read for this third, or NONE */
+    volatile ULONG h_vtot[CARD_FLIP_N];     /* a record's total lines */
+    volatile ULONG h_htot[CARD_FLIP_N];     /* ... and CRTC(2)_H_TOTAL_DISP */
+    /* for the log */
+    ULONG fin_lock;             /* the last frame settled already (a heap lock, a waited flush, none) */
+    ULONG fin_fence;            /* ... its fence had passed */
+    ULONG fence_waits;          /* ... the GL task slept for its fence */
+    ULONG fence_sleeps;         /* ... 1 ms sleeps */
+    ULONG fence_us_max, fence_us_sum;
+    ULONG fence_gaveup;         /* ... 100 ms and still not done: no pan this flush */
+    ULONG pan_hidden;           /* a pan due while the GL screen was behind another: not made */
+    ULONG pan_cp_off, pan_cp_off_us;    /* ScrollVPort with the CP stopped: calls, us summed */
+    ULONG pan_cp_on, pan_cp_on_us;      /* ... with the CP left running, idle */
+    ULONG ref_kick;             /* a record's reference taken at the kick (the pan's line was none) */
+    ULONG beam_refresh;         /* step R2: no wait, a refresh measured from the beam had gone by */
+    ULONG line_samples, line_resets;
+    ULONG rest_n, rest_us_min, rest_us_sum;  /* a left third, the pan to the kick into it */
+    ULONG pred[3];              /* the line predicted at the kick from sample A: within 32, 128, more */
+    ULONG pace_waits;           /* pans held until the last pan's offset was taken (faster than the refresh) */
+    ULONG pace_sleeps;          /* ... 1 ms sleeps */
+    ULONG pace_gaveup;          /* ... CF_PACE_SLEEPS and still not known: panned anyway */
 };
 
 /* mglChooseNumberOfBuffers: the next screen context's wish (reset when a
@@ -125,8 +199,13 @@ void CardFlip_Unbuffer(struct Card *k);
 /* Card_Close: everything */
 void CardFlip_Free(struct Card *k);
 
-/* The flush (card.c CardFlush). Safe: before anything, the third drawn
- * into off the display. Settled: in the lock, after the last frame was
+/* The flush (card.c CardFlush). Safe: before anything -- panning without
+ * the helper (step R), the frame the last flush kicked shown once the
+ * engine is idle (the GL task may sleep for its fence, 1 ms steps, 100 at
+ * most); with the helper, the third drawn into off the display by the
+ * bookkeeping -- and, for a third a pan left (cure B), the beam's
+ * reference for Beam: may sleep on timer.device, 1 ms polls for a
+ * reference, at most 8, or without a beam the rest of FLIP_BEAM_AGED_US. Settled: in the lock, after the last frame was
  * settled. Present: in the lock, the frame's end and the next frame's
  * third. After: after the unlock, the next frame retargeted and the
  * finished frame shown. */
@@ -134,6 +213,13 @@ void CardFlip_Safe(struct Card *k);
 void CardFlip_Settled(struct Card *k);
 void CardFlip_Present(struct Card *k);
 void CardFlip_After(struct Card *k);
+/* Beam: in the lock, right before the frame's commands go into the ring.
+ * Acts on Safe's preparation only: a flush that draws into a third a pan
+ * left while the beam has not been through a blank since puts the
+ * Radeon's wait for the blank first (four dwords, committed to the CP at
+ * once; the 68k does not wait here) -- if the CRTC still shows the mode
+ * the wait was built for (read here, in the lock) */
+void CardFlip_Beam(struct Card *k);
 
 /* The GL screen is about to close (resize): no pan in flight */
 void CardFlip_Quiet(struct Card *k);

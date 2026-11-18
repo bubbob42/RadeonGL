@@ -430,8 +430,13 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     der Karte, jedes Mal mit einer kurzen Picasso96-Sperre, statt mit
     einer Sperre pro Bild. Auf dem Testrechner etwa 2% schneller.
 
-@{b}RadeonGLUploadCache@{ub}  (Vorgabe: an)
+@{b}RadeonGLUploadCache@{ub}  (Vorgabe: an, 4 MB, die mit der Szene wachsen)
     0 schickt in jedem Bild alle Eckpunkte neu (nur zum Vergleichen).
+    Eine Zahl von 1 bis 256 legt den Cache auf so viele MB Kartenspeicher
+    fest. Eingeschaltet beginnt er mit 4 MB (2 oder 1, wenn
+    Kartenspeicher oder Fast-RAM für 4 fehlt), verdoppelt sich, solange
+    er wiederkehrende Daten verwerfen muss und Kartenspeicher frei ist,
+    und gibt Texturen Speicher zurück, nie unter seine Anfangsgröße.
 
 @{b}RadeonGLLocked@{ub}  (Vorgabe: an)
     0 zeichnet die Eckpunkt-Felder eines Programms auf dem langsamen,
@@ -444,6 +449,17 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Bild fertig, während der Prozessor das nächste aufbaut: GLQuake demo1
     bei 1280 x 720 stieg auf dem Testrechner von 19,9 auf 23,5 Bilder/s.
     Aus ist zum Vergleichen da, oder falls Bilder fehlerhaft werden.
+
+@{b}RadeonGLWaitSleep@{ub}  (Vorgabe: 500)
+    Während ein Programm darauf wartet, dass die Radeon ein Bild fertig
+    hat (beim Zeigen eines Fenster- oder Bitmap-Kontexts, oder bei einer
+    Sperre, die das letzte Bild zu Ende laufen lassen muss), schläft
+    RadeonGL nach den ersten 200 Mikrosekunden in Schritten von so vielen
+    und wartet nur die letzten 600 vor dem erwarteten Ende aktiv. So
+    laufen andere Programme gleicher Priorität weiter: Heralds Karten
+    rollen sanft, und sein Hilfsprogramm für das Mausrad bekommt trotzdem
+    den Prozessor. 0 wartet die ganze Zeit aktiv, wie RadeonGL 0.15 und
+    früher.
 
 @{b}RadeonGLMove16@{ub}  (Vorgabe: aus)
     Nur mit 68060. 1 oder 2 kopiert die Daten jedes Bildes in 16-Byte-
@@ -487,20 +503,28 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Wechsel auf die DispMessage des letzten zu warten. Laut dem Betreuer
     von Picasso96 ist das nicht sicher, und in GLQuake war es nicht
     schneller (21,6 und 17,0 Bilder pro Sekunde wie csb); es ist für
-    Tests da und wird nie von selbst gewählt. Ein Programm darf die Variable lokal für sich
-    setzen und während des Laufs umschalten (so macht es GLQuakes Video
-    Options > Display sync). Auf dem Testrechner (GLQuake demo1) war pan
-    der schnellste Weg ohne Zerreißen: 32,1 Bilder pro Sekunde bei
-    1280 x 720 (Kopieren mit vertikaler Synchronisation 29,9, csb 21,6;
-    Kopieren ohne Synchronisation, das zerreißt, 32,2) und 30,6 bei
-    1920 x 1080 (22,4, 17,0; 28,7).
+    Tests da und wird nie von selbst gewählt. Ein Programm darf die
+    Variable lokal für sich setzen und während des Laufs umschalten (so
+    macht es GLQuakes Video Options > Display sync). Die Karte zeigt ein
+    neues Drittel erst ab der nächsten vertikalen Austastlücke; seit 0.15
+    wartet die Radeon auf diese Lücke, bevor sie in das eben verlassene
+    Drittel zeichnet (vorher zerriss pan das Bild), seit 0.16 nur, bis
+    seit dem Verschieben ein Bildaufbau vergangen ist. Auf dem
+    Testrechner (GLQuake demo1) ist pan der schnellste Weg ohne
+    Zerreißen: 32,4 Bilder pro Sekunde bei 1280 x 720 (0.15: 31,3;
+    Kopieren mit vertikaler Synchronisation 29,9, csb 21,6; Kopieren ohne
+    Synchronisation, das zerreißt, 32,2) und 30,6 bei 1920 x 1080 (0.15:
+    27,9; 22,4, 17,0; 28,7).
 
-@{b}RadeonGLHelperPri@{ub}  (Vorgabe: -1 für pan, +1 für csb)
-    Die Priorität des Tasks, der die drei Puffer zeigt, gegenüber der des
-    Programms. pan wartet, bis die Karte das Bild fertig hat; unterhalb
-    des Programms kostet dieses Warten das Programm nichts (oberhalb war
-    pan 26,6 Bilder pro Sekunde statt 32,1). ChangeScreenBuffer läuft
-    oberhalb am besten.
+@{b}RadeonGLHelperPri@{ub}  (Vorgabe: nicht gesetzt für pan, +1 für csb)
+    pan: Nicht gesetzt verschiebt der Task des Programms selbst, zu Beginn
+    des nächsten Bildes, sobald die Karte das letzte fertig hat: kein
+    zusätzlicher Task, und das Bild erscheint ein Bild früher. Gesetzt
+    zeigt ein Hilfstask die drei Puffer mit dieser Priorität gegenüber der
+    des Programms, wie in 0.15 (dort war -1 die Vorgabe; oberhalb des
+    Programms lief pan mit 26,6 Bildern pro Sekunde statt 32,1).
+    ChangeScreenBuffer nutzt immer den Hilfstask und läuft oberhalb des
+    Programms am besten (+1).
 
         SetEnv SAVE RadeonGLFlip csb
 @endnode
@@ -800,14 +824,61 @@ Hardware getestet.
 
 @{b}Versionen@{ub}
 
+0.16 (15.11.2026)
+    * drei Puffer durch Verschieben sind schneller, weiterhin ohne
+      Zerreißen: Der Task des Programms verschiebt jetzt selbst, zu
+      Beginn des nächsten Bildes, sobald die Karte das letzte fertig hat,
+      und das Bild erscheint ein Bild früher. Die Radeon wartet auf die
+      Austastlücke nur noch, bis seit dem Verschieben ein Bildaufbau
+      vergangen ist, am Strahl gemessen. GLQuake demo1 auf dem
+      Testrechner: 31,4 Bilder pro Sekunde bei 1024 x 768, 32,4 bei
+      1280 x 720, 30,6 bei 1920 x 1080 (0.15 in den Messungen derselben
+      Nacht: 30,4, 31,3, 27,9), bei den ersten beiden Größen so schnell
+      wie mit Zerreißen. In einem Blindtest ohne Zerreißen gesehen. Ein
+      gesetztes RadeonGLHelperPri holt den Hilfstask von 0.15 zurück
+    * beim Warten auf die Karte schläft RadeonGL nach 200 Mikrosekunden
+      auf dem timer.device, statt aktiv zu warten (die letzten 600 vor
+      dem erwarteten Ende wartet es aktiv); andere Tasks gleicher
+      Priorität laufen derweil weiter (Herald: ein Task der Priorität 0
+      kam während eines Gleitens nach 11 bis 60 ms statt nach 114 bis
+      185 ms dran). RadeonGLWaitSleep=n setzt den Schritt in
+      Mikrosekunden (Vorgabe 500, 0: wartet aktiv wie bisher)
+    * ein Kontext, der nach dem Öffnen der Karte abgelehnt wird (etwa
+      mangels Fast-RAM), nennt den Grund jetzt im Log (Reflector)
+
+0.15 (14.11.2026)
+    * behoben: drei Puffer durch Verschieben zerrissen das Bild. Die
+      Karte zeigt ein neues Drittel erst ab der nächsten vertikalen
+      Austastlücke, und das nächste Bild wurde in das Drittel gezeichnet,
+      das noch zu sehen war. Die Radeon wartet jetzt auf diese Lücke,
+      bevor sie dort zeichnet, außer der Strahl hat die Lücke schon
+      hinter sich. Es ist dieselbe Wartebedingung wie beim Kopieren mit
+      vertikaler Synchronisation; nichts, was das Bild verändert, wird
+      geschrieben. GLQuake demo1 auf dem Testrechner ohne Zerreißen: 30,1
+      Bilder pro Sekunde bei 1024 x 768, 31,5 bei 1280 x 720, 27,9 bei
+      1920 x 1080 (2 bis 10% langsamer als mit Zerreißen; bei 1280 x 720
+      und 1920 x 1080 immer noch schneller als das Kopieren mit
+      vertikaler Synchronisation, 29,9 und 22,4)
+    * der Upload-Cache beginnt mit 4 MB (bisher 2) und wächst mit der
+      Szene, solange Kartenspeicher frei ist; Texturen bekommen Speicher
+      von ihm zurück. RadeonGLUploadCache=n legt ihn auf n MB fest
+    * behoben: mit dem Hinweis für statische Felder konnte ein Bild mit
+      mehr neuen Daten, als der Upload-Cache fasste, Daten überschreiben,
+      aus denen es noch zeichnete (Reflector)
+    * GL_RGL_bitmap_view: eine Picasso96-Bitmap auf der Karte
+      (R5G6B5PC, R5G5B5PC oder B8G8R8A8), ohne Kopie als Textur
+      gezeichnet, bis zu vier pro Kontext (Herald)
+    * GLQuake mit zwei Puffern so schnell wie mit 0.14
+
 0.14 (13.11.2026)
     * drei Puffer durch Verschieben (der vorgegebene Weg) sind viel
       schneller: Der Task, der verschiebt, läuft jetzt unterhalb des
       Programms, sein Warten auf die Karte kostet das Programm also
       nichts. GLQuake demo1: 32,1 Bilder pro Sekunde bei 1280 x 720
       (0.13: 26,6) und 30,6 bei 1920 x 1080 (0.13: 21,9), schneller als
-      das Kopieren mit vertikaler Synchronisation (29,9 und 22,4) und ohne
-      Zerreißen; RadeonGLHelperPri setzt die Priorität dieses Tasks
+      das Kopieren mit vertikaler Synchronisation (29,9 und 22,4); das
+      Verschieben zerriss das Bild, was 0.15 behebt; RadeonGLHelperPri
+      setzt die Priorität dieses Tasks
     * RadeonGLFlip=csbnowait: ChangeScreenBuffer, ohne auf die
       DispMessage jedes Wechsels zu warten, nur für Tests (laut dem
       Betreuer von Picasso96 nicht sicher, und GLQuake war damit nicht

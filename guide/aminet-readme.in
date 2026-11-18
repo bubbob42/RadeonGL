@@ -6,10 +6,7 @@ Version:      @VERSION@
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
-Requires:     A Radeon 8500, 9000, 9100, 9200 or 9250 driven by
-              Picasso96 3.6+ (Radeon.card); a 68040 or 68060 with FPU,
-              or a 68020/68030 with 68881/68882 (a second build);
-              AmigaOS 3.1+ (tested on 3.2).
+Requires:     R200 Radeon 8500-9250, Picasso96 3.6+, 68020+ with FPU
 Kurz:         minigl.library fuer R200-Radeons an P96
 
 RadeonGL @VERSION@  --  @DATE@
@@ -61,7 +58,7 @@ FEATURES
     in every GL 1.1 layout and type, MiniGL's own main loop
   * A Picasso96 screen of its own, 16 or 32 bit, up to 2048 x 2048, in
     every mode of the card, switched while the program runs; vertical
-    sync
+    sync, or three buffers without tearing
   * Or a window on the Workbench (the program's or one of its own), or
     straight into the program's bitmap, on 15-, 16- and 32-bit screens
   * Several programs at once, each with its own context
@@ -152,10 +149,23 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.16 (15.11.2026)
+  - panning faster, still tear-free: the program's task pans (GLQuake
+    demo1 32.4 fps at 1280 x 720, 30.6 at 1920 x 1080; 0.15: 31.3, 27.9)
+  - the waits for the card sleep instead of spinning (RadeonGLWaitSleep)
+  - a context refused after the card opened says why in the log
+
+0.15 (14.11.2026)
+  - fixed: panning tore the picture (0.14 was wrong to call it tear-free)
+  - the upload cache starts at 4 MB and grows with the scene
+  - fixed: a stale upload-cache block under the static arrays hint
+  - GL_RGL_bitmap_view: board bitmaps as textures without a copy
+
 0.14 (13.11.2026)
   - panning (three buffers) 21-40% faster, its task now below the
-    program: faster than vsync and tear-free; RadeonGLFlip=csbnowait for
-    tests; faster 32-bit texture uploads, GL_BGRA 0xAARRGGBB words
+    program: faster than vsync (but it tore, fixed in 0.15);
+    RadeonGLFlip=csbnowait for tests; faster 32-bit texture uploads,
+    GL_BGRA 0xAARRGGBB words
 
 0.13 (13.11.2026)
   - public port "RadeonGL" (is anything drawing?), GL_ARB_multitexture

@@ -87,6 +87,18 @@ struct CardBm
     ULONG p96;                  /* from p96AllocBitMap: freed with p96FreeBitMap */
 };
 
+/* R4 (cardview.c): a board bitmap's rectangle drawn from as a texture */
+#define CARD_NVIEW 4
+struct CardView
+{
+    struct BitMap *bm;          /* NULL: free */
+    LONG x, y;
+    ULONG w, h, bpp, bpr;
+    ULONG gpu;                  /* the rectangle's first texel, as the frame was built */
+    LONG lock;
+    UBYTE *mem;
+};
+
 struct Card
 {
     ULONG kind;                 /* CARD_KIND_* */
@@ -213,7 +225,47 @@ struct Card
     ULONG flip_on;
     struct CardFlip *flip;      /* asked for three buffers: the state (kept over a resize) */
     ULONG scr_intui;            /* the GL screen is Intuition's (CloseScreen, not p96CloseScreen) */
+
+    /* 2026-11-14, R4 (lib/cardview.c, GL_RGL_bitmap_view): board bitmaps
+     * drawn from as textures, locked with the targets at every flush */
+    struct CardView view[CARD_NVIEW];
+    ULONG nview;                /* views in use */
+    ULONG view_opened, view_refused, view_dropped, view_moved;
+    char view_why[64];          /* the last refusal, for the log */
+
+    /* 2026-11-15 (Herald): the waits for the Radeon's fence sleep on
+     * timer.device after a short spin, so the other tasks of the same
+     * priority run meanwhile. RadeonGLWaitSleep=us the sleep step (0: the
+     * old spin, no sleep) */
+    ULONG wait_init;            /* the two below read (RadeonGLWaitSleep) at the first wait */
+    ULONG wait_spin_us;         /* spin this long before the first sleep */
+    ULONG wait_sleep_us;        /* each sleep; 0 = spin only */
+    ULONG wait_sleeps;          /* sleeps taken, for the log */
+    ULONG wait_last_us;         /* 2026-11-15: the last wait that slept, start to fence (the next one's guess) */
+    ULONG wait_spun_end;        /* waits whose end was spun out, not slept (for the log) */
+    /* 2026-11-15: GCC copies a struct Card in the four Card_Open* paths,
+     * 16 dwords a loop pass plus the rest one by one. 0.15's 411 dwords left
+     * 11; the six wait dwords alone would shrink each copy by 20 bytes and
+     * move the hot CardFlush behind them (tools/hot_layout.py). 427 dwords
+     * (16 more) keeps 0.15's copy code to the byte. Adding fields: take them
+     * from here. */
+    ULONG layout_spare[10];
 };
+
+/* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
+ * 0 = taken (gpu, pitch in bytes, CORE_VIEW_* format, handle 1..CARD_NVIEW) */
+LONG CardView_Open(struct Card *k, const void *view, ULONG w, ULONG h, ULONG rgba,
+                   ULONG *gpu, ULONG *pitch, ULONG *fmt, ULONG *handle);
+void CardView_Close(struct Card *k, ULONG handle);
+/* the flush: the views' address ranges for the checker (from range n on;
+ * the new count), the locks (FALSE: one off the board), whether one moved
+ * (TRUE: the frame is dropped; the core has the new address), the unlocks */
+ULONG CardView_Ranges(struct Card *k, struct R2ChkCfg *cfg, ULONG n);
+BOOL CardView_Lock(struct Card *k);
+BOOL CardView_Moved(struct Card *k);
+void CardView_Unlock(struct Card *k);
+struct LogOut;
+void CardView_Log(struct LogOut *f, struct Card *k);
 
 extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
 /* Breadcrumbs for the debug trap catcher (trapcatch.h, RGL_TRAPCATCH):
@@ -342,6 +394,11 @@ void Card_Close(struct Card *k);
 
 /* A register read (cardflip.c's beam check around ScrollVPort; reads only) */
 ULONG Card_ReadReg(struct Card *k, ULONG reg);
+/* The fence wait that sleeps on timer.device after a short spin (cardwait.c,
+ * linked late): Settle and the waited present. It takes R2Ring_WaitFence's
+ * arguments (the ring is a card's own, k->ring), so the calls in card.c
+ * keep their size and the hot code its place */
+LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq);
 
 /* rglport.c: every flush to the Radeon, for the public port (rglport.h) */
 void Port_Flushed(void);

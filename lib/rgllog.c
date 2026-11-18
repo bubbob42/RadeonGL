@@ -140,6 +140,20 @@ static void PutCache(struct LogOut *f, const struct Core *c)
     {
         Put(f, "; streamed as dynamic (no key): "); PutU(f, c->stat_dyn_v); Put(f, " vertex blocks");
     }
+    /* its size (ucgrow.c, 2026-11-14) */
+    Put(f, "; size KB: started "); PutU(f, c->ucache_start >> 10);
+    Put(f, ", now "); PutU(f, c->ucache_size >> 10);
+    Put(f, ", largest "); PutU(f, c->ucache_max >> 10);
+    if (c->ucache_fixed)
+        Put(f, " (fixed: RadeonGLUploadCache)");
+    Put(f, "; capacity misses "); PutU(f, c->stat_uc_cap);
+    Put(f, ", grown "); PutU(f, c->stat_uc_grows);
+    Put(f, ", shrunk for textures "); PutU(f, c->stat_uc_shrinks);
+    if (c->stat_uc_refused != 0)
+    {
+        Put(f, ", grows refused "); PutU(f, c->stat_uc_refused);
+        Put(f, c->ug_why == UG_FASTRAM ? " (last: no fast RAM)" : " (last: no heap block that big)");
+    }
     Put(f, "\n");
 }
 
@@ -216,6 +230,7 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     }
     Put(f, ", with no CRTC running: "); PutU(f, k->vsync_off); Put(f, "\n");
     CardFlip_Log(f, k);                 /* triple buffering (cardflip.c) */
+    CardView_Log(f, k);                 /* R4: bitmap views (cardview.c) */
     Put(f, "frames dropped: "); PutU(f, k->dropped); Put(f, " (bitmaps moved "); PutU(f, k->moved);
     Put(f, ", off the board "); PutU(f, k->offboard); Put(f, ")\n");
     Put(f, "frames not drawn, the GL screen behind another: "); PutU(f, k->hidden); Put(f, "\n");
@@ -236,7 +251,16 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     PutU(f, k->dwords); Put(f, "\n");
     Put(f, "lock per flush: mean "); PutU(f, k->lock_flushes ? k->lock_us_sum / k->lock_flushes : 0);
     Put(f, " us, max "); PutU(f, k->lock_us_max); Put(f, " us; fence wait max ");
-    PutU(f, k->fence_us_max); Put(f, " us\n");
+    PutU(f, k->fence_us_max);
+    if (k->wait_sleep_us != 0)
+    {
+        Put(f, " us (sleeping in steps of "); PutU(f, k->wait_sleep_us);
+        Put(f, " us after "); PutU(f, k->wait_spin_us); Put(f, " us: slept ");
+        PutU(f, k->wait_sleeps); Put(f, " times; the end spun out ");
+        PutU(f, k->wait_spun_end); Put(f, " times, the last wait us "); PutU(f, k->wait_last_us); Put(f, ")\n");
+    }
+    else
+        Put(f, " us (spinning: RadeonGLWaitSleep=0)\n");
 #ifdef CARD_OVERLAP_STAT
     Put(f, "overlap estimate: "); PutU(f, k->ov_n);
     Put(f, " unlocks after a fence; the GPU's tail at the unlock: mean ");
@@ -343,6 +367,37 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
         Put(f, ", argument "); PutX(f, r->err_arg); Put(f, "\n");
     }
     PutSlots(r, f);
+}
+
+/* A context the library could not make, the card already open (the null
+ * card's memory, Core_Init, the null card's window): why, in the log only
+ * -- the program hears NULL and says so itself. Reflector, 2026-11-08: on
+ * an 8 MB machine mglCreateContextFromBitMap returned NULL and there was
+ * no log at all. */
+void Rgl_NoContext(struct Rgl *r, ULONG step, ULONG err)
+{
+    struct LogOut *f;
+
+    f = LogOpen(r);
+    if (f == NULL)
+        return;
+    Put(f, "RadeonGL: no context: ");
+    if (step == RGL_NOCTX_NULLMEM)
+        Put(f, "no memory for the null card's command ring and texture heap (4 MB of fast RAM at least)");
+    else if (step == RGL_NOCTX_CORE)
+        Put(f, "the GL state could not be set up (Core_Init: its tables in fast RAM)");
+    else if (step == RGL_NOCTX_WINDOW)
+        Put(f, "the null card's window did not open");
+    else
+        Put(f, "an unknown step");
+    if (err != 0)
+    {
+        Put(f, " (GL error ");
+        PutX(f, err);
+        Put(f, ")");
+    }
+    Put(f, "\n");
+    LogClose(f);
 }
 
 /* A context refused on a Radeon: why, in the log and a requester -- not

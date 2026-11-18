@@ -167,6 +167,11 @@ ULONG Core_IsTexture(struct Core *c, ULONG name)
 
 static void Release(struct Core *c, struct CoreTex *t)
 {
+    if (t->view != 0)
+    {
+        Core_TexViewRelease(c, t);  /* R4: a bitmap's memory, not the heap's */
+        return;
+    }
     if (t->gpu != 0)
     {
         Core_TexHazard(c, t);       /* the GPU may still read the memory */
@@ -727,6 +732,9 @@ static ULONG Allocate(struct Core *c, struct CoreTex *t, ULONG w, ULONG h, ULONG
             break;          /* NPOT: one level */
     }
     off = Heap_Alloc(c, total, 32);
+    /* no room: a grown upload cache gives memory back (ucgrow.c) */
+    while (off == 0xffffffffUL && Core_UCacheShrink(c))
+        off = Heap_Alloc(c, total, 32);
     if (off == 0xffffffffUL)
         return GL_OUT_OF_MEMORY;
     t->gpu = c->heap.gpu + off;
@@ -756,6 +764,29 @@ void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
     if (IN_BEGIN(c))
     {
         Core_Error(c, GL_INVALID_OPERATION);
+        return;
+    }
+    if (format == GL_RGL_BITMAP_VIEW)
+    {
+        /* R4: a board bitmap's rectangle (texview.c). A plain 2D texture of
+         * unit 0 or 1 only: not under GL 1.3's routing (x_route: a unit
+         * above 1 or a cube map) and not a texture tex13.c stores */
+        t = c->tex[c->bound[c->active_unit]];
+        if (t == NULL)
+            return;
+        if (target != GL_TEXTURE_2D || c->x_route || t->x13)
+        {
+            Core_Error(c, (target != GL_TEXTURE_2D) ? GL_INVALID_ENUM : GL_INVALID_OPERATION);
+            return;
+        }
+        if (level != 0 || border != 0)
+        {
+            Core_Error(c, GL_INVALID_VALUE);
+            return;
+        }
+        Release(c, t);
+        Core_TexView(c, t, internal, w, h, pixels);
+        Touched(c, t);
         return;
     }
     base = BaseOf(internal);
@@ -830,7 +861,7 @@ void Core_TexSubImage2D(struct Core *c, ULONG target, LONG level, LONG x, LONG y
         Tex13_TexSubImage2D(c, target, level, x, y, w, h, format, type, pixels);   /* (tex13.c) */
         return;
     }
-    if (t == NULL || t->gpu == 0 || level < 0 || level >= CORE_MAX_LEVELS
+    if (t == NULL || t->gpu == 0 || t->view != 0 || level < 0 || level >= CORE_MAX_LEVELS
         || !(t->levels & (1UL << level)))
     {
         Core_Error(c, GL_INVALID_OPERATION);

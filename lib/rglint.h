@@ -70,7 +70,16 @@ void Port_Count(void);
 
 /* rgllog.c (linked behind the hot code): the delete log and a refusal */
 void Rgl_WriteLog(struct Rgl *r);
+void Rgl_ViewsAttach(struct Rgl *r);    /* cardview.c: R4, the back end's bitmap views */
 void Rgl_Refused(struct Rgl *r, const char *why);
+/* A context that could not be made after the card opened (2026-11-14,
+ * Reflector's 8 MB report of 2026-11-08: a NULL without a word): why, in
+ * the log only; step RGL_NOCTX_*, err a GL error or 0. The words live in
+ * rgllog.c, behind the hot code: rgl.o sits in front of the layout pad */
+#define RGL_NOCTX_NULLMEM  1    /* the null card's ring and heap */
+#define RGL_NOCTX_CORE     2    /* Core_Init */
+#define RGL_NOCTX_WINDOW   3    /* the null card's window */
+void Rgl_NoContext(struct Rgl *r, ULONG step, ULONG err);
 extern ULONG Rgl_UnimplEarly[];         /* rgl.c: slots called before any context */
 /* rglcompat.c (linked last): glGet with the context's buffering known */
 extern const char Rglc_Extensions[];    /* GL_EXTENSIONS (rglcompat.c) */
