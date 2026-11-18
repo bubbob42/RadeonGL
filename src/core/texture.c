@@ -104,9 +104,9 @@ void Core_BindTexture(struct Core *c, ULONG target, ULONG name)
         Core_Error(c, GL_INVALID_OPERATION);
         return;
     }
-    if (target != GL_TEXTURE_2D)
+    if (target != GL_TEXTURE_2D || c->x_route)
     {
-        Core_Error(c, GL_INVALID_ENUM);
+        Tex13_BindTexture(c, target, name);     /* cube maps, units above 1 (tex13.c) */
         return;
     }
     u = c->active_unit;
@@ -226,9 +226,9 @@ void Core_TexParameteri(struct Core *c, ULONG target, ULONG pname, LONG param)
         Core_Error(c, GL_INVALID_OPERATION);
         return;
     }
-    if (target != GL_TEXTURE_2D)
+    if (target != GL_TEXTURE_2D || c->x_route)
     {
-        Core_Error(c, GL_INVALID_ENUM);
+        Tex13_TexParameter(c, target, pname, param);    /* (tex13.c) */
         return;
     }
     t = c->tex[c->bound[c->active_unit]];
@@ -264,7 +264,7 @@ void Core_TexParameteri(struct Core *c, ULONG target, ULONG pname, LONG param)
             Touched(c, t);
             return;
     }
-    Core_Error(c, GL_INVALID_ENUM);
+    Tex13_TexParameter(c, target, pname, param);    /* GL 1.2/1.3's, else GL_INVALID_ENUM */
 }
 
 /* --- Formats -------------------------------------------------------------------- */
@@ -280,7 +280,7 @@ static ULONG BaseOf(LONG internal)
             return GL_LUMINANCE_ALPHA;
         case 3: case GL_RGB: case GL_RGB5: case GL_RGB8: case MGL_UNSIGNED_SHORT_5_6_5:
             return GL_RGB;
-        case 4: case GL_RGBA: case GL_RGBA8: case GL_RGB5_A1: case MGL_UNSIGNED_SHORT_4_4_4_4:
+        case 4: case GL_RGBA: case GL_RGBA8: case MGL_UNSIGNED_SHORT_4_4_4_4:   /* GL_RGB5_A1: tex13.c */
             return GL_RGBA;
         case GL_ALPHA: case GL_ALPHA8:
             return GL_ALPHA;
@@ -766,17 +766,19 @@ void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
         Core_Error(c, GL_INVALID_OPERATION);
         return;
     }
-    if (target != GL_TEXTURE_2D)
-    {
-        Core_Error(c, GL_INVALID_ENUM);
-        return;
-    }
     if (format == GL_RGL_BITMAP_VIEW)
     {
-        /* R4: a board bitmap's rectangle (texview.c) */
+        /* R4: a board bitmap's rectangle (texview.c). A plain 2D texture of
+         * unit 0 or 1 only: not under GL 1.3's routing (x_route: a unit
+         * above 1 or a cube map) and not a texture tex13.c stores */
         t = c->tex[c->bound[c->active_unit]];
         if (t == NULL)
             return;
+        if (target != GL_TEXTURE_2D || c->x_route || t->x13)
+        {
+            Core_Error(c, (target != GL_TEXTURE_2D) ? GL_INVALID_ENUM : GL_INVALID_OPERATION);
+            return;
+        }
         if (level != 0 || border != 0)
         {
             Core_Error(c, GL_INVALID_VALUE);
@@ -789,9 +791,10 @@ void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
     }
     base = BaseOf(internal);
     src = SrcOf(format, type, &bpp);
-    if (base == 0 || src == 0)
+    if (target != GL_TEXTURE_2D || c->x_route || base == 0 || src == 0)
     {
-        Core_Error(c, GL_INVALID_ENUM);
+        /* cube faces, units above 1, the GL 1.2 formats and types (tex13.c) */
+        Tex13_TexImage2D(c, target, level, internal, w, h, border, format, type, pixels);
         return;
     }
     if (level < 0 || level >= CORE_MAX_LEVELS || border != 0 || w < 1 || h < 1
@@ -803,6 +806,11 @@ void Core_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal,
     t = c->tex[c->bound[c->active_unit]];
     if (t == NULL)
         return;
+    if (t->x13)
+    {
+        Tex13_TexImage2D(c, target, level, internal, w, h, border, format, type, pixels);
+        return;                     /* a texture tex13.c stores (ARGB1555) */
+    }
     if (level == 0)
     {
         err = Allocate(c, t, (ULONG) w, (ULONG) h, base, DeepOf(internal));
@@ -846,18 +854,13 @@ void Core_TexSubImage2D(struct Core *c, ULONG target, LONG level, LONG x, LONG y
         Core_Error(c, GL_INVALID_OPERATION);
         return;
     }
-    if (target != GL_TEXTURE_2D)
-    {
-        Core_Error(c, GL_INVALID_ENUM);
-        return;
-    }
     src = SrcOf(format, type, &bpp);
-    if (src == 0)
+    t = c->tex[c->bound[c->active_unit]];
+    if (target != GL_TEXTURE_2D || c->x_route || src == 0 || (t != NULL && t->x13))
     {
-        Core_Error(c, GL_INVALID_ENUM);
+        Tex13_TexSubImage2D(c, target, level, x, y, w, h, format, type, pixels);   /* (tex13.c) */
         return;
     }
-    t = c->tex[c->bound[c->active_unit]];
     if (t == NULL || t->gpu == 0 || t->view != 0 || level < 0 || level >= CORE_MAX_LEVELS
         || !(t->levels & (1UL << level)))
     {

@@ -656,7 +656,7 @@ glquake glquake-data clean-glquake:
 
 # The GL core's modules (src/core): defined here, before the probe rules
 # that list them as prerequisites (those expand when the Makefile is read).
-CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen fog arraylit compat polymode texview ucgrow
+CORE_MODULES    := core vram state matrix hwstate vertex texture get frame array light texgen fog arraylit compat polymode texview ucgrow tex13
 CORE_HDRS       := $(wildcard src/core/*.h)
 
 # --- Probes: the day-one tools for the real machine (docs/probes.md) --------
@@ -1068,16 +1068,22 @@ build/host/test_core: build/host/test_core.o build/host/simcp.o $(HOST_CORE_OBJS
 build/host/test_sim: build/host/test_sim.o build/host/r200sim.o build/host/triscene.o build/host/texscene.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
 	$(HOSTCC) $^ -o $@
 
+# GL 1.3 phase 1 (src/core/tex13.c): its registers and its pictures,
+# build/host/t13-*.ppm
+build/host/test_tex13: build/host/test_tex13.o build/host/r200sim.o $(HOST_CORE_OBJS) $(HOST_R200_OBJS)
+	$(HOSTCC) $^ -o $@
+
 # r200view DUMP.r2d OUT.ppm: a GLQuake frame dumped by the library
 # (RadeonGLDump=N) rendered on the Mac.
 build/host/r200view: build/host/r200view.o build/host/r200sim.o
 	$(HOSTCC) $^ -o $@
 
 .PHONY: test
-test: build/host/test_r200 build/host/test_core build/host/test_sim build/host/r200view build/host/test_flip
+test: build/host/test_r200 build/host/test_core build/host/test_sim build/host/test_tex13 build/host/r200view build/host/test_flip
 	./build/host/test_r200
 	./build/host/test_core
 	./build/host/test_sim
+	./build/host/test_tex13
 	./build/host/test_flip
 
 # triple buffering's bookkeeping (lib/cardflip_sm.h) against a model of the
@@ -1133,7 +1139,7 @@ RGL_DEFS   ?=
 # functions and cost GLQuake ~0.8% (lib/rgllight.c, MEASURED 2026-11-07)
 # The 2026-11-07 modules (lighting, texgen, fog) likewise go after the hot
 # ones, so that GLQuake's code keeps its places.
-CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow
+CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow tex13
 # The dispatch object shrinks by a stub for every slot that becomes a hook
 # (the 29.1 calls of 2026-11-08: 708 bytes less), and the core in front of
 # core_vertex.o changed (hwstate.o +24, state.o -12). Its padding keeps

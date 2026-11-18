@@ -30,11 +30,18 @@
 #include <exec/types.h>
 #include "glconst.h"
 #include "glextra.h"
+#include "gl13.h"
 #include "r2cs.h"
 #include "r2emit.h"
 
 /* Limits */
-#define CORE_UNITS        2       /* texture units (GLQuake needs 2) */
+#define CORE_UNITS        6       /* texture units: the R200's six (GL 1.3 phase 1, 2026-11-12) */
+/* Units the narrow ways handle -- the hot vertex and array paths, which
+ * write a vertex's texture coordinates for units 0 and 1 only. A draw that
+ * may need more (c->wide_on: a unit above 1 enabled, or a cube map, whose
+ * coordinates have three components) goes tex13.c's way instead, so
+ * GLQuake's two-unit paths keep their code. */
+#define CORE_NARROW       2
 #define CORE_MAX_TEX      4096    /* texture names 0..4095 */
 #define CORE_MAX_LEVELS   12      /* 2048 x 2048 down to 1 x 1 */
 #define CORE_MAX_TEXSIZE  2048
@@ -149,6 +156,19 @@ struct CoreTex
     ULONG min_filter, mag_filter, wrap_s, wrap_t;
     ULONG use_epoch;        /* the epoch it was last drawn in (0: never) */
     ULONG view;             /* R4: a back end's bitmap view (texview.c), its handle; 0 none */
+    /* GL 1.3 phase 1 (tex13.c), all 0 for a texture without them */
+    ULONG x13;              /* stored and uploaded by tex13.c (a cube map, ARGB1555) */
+    ULONG xparm;            /* a phase-1 parameter set: Tex13_TexRegs adjusts the registers */
+    ULONG cube;             /* a cube map: six faces, face_bytes apart */
+    ULONG face_bytes;
+    ULONG face_lv[6];       /* each face's levels (levels: those all six have) */
+    ULONG wrap_x;           /* GL_MIRRORED_REPEAT / GL_CLAMP_TO_BORDER: TXFILTER clamp bits */
+    ULONG aniso;            /* GL_TEXTURE_MAX_ANISOTROPY_EXT, 0 or 1: none */
+    ULONG base_level;       /* GL_TEXTURE_BASE_LEVEL */
+    ULONG max_level_set, max_level;     /* GL_TEXTURE_MAX_LEVEL */
+    LONG min_lod, max_lod;  /* GL_TEXTURE_MIN/MAX_LOD, whole levels; lod_set: given */
+    ULONG lod_set;
+    ULONG border;           /* GL_TEXTURE_BORDER_COLOR as PP_BORDER_COLOR: A R G B bytes */
 };
 
 /* R4 (texview.c): the formats a back end's bitmap view may have */
@@ -178,7 +198,9 @@ struct CoreArray
 #define D_PPCNTL    0x00000100UL
 #define D_SECNTL    0x00000200UL    /* SE_CNTL + UCP_VERT_BLEND_CTL (cull) */
 #define D_PLANEMASK 0x00000400UL
-#define D_TEX0      0x00000800UL    /* unit n: D_TEX0 << n */
+#define D_TEX0      0x04000000UL    /* unit n: D_TEX0 << n, bits 26..31 (six units since GL 1.3
+                                     * phase 1: contiguous, so that DIRTY_UNIT stays a shift --
+                                     * 0.11 had units 0 and 1 at bits 11 and 12, now free) */
 #define D_COMBINE   0x00002000UL
 #define D_MATRIX    0x00004000UL    /* MVP upload */
 #define D_VTXFMT    0x00008000UL
@@ -188,7 +210,7 @@ struct CoreArray
 #define D_LIGHT     0x00080000UL    /* TCL lighting: controls, lights, materials (light.c) */
 #define D_TEXGEN    0x00100000UL    /* TCL texgen and texture matrices (texgen.c) */
 #define D_FOG       0x00200000UL    /* fog colour and coefficients, line width (fog.c) */
-#define D_ALL       0x003fffffUL
+#define D_ALL       0xfc3fffffUL    /* (bits 11, 12, 22..25 unused) */
 
 /* Enables (struct Core.enables) */
 #define EN_ALPHA_TEST   0x0001UL
@@ -307,6 +329,17 @@ struct Core
                              * vlimit is vbase for them, so every glVertex lands in
                              * Emit's slow branch (MEASURED 2026-11-07: checks on the
                              * shared path cost GLQuake ~1%) */
+    /* GL 1.3 phase 1 (tex13.c, 2026-11-12): where the hot paths turn off
+     * to it. Here, near the top, so that their tests stay short. */
+    ULONG vslow;            /* vertices take Emit's slow branch: vnorm or wide_on */
+    ULONG wide_on;          /* a unit above 1 enabled, or a cube map: vertices and array
+                             * draws go tex13.c's way (core.h CORE_NARROW) */
+    ULONG x_route;          /* glEnable(GL_TEXTURE_2D) and the texture calls go to tex13.c:
+                             * the active unit above 1, or a cube map enabled anywhere */
+    ULONG cube_on;          /* bit u: GL_TEXTURE_CUBE_MAP enabled on unit u */
+    ULONG comb_x;           /* bit u: unit u's environment is tex13.c's (GL_COMBINE) */
+    ULONG tex_x;            /* the texture registers need tex13.c's touch (Tex13_TexRegs):
+                             * a texture with phase-1 parameters, or a unit's LOD bias */
     /* What lighting, fog, texgen and wide lines add to registers the hot
      * paths build, worked out when that state changes (light.c
      * Core_Extras), so the hot paths OR them in without a test */
@@ -429,7 +462,8 @@ struct Core
     float lm_ambient[4];            /* GL_LIGHT_MODEL_AMBIENT */
     struct CoreLight light[CORE_LIGHTS];
     struct CoreMaterial mtl[2];     /* front, back */
-    ULONG lit_first[12];            /* first[] of a lit vertex (up to 11 dwords) */
+    ULONG lit_first[32];            /* first[] of a slow vertex (vslow: lit, or wide -- up to
+                                     * 3 + 3 + 1 + 6 x 3 = 25 dwords) */
 
     /* Texture coordinate generation and texture matrices (texgen.c,
      * 2026-11-07): per unit, S and T */
@@ -510,12 +544,38 @@ struct Core
     ULONG ug_why;                   /* the last grow refused: UG_HEAP, UG_FASTRAM */
     ULONG stat_uc_cap;              /* capacity misses: keys the cache had dropped or refused */
     ULONG stat_uc_grows, stat_uc_shrinks, stat_uc_refused;
+
+    /* GL 1.3 phase 1 (tex13.c, 2026-11-12): units 2..5, cube maps, the
+     * combiner, sampling. At the end, for the same reason as the rest. */
+    ULONG en_2d;                            /* bit u: GL_TEXTURE_2D enabled (tex_enabled[u] is
+                                             * the unit's effective enable: 2D or cube) */
+    /* The bindings by target. bound[u] is the texture drawn: the cube
+     * map's while cube_on has u. Kept by tex13.c once x_route is set
+     * (before, bound[u] is the 2D binding and bound_2d may lag it). */
+    ULONG bound_2d[CORE_UNITS];
+    ULONG bound_cube[CORE_UNITS];
+    float cur_r[CORE_UNITS];                /* the current r of each unit (cube maps) */
+    float lod_bias[CORE_UNITS];             /* GL_TEXTURE_LOD_BIAS_EXT per unit */
+    struct CoreComb
+    {
+        ULONG rgb, a;                       /* GL_COMBINE_RGB, GL_COMBINE_ALPHA */
+        ULONG src_rgb[3], src_a[3];         /* GL_SOURCEn_RGB/ALPHA */
+        ULONG op_rgb[3], op_a[3];           /* GL_OPERANDn_RGB/ALPHA */
+        ULONG scale_rgb, scale_a;           /* log2 of GL_RGB_SCALE / GL_ALPHA_SCALE: 0, 1, 2 */
+    } comb[CORE_UNITS];
+    ULONG hw_txx[CORE_UNITS][7];            /* BORDER_COLOR, CUBIC_FACES, CUBIC_OFFSET_F1..F5 */
+    ULONG hw_tfs[CORE_UNITS];               /* PP_TFACTOR_n as tex13.c's combiner last sent it */
+    ULONG unpack_done;                      /* compat.c laid the rows out: GL's default unpack */
+    ULONG spec_sep;                         /* GL_SEPARATE_SPECULAR_COLOR */
+    ULONG rescale;                          /* GL_RESCALE_NORMAL */
+    ULONG tg_r_mode[CORE_UNITS];            /* glTexGen(GL_R): GL_REFLECTION_MAP ... */
+    ULONG hw_stq_d3d;                       /* RE_CNTL's STQn_D3D bits as last sent (cube maps) */
 };
 
 struct PmWork;
 
 /* The primitive's first vertex, wherever its size puts it (vertex.c) */
-#define CORE_FIRST(c) ((c)->vnorm ? (c)->lit_first : (c)->first)
+#define CORE_FIRST(c) ((c)->vslow ? (c)->lit_first : (c)->first)
 
 #define CORE_NO_PRIM 0xffffffffUL
 
@@ -810,6 +870,17 @@ void Core_InterleavedArrays(struct Core *c, ULONG format, LONG stride, const voi
                         "GL_MGL_packed_pixels GL_EXT_texture_env_add " \
                         "GL_RGL_static_arrays GL_RGL_dynamic_arrays GL_RGL_arrays_tag GL_RGL_resize_error " \
                         "GL_RGL_bitmap_view"
+/* GL 1.3 phase 1 (tex13.c): features passed as values to calls MiniGL has.
+ * The library appends it (lib/rglcompat.c): with it the string is longer
+ * than C90's 509 characters, which the core's compilers must take. */
+#define CORE_EXTENSIONS_13 " GL_ARB_texture_env_add " \
+                        "GL_ARB_texture_env_combine GL_EXT_texture_env_combine GL_ARB_texture_env_dot3 " \
+                        "GL_EXT_texture_env_dot3 GL_ARB_texture_env_crossbar GL_ATI_texture_env_combine3 " \
+                        "GL_ARB_texture_border_clamp GL_ARB_texture_mirrored_repeat " \
+                        "GL_EXT_texture_filter_anisotropic GL_SGIS_texture_edge_clamp GL_EXT_texture_edge_clamp " \
+                        "GL_SGIS_texture_lod GL_EXT_texture_lod_bias GL_ARB_texture_cube_map " \
+                        "GL_EXT_texture_cube_map GL_EXT_bgra GL_EXT_packed_pixels " \
+                        "GL_EXT_separate_specular_color GL_EXT_rescale_normal"
 extern const char Core_Extensions[];            /* compat.c: CORE_EXTENSIONS, linked late */
 extern const char Core_GetPad[];                /* get.c: keeps the hot code in place */
 extern const char Core_InitPad[];               /* core.c: the same */
@@ -854,6 +925,39 @@ void Core_Cylinder(struct Core *c, const struct CoreQuadric *q, float base, floa
                    LONG slices, LONG stacks);
 void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float outer, LONG slices,
                LONG loops);
+
+/* --- GL 1.3 phase 1 (tex13.c, linked late) ----------------------------------------
+ * Units 2..5, cube maps (three texture coordinates), the full combiner
+ * (ARB_texture_env_combine, dot3, crossbar, ATI's combine3), BGRA and the
+ * packed pixel types, ARGB1555, border clamp, mirrored repeat, anisotropy,
+ * LOD control, separate specular colour, GL_RESCALE_NORMAL. The hot code
+ * turns off to it where a value it does not know arrives (an error branch)
+ * or where one of the routing fields above says so. */
+void  Tex13_Update(struct Core *c);     /* wide_on, vslow, x_route, comb_x, tex_x from the state */
+ULONG Tex13_UnitsOn(struct Core *c, ULONG on);      /* Core_UnitsOn's units 2.. (wide_on) */
+ULONG Tex13_Dw(struct Core *c, ULONG units);        /* a wide vertex's dwords */
+ULONG Tex13_Fmt1(struct Core *c, ULONG units);      /* SE_VTX_FMT_1 for it */
+void Tex13_ReCntl(struct Core *c, ULONG units);     /* RE_CNTL's STQn_D3D for the cube units */
+void  Tex13_Emit(struct Core *c, ULONG *p, ULONG x, ULONG y, ULONG z);  /* one wide vertex */
+void  Tex13_DrawArrays(struct Core *c, ULONG mode, LONG first, LONG count);
+void  Tex13_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, const void *idx);
+void  Tex13_ArrayElement(struct Core *c, LONG i);
+void  Tex13_Enable2D(struct Core *c, ULONG on);     /* glEnable(GL_TEXTURE_2D) while x_route */
+ULONG Tex13_Enable(struct Core *c, ULONG cap, ULONG on);  /* its caps: TRUE when one */
+ULONG Tex13_IsEnabled(struct Core *c, ULONG cap, ULONG *on);
+void  Tex13_BindTexture(struct Core *c, ULONG target, ULONG name);
+void  Tex13_TexParameter(struct Core *c, ULONG target, ULONG pname, LONG param);
+void  Tex13_TexImage2D(struct Core *c, ULONG target, LONG level, LONG internal, LONG w, LONG h,
+                       LONG border, ULONG format, ULONG type, const void *pixels);
+void  Tex13_TexSubImage2D(struct Core *c, ULONG target, LONG level, LONG x, LONG y, LONG w,
+                          LONG h, ULONG format, ULONG type, const void *pixels);
+void  Tex13_TexEnvi(struct Core *c, ULONG target, ULONG pname, LONG param);
+void  Tex13_TexEnvfv(struct Core *c, ULONG target, ULONG pname, const float *v);
+LONG  Tex13_Combiner(struct Core *c, ULONG units);  /* EmitCombiner's, units above 1 or comb_x */
+ULONG Tex13_PpCntl(struct Core *c, ULONG v, ULONG units);   /* PP_CNTL's blend bits, the same */
+void  Tex13_TexRegs(struct Core *c, ULONG u, struct CoreTex *t, struct R2Tex *r);  /* tex_x */
+ULONG Tex13_Query(struct Core *c, ULONG pname, float *v);   /* its glGet names: values, or 0 */
+void  Tex13_LightModel(struct Core *c, ULONG pname, float v);
 
 /* --- Internals shared between the core's files ---------------------------------- */
 

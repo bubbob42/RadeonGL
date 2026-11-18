@@ -77,7 +77,8 @@ void Compat_Enable(struct Core *c, ULONG cap, ULONG on)
             flag = &c->shared_pal;
             break;
         default:
-            Core_Error(c, GL_INVALID_ENUM);
+            if (!Tex13_Enable(c, cap, on))  /* cube maps, GL_TEXTURE_GEN_R, GL_RESCALE_NORMAL */
+                Core_Error(c, GL_INVALID_ENUM);
             return;
     }
     *flag = on ? 1UL : 0UL;
@@ -86,6 +87,8 @@ void Compat_Enable(struct Core *c, ULONG cap, ULONG on)
 /* Core_IsEnabled's path for the same: the client arrays too */
 ULONG Compat_IsEnabled(struct Core *c, ULONG cap)
 {
+    ULONG f;
+
     switch (cap)
     {
         case GL_VERTEX_ARRAY:           return c->va.enabled;
@@ -100,6 +103,8 @@ ULONG Compat_IsEnabled(struct Core *c, ULONG cap)
         case MGL_ARRAY_TRANSFORMATIONS: return c->array_xform;
         case GL_SHARED_TEXTURE_PALETTE_EXT: return c->shared_pal;
     }
+    if (Tex13_IsEnabled(c, cap, &f))
+        return f;
     Core_Error(c, GL_INVALID_ENUM);
     return 0;
 }
@@ -256,7 +261,7 @@ static ULONG QueryX(struct Core *c, ULONG pname, float *v)
         v[0] = (float) Core_IsEnabled(c, pname);
         return 1;
     }
-    return 0;
+    return Tex13_Query(c, pname, v);    /* GL 1.3 phase 1's names (tex13.c) */
 }
 
 ULONG Core_GetCountX(ULONG pname)
@@ -661,7 +666,9 @@ void Core_TexImage2DX(struct Core *c, ULONG target, LONG level, LONG internal,
     tmp = Unpack(c, w, h, &format, &type, &pixels, &size);
     if (tmp == NULL && size != 0)
         return;                             /* out of memory or refused, said */
+    c->unpack_done = (tmp != NULL) ? 1UL : 0UL;     /* rows laid out: tex13.c reads them so */
     Core_TexImage2D(c, target, level, internal, w, h, border, format, type, pixels);
+    c->unpack_done = 0;
     if (tmp != NULL)
         c->env.free(c->env.env, tmp, size);
 }
@@ -681,7 +688,9 @@ void Core_TexSubImage2DX(struct Core *c, ULONG target, LONG level, LONG x, LONG 
     tmp = Unpack(c, w, h, &format, &type, &pixels, &size);
     if (tmp == NULL && size != 0)
         return;
+    c->unpack_done = (tmp != NULL) ? 1UL : 0UL;
     Core_TexSubImage2D(c, target, level, x, y, w, h, format, type, pixels);
+    c->unpack_done = 0;
     if (tmp != NULL)
         c->env.free(c->env.env, tmp, size);
 }
@@ -702,19 +711,19 @@ void Core_TexEnvfv(struct Core *c, ULONG target, ULONG pname, const float *v)
     ULONG u;
     ULONG i;
 
-    if (target != GL_TEXTURE_ENV || v == NULL)
+    if (v == NULL)
     {
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
-    if (pname == GL_TEXTURE_ENV_MODE)
+    if (target == GL_TEXTURE_ENV && pname == GL_TEXTURE_ENV_MODE)
     {
         Core_TexEnvi(c, target, pname, Core_Floor(v[0] + 0.5f));
         return;
     }
-    if (pname != GL_TEXTURE_ENV_COLOR)
+    if (target != GL_TEXTURE_ENV || pname != GL_TEXTURE_ENV_COLOR)
     {
-        Core_Error(c, GL_INVALID_ENUM);
+        Tex13_TexEnvfv(c, target, pname, v);    /* the combiner's, the LOD bias (tex13.c) */
         return;
     }
     u = c->active_unit;
@@ -784,6 +793,11 @@ void Core_ArrayElement(struct Core *c, LONG i)
 
     if (i < 0)
         return;                             /* undefined in GL: nothing */
+    if (c->wide_on)
+    {
+        Tex13_ArrayElement(c, i);           /* units above 1, cube maps (tex13.c) */
+        return;
+    }
     if (c->na.enabled)
         FetchNormal(c, (ULONG) i);
     if (c->ea.enabled && c->ea.ptr != NULL)
@@ -830,15 +844,17 @@ void Core_TexCoord4f(struct Core *c, float s, float t, float r, float q)
     float sq;
     float tq;
 
-    (void) r;
     if (q > -1.0e-8f && q < 1.0e-8f)
     {
         Core_TexCoord2f(c, s, t);
+        c->cur_r[0] = r;            /* a cube map's third coordinate (tex13.c) */
         return;
     }
     sq = s / q;                 /* float locals: SAS/C passes a float expression as a double */
     tq = t / q;
     Core_TexCoord2f(c, sq, tq);
+    sq = r / q;
+    c->cur_r[0] = sq;
 }
 
 /* --- GLU: gluPerspective, gluLookAt ----------------------------------------------------- */

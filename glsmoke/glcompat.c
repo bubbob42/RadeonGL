@@ -4,11 +4,16 @@
  * RGBA GL_DECAL, gluPerspective and gluLookAt, glArrayElement and
  * glMultiDrawArrays, texture uploads with GL_UNPACK_ALIGNMENT 1 and float
  * texels, glReadPixels in other types, and the glGet answers 29.1 gives;
- * since 2026-11-11 glPolygonMode (GL_LINE and GL_POINT, culling first).
+ * since 2026-11-11 glPolygonMode (GL_LINE and GL_POINT, culling first);
+ * since 2026-11-12 GL 1.3 phase 1 (Tex13Cases: units 2..5, the combiner,
+ * cube maps, mirror and border, ARGB32, ARGB1555).
  * Each picture case draws into a frame of 128 x 128, reads pixels back and
  * compares them with what GL 1.1 says, worked out by hand below.
  *
- *   GLCompat [DEPTH=16|32] [VERBOSE]
+ *   GLCompat [DEPTH=16|32] [VERBOSE] [NOLOOP]
+ *
+ * NOLOOP skips the last case (mglMainLoop in a context of its own), so
+ * that RadeonGLLog -- rewritten by every context -- describes the cases.
  *
  * Like GLLight: a public screen of its own (800 x 600, 32 bit unless
  * DEPTH=16), a window on it, a bitmap context on a bitmap of 128 x 128
@@ -33,10 +38,10 @@
 #include <proto/minigl.h>
 #include <string.h>
 
-#define TEMPLATE "DEPTH/K/N,VERBOSE/S"
+#define TEMPLATE "DEPTH/K/N,VERBOSE/S,NOLOOP/S"
 #define S 128                   /* the frame: S x S */
 
-const char ver[] = "$VER: GLCompat 0.2 (11.11.2026)";
+const char ver[] = "$VER: GLCompat 0.3 (12.11.2026)";
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
 struct Library *P96Base;
@@ -838,6 +843,307 @@ static void PolyModeCases(void)
     Want("GL_POINT: inside", 40, 88, 0, 0, 0);
 }
 
+/* --- GL 1.3 phase 1 (src/core/tex13.c, 2026-11-12) ------------------------------------
+ * Units 2..5, the combiner, the crossbar, cube maps, mirrored repeat and
+ * border clamp, the Amiga's ARGB32 (GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV),
+ * ARGB1555. Each group only when GL_EXTENSIONS names it (another MiniGL
+ * skips it). The same pictures test/host/test_tex13.c checks on the host. */
+
+#ifndef GL_COMBINE
+#define GL_COMBINE                      0x8570
+#define GL_COMBINE_RGB                  0x8571
+#define GL_RGB_SCALE                    0x8573
+#define GL_ADD_SIGNED                   0x8574
+#define GL_INTERPOLATE                  0x8575
+#define GL_CONSTANT                     0x8576
+#define GL_PRIMARY_COLOR                0x8577
+#define GL_PREVIOUS                     0x8578
+#define GL_SOURCE0_RGB                  0x8580
+#define GL_SOURCE1_RGB                  0x8581
+#define GL_SOURCE2_RGB                  0x8582
+#define GL_OPERAND2_RGB                 0x8592
+#define GL_SUBTRACT                     0x84E7
+#define GL_DOT3_RGB                     0x86AE
+#endif
+#ifndef GL_TEXTURE_CUBE_MAP
+#define GL_TEXTURE_CUBE_MAP             0x8513
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_X  0x8515
+#endif
+#ifndef GL_MIRRORED_REPEAT
+#define GL_MIRRORED_REPEAT              0x8370
+#endif
+#ifndef GL_CLAMP_TO_BORDER
+#define GL_CLAMP_TO_BORDER              0x812D
+#endif
+#ifndef GL_BGRA
+#define GL_BGRA                         0x80E1
+#endif
+#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
+#define GL_UNSIGNED_INT_8_8_8_8_REV     0x8367
+#endif
+#ifndef GL_TEXTURE4_ARB
+#define GL_TEXTURE4_ARB                 0x84C4
+#define GL_TEXTURE5_ARB                 0x84C5
+#endif
+
+static BOOL Has(const char *name)
+{
+    const char *e;
+
+    e = (const char *) glGetString(GL_EXTENSIONS);
+    return (BOOL) (e != NULL && strstr(e, name) != NULL);
+}
+
+/* a 1 x 1 texture of one colour on unit u (names 300 + u), enabled */
+static void Solid1(int u, UBYTE r, UBYTE g, UBYTE b, UBYTE a)
+{
+    UBYTE px[4];
+
+    px[0] = r; px[1] = g; px[2] = b; px[3] = a;
+    glActiveTextureARB(GL_TEXTURE0_ARB + u);
+    glBindTexture(GL_TEXTURE_2D, (GLuint) (300 + u));
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    Nearest();
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glEnable(GL_TEXTURE_2D);
+}
+
+static void UnitsOff(int n)
+{
+    int u;
+
+    for (u = n - 1; u >= 0; u--)
+    {
+        glActiveTextureARB(GL_TEXTURE0_ARB + u);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        glDisable(GL_TEXTURE_2D);
+    }
+}
+
+/* a cell of 32 x 32 at (x, y), each unit up to n the coordinates (s, t) at its corners */
+static void Cell(GLfloat x, GLfloat y, int n)
+{
+    static const GLfloat c[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+    int k, u;
+
+    glBegin(GL_QUADS);
+    for (k = 0; k < 4; k++)
+    {
+        for (u = 0; u < n; u++)
+            glMultiTexCoord2fARB(GL_TEXTURE0_ARB + u, c[k][0], c[k][1]);
+        glVertex3f(x + 32.0f * c[k][0], y + 32.0f * c[k][1], 0.0f);
+    }
+    glEnd();
+}
+
+static void Comb(GLfloat x, GLfloat y, GLenum mode)
+{
+    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, mode);
+    Cell(x, y, 1);
+}
+
+static void Tex13Cases(void)
+{
+    static const UBYTE face[6][4] = { { 255, 0, 0, 255 }, { 0, 255, 0, 255 }, { 0, 0, 255, 255 },
+                                      { 255, 255, 0, 255 }, { 0, 255, 255, 255 }, { 255, 0, 255, 255 } };
+    static const GLfloat dir[6][3] = { { 1, 0.2f, 0.1f }, { -1, 0.1f, 0.2f }, { 0.2f, 1, 0.1f },
+                                       { 0.1f, -1, 0.2f }, { 0.2f, 0.1f, 1 }, { 0.1f, 0.2f, -1 } };
+    static const GLfloat cc[4] = { 0.25f, 0.25f, 0.25f, 1.0f };
+    static const UBYTE bw[2 * 4] = { 0, 0, 0, 255, 255, 255, 255, 255 };
+    static const UBYTE a1[2 * 4] = { 0, 255, 0, 255, 255, 0, 0, 0 };
+    static ULONG argb[2];
+    UBYTE px[4 * 4 * 4];
+    GLint units;
+    int f, i;
+
+    Ortho();
+    glGetIntegerv(GL_MAX_TEXTURE_UNITS_ARB, &units);
+    if (Has("GL_ARB_texture_env_combine"))
+        WantInt("T0 GL_MAX_TEXTURE_UNITS_ARB (phase 1: six)", (LONG) units, 6);
+
+    /* T1. six units, each multiplying by its own colour: 0.5 grey */
+    if (units >= 6)
+    {
+        Begin();
+        glColor3f(1.0f, 1.0f, 1.0f);
+        Solid1(0, 255, 255, 255, 255);
+        Solid1(1, 128, 255, 255, 255);
+        Solid1(2, 255, 128, 255, 255);
+        Solid1(3, 255, 255, 128, 255);
+        Solid1(4, 255, 255, 255, 255);
+        Solid1(5, 255, 255, 255, 255);
+        Cell(0, 0, 6);
+        /* unit 1 off: a hole in the middle */
+        glActiveTextureARB(GL_TEXTURE1_ARB);
+        glDisable(GL_TEXTURE_2D);
+        Cell(48, 0, 6);
+        UnitsOff(6);
+        Show();
+        Want("T1 six units modulated", 16, 16, 0.5f, 0.5f, 0.5f);
+        Want("T1 five units, unit 1 off", 64, 16, 1.0f, 0.5f, 0.5f);
+    }
+
+    /* T2. GL_COMBINE: texture (0.75, 0.25, 0.5), colour 0.5, constant 0.25 */
+    if (Has("GL_ARB_texture_env_combine"))
+    {
+        Begin();
+        glColor3f(0.5f, 0.5f, 0.5f);
+        Solid1(0, 191, 64, 128, 255);
+        glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, cc);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_TEXTURE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_PREVIOUS);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE2_RGB, GL_CONSTANT);
+        glTexEnvi(GL_TEXTURE_ENV, GL_OPERAND2_RGB, GL_SRC_COLOR);
+        Comb(0, 0, GL_ADD);
+        Comb(32, 0, GL_ADD_SIGNED);
+        Comb(64, 0, GL_SUBTRACT);
+        Comb(96, 0, GL_INTERPOLATE);
+        if (Has("GL_ARB_texture_env_dot3"))
+        {
+            glColor3f(1.0f, 0.5f, 0.5f);
+            Comb(0, 32, GL_DOT3_RGB);
+        }
+        glColor3f(0.5f, 0.5f, 0.5f);
+        glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, 2);
+        Comb(32, 32, GL_MODULATE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_RGB_SCALE, 1);
+        UnitsOff(1);
+        Show();
+        Want("T2 GL_ADD: t + p", 16, 16, 1.0f, 0.753f, 1.0f);
+        Want("T2 GL_ADD_SIGNED: t + p - 0.5", 48, 16, 0.751f, 0.253f, 0.504f);
+        Want("T2 GL_SUBTRACT: t - p", 80, 16, 0.247f, 0.0f, 0.0f);
+        Want("T2 GL_INTERPOLATE: t c + p (1 - c)", 112, 16, 0.564f, 0.439f, 0.502f);
+        if (Has("GL_ARB_texture_env_dot3"))
+            Want("T2 GL_DOT3_RGB: 4 ((t - 0.5) . (p - 0.5))", 16, 48, 0.496f, 0.496f, 0.496f);
+        Want("T2 GL_MODULATE, GL_RGB_SCALE 2", 48, 48, 0.752f, 0.252f, 0.504f);
+    }
+
+    /* T3. the crossbar: unit 1 adds unit 0's raw texel to its own */
+    if (Has("GL_ARB_texture_env_crossbar"))
+    {
+        Begin();
+        glColor3f(0.5f, 0.5f, 0.5f);
+        Solid1(0, 255, 0, 0, 255);
+        Solid1(1, 0, 0, 255, 255);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+        glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_ADD);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_TEXTURE0_ARB);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB, GL_TEXTURE1_ARB);
+        Cell(0, 0, 2);
+        glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB, GL_PREVIOUS);
+        Cell(48, 0, 2);
+        UnitsOff(2);
+        Show();
+        Want("T3 crossbar: texture 0 + texture 1", 16, 16, 1.0f, 0.0f, 1.0f);
+        Want("T3 previous (texture 0 x colour) + texture 1", 64, 16, 0.5f, 0.0f, 1.0f);
+    }
+
+    /* T4. a cube map's six faces along the axes */
+    if (Has("GL_ARB_texture_cube_map"))
+    {
+        Begin();
+        glActiveTextureARB(GL_TEXTURE0_ARB);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, 310);
+        for (f = 0; f < 6; f++)
+        {
+            for (i = 0; i < 16; i++)
+                memcpy(px + 4 * i, face[f], 4);
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, GL_RGBA8, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        }
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glEnable(GL_TEXTURE_CUBE_MAP);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+        for (f = 0; f < 6; f++)
+        {
+            GLfloat x = (GLfloat) (40 * (f % 3)), y = (GLfloat) (40 * (f / 3));
+
+            glBegin(GL_QUADS);
+            glTexCoord3f(dir[f][0], dir[f][1], dir[f][2]); glVertex3f(x, y, 0.0f);
+            glTexCoord3f(dir[f][0], dir[f][1], dir[f][2]); glVertex3f(x + 32.0f, y, 0.0f);
+            glTexCoord3f(dir[f][0], dir[f][1], dir[f][2]); glVertex3f(x + 32.0f, y + 32.0f, 0.0f);
+            glTexCoord3f(dir[f][0], dir[f][1], dir[f][2]); glVertex3f(x, y + 32.0f, 0.0f);
+            glEnd();
+        }
+        glDisable(GL_TEXTURE_CUBE_MAP);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        Show();
+        Want("T4 cube +X red", 16, 16, 1, 0, 0);
+        Want("T4 cube -X green", 56, 16, 0, 1, 0);
+        Want("T4 cube +Y blue", 96, 16, 0, 0, 1);
+        Want("T4 cube -Y yellow", 16, 56, 1, 1, 0);
+        Want("T4 cube +Z cyan", 56, 56, 0, 1, 1);
+        Want("T4 cube -Z magenta", 96, 56, 1, 0, 1);
+    }
+
+    /* T5. mirrored repeat (s 0..2: black white white black), border clamp */
+    if (Has("GL_ARB_texture_mirrored_repeat") && Has("GL_ARB_texture_border_clamp"))
+    {
+        Begin();
+        glActiveTextureARB(GL_TEXTURE0_ARB);
+        glBindTexture(GL_TEXTURE_2D, 311);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, bw);
+        Nearest();
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+        glEnable(GL_TEXTURE_2D);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0, 0); glVertex3f(0, 0, 0);
+        glTexCoord2f(2, 0); glVertex3f(128, 0, 0);
+        glTexCoord2f(2, 1); glVertex3f(128, 32, 0);
+        glTexCoord2f(0, 1); glVertex3f(0, 32, 0);
+        glEnd();
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glBegin(GL_QUADS);
+        glTexCoord2f(-1, 0); glVertex3f(0, 48, 0);
+        glTexCoord2f(2, 0); glVertex3f(96, 48, 0);
+        glTexCoord2f(2, 1); glVertex3f(96, 80, 0);
+        glTexCoord2f(-1, 1); glVertex3f(0, 80, 0);
+        glEnd();
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        UnitsOff(1);
+        Show();
+        Want("T5 mirrored: 1st quarter black", 16, 16, 0, 0, 0);
+        Want("T5 mirrored: 2nd quarter white", 48, 16, 1, 1, 1);
+        Want("T5 mirrored: 3rd quarter white", 80, 16, 1, 1, 1);
+        Want("T5 mirrored: 4th quarter black", 112, 16, 0, 0, 0);
+        Want("T5 border: left of the texture", 16, 64, 0, 0, 0);
+        Want("T5 border: the white texel", 56, 64, 1, 1, 1);
+        Want("T5 border: right of the texture", 80, 64, 0, 0, 0);
+    }
+
+    /* T6. the Amiga's ARGB32 as it lies in memory; T7. ARGB1555's one-bit alpha */
+    if (Has("GL_EXT_bgra") && Has("GL_EXT_packed_pixels"))
+    {
+        Begin();
+        argb[0] = 0xffff0000UL;     /* red, then green */
+        argb[1] = 0xff00ff00UL;
+        glActiveTextureARB(GL_TEXTURE0_ARB);
+        glBindTexture(GL_TEXTURE_2D, 312);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 1, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, argb);
+        Nearest();
+        glEnable(GL_TEXTURE_2D);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+        Cell(0, 0, 1);
+        glBindTexture(GL_TEXTURE_2D, 313);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB5_A1, 2, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, a1);
+        Nearest();
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GREATER, 0.5f);
+        Cell(48, 0, 1);
+        glDisable(GL_ALPHA_TEST);
+        UnitsOff(1);
+        Show();
+        Want("T6 ARGB32 (GL_BGRA, 8_8_8_8_REV): red", 8, 16, 1, 0, 0);
+        Want("T6 ARGB32: green", 24, 16, 0, 1, 0);
+        Want("T7 GL_RGB5_A1: the opaque texel", 56, 16, 0, 1, 0);
+        Want("T7 GL_RGB5_A1: alpha 0 not drawn", 72, 16, 0, 0, 0);
+    }
+    glActiveTextureARB(GL_TEXTURE0_ARB);
+    glColor3f(1.0f, 1.0f, 1.0f);
+}
+
 static void QueryCases(void)
 {
     GLfloat f[4 * 4 * 2];           /* two rows of four RGBA pixels */
@@ -943,7 +1249,7 @@ static void LoopCase(void)
 int main(void)
 {
     struct RDArgs *rd;
-    LONG args[2];
+    LONG args[3];
     LONG depth;
     ULONG id;
     BOOL opened;
@@ -1015,8 +1321,10 @@ int main(void)
     ListCases();
     QueryCases();
     PolyModeCases();
+    Tex13Cases();
     mglDeleteContext();
-    LoopCase();
+    if (!args[2])
+        LoopCase();     /* NOLOOP: the library log then covers the cases above */
     Printf("GLCompat: %ld passed, %ld failed\n", passed, failed);
     rc = (failed != 0) ? RETURN_WARN : RETURN_OK;
 

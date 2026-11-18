@@ -82,9 +82,15 @@ static const struct Rule rules[] =
     { 0x2c0c, 0x2cac, 0x20, 0, "PP_TXSIZE_n" },
     { 0x2c10, 0x2cb0, 0x20, 0, "PP_TXPITCH_n" },
     { 0x2c14, 0x2cb4, 0x20, 0, "PP_BORDER_COLOR_n" },
+    { 0x2c18, 0x2cb8, 0x20, 0, "PP_CUBIC_FACES_n" },
     { 0x2c1c, 0x2cbc, 0x20, 0, "PP_TXMULTI_CTL_n" },
     { 0x2cc4, 0x2cc4, 0x04, 0, "PP_CNTL_X" },
     { 0x2d00, 0x2d78, 0x18, 0, "PP_TXOFFSET_n" },
+    { 0x2d04, 0x2d7c, 0x18, 0, "PP_CUBIC_OFFSET_F1_n" },
+    { 0x2d08, 0x2d80, 0x18, 0, "PP_CUBIC_OFFSET_F2_n" },
+    { 0x2d0c, 0x2d84, 0x18, 0, "PP_CUBIC_OFFSET_F3_n" },
+    { 0x2d10, 0x2d88, 0x18, 0, "PP_CUBIC_OFFSET_F4_n" },
+    { 0x2d14, 0x2d8c, 0x18, 0, "PP_CUBIC_OFFSET_F5_n" },
     { 0x2ee0, 0x2efc, 0x04, 0, "PP_TFACTOR_n" },
     { 0x2f00, 0x2f7c, 0x04, 0, "PP_TXCBLEND/ABLEND_n" },
     { 0x3218, 0x3218, 0x04, 0, "RB3D_BLENDCOLOR" },
@@ -458,9 +464,10 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
             st->tex[unit].format = val;
         else if (off == 0x08)
         {
-            /* depth 1 and plain or projective coordinates: no volume or
-             * cube map, whose faces' offsets are not on the whitelist */
-            if ((val & 0xfUL) != 0 || (((val >> 16) & 7) != 0 && ((val >> 16) & 7) != 3))
+            /* depth 1 and plain, cube-map or projective coordinates: no
+             * volume (a cube map's faces are checked at the draw) */
+            if ((val & 0xfUL) != 0 || (((val >> 16) & 7) != 0 && ((val >> 16) & 7) != 1
+                                       && ((val >> 16) & 7) != 3))
                 return Err(c, R2CE_VALUE, reg, val);
             st->tex[unit].format_x = val;
         }
@@ -468,6 +475,18 @@ static LONG OnReg(struct Ctx *c, ULONG reg, ULONG val)
             st->tex[unit].size = val;
         else if (off == 0x10)
             st->tex[unit].pitch = val;
+        return R2CE_OK;
+    }
+    if (reg >= R_PP_TXOFFSET_0 && reg < R_PP_TXOFFSET_0 + 6 * R_PP_TXOFFSET_STRIDE
+        && (reg - R_PP_TXOFFSET_0) % R_PP_TXOFFSET_STRIDE != 0)
+    {
+        /* a cube map's face 1..5 (GL 1.3 phase 1): checked at the draw */
+        unit = (reg - R_PP_TXOFFSET_0) / R_PP_TXOFFSET_STRIDE;
+        off = ((reg - R_PP_TXOFFSET_0) % R_PP_TXOFFSET_STRIDE) / 4;     /* 1..5 */
+        if (val & 0x1cUL)
+            return Err(c, R2CE_VALUE, reg, val);
+        st->tex[unit].face[off - 1] = val & R_TXO_OFFSET_MASK;
+        st->tex[unit].have_face |= 1UL << (off - 1);
         return R2CE_OK;
     }
     if (reg >= R_PP_TXOFFSET_0 && reg <= R_PP_TXOFFSET_0 + 5 * R_PP_TXOFFSET_STRIDE)
@@ -624,6 +643,16 @@ static LONG CheckTextures(struct Ctx *c)
         }
         if (!InRange(c->cfg, R2K_TEXTURE, t->offset, bytes))
             return Err(c, R2CE_TEXTURE, R_PP_TXOFFSET_0 + u * R_PP_TXOFFSET_STRIDE, bytes);
+        /* a cube map: faces 1..5, each the size of face 0 */
+        if (((t->format_x >> 16) & 7) == 1 || (t->format & (1UL << 30)))
+        {
+            if (t->have_face != 0x1fUL || (t->format & R_TXFORMAT_NON_POWER2))
+                return Err(c, R2CE_TEXTURE, R_PP_TXOFFSET_0 + u * R_PP_TXOFFSET_STRIDE + 4, t->have_face);
+            for (l = 0; l < 5; l++)
+                if (!InRange(c->cfg, R2K_TEXTURE, t->face[l], bytes))
+                    return Err(c, R2CE_TEXTURE, R_PP_TXOFFSET_0 + u * R_PP_TXOFFSET_STRIDE + 4 * (l + 1),
+                               bytes);
+        }
     }
     return R2CE_OK;
 }

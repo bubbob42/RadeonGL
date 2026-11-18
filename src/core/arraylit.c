@@ -91,7 +91,7 @@ ULONG Core_StaticKey(struct Core *c, ULONG first, ULONG lcount, ULONG units, ULO
         KeyArray(&c->ca, first, h);
     else
         UMIX(h[0], h[1], c->cur_color);
-    for (u = 0; u < CORE_UNITS; u++)
+    for (u = 0; u < CORE_NARROW; u++)
     {
         if (!(units & (1UL << u)))
             continue;

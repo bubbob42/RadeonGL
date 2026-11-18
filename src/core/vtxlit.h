@@ -35,7 +35,7 @@
         ULONG vl_a; \
         ULONG vl_b; \
         vl_p = (c)->vptr; \
-        if ((c)->vnorm && (c)->vfast && (c)->nverts != 0 && vl_p < (c)->vlimit_lit) \
+        if ((c)->vnorm && !(c)->wide_on && (c)->vfast && (c)->nverts != 0 && vl_p < (c)->vlimit_lit) \
         { \
             R2_SWAPI(x); \
             R2_SWAPI(y); \

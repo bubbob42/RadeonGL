@@ -36,9 +36,13 @@
 
 #define TG_INPUT_OBJ    8UL
 #define TG_INPUT_EYE    9UL
+#define TG_INPUT_NORMAL 0xaUL       /* GL_NORMAL_MAP (GL 1.3 phase 1, tex13.c) */
+#define TG_INPUT_REFLECT 0xbUL      /* GL_REFLECTION_MAP */
 #define TG_INPUT_SPHERE 0xdUL
 #define TG_COMP_S       1UL
 #define TG_COMP_T       2UL
+#define TG_COMP_R       4UL
+#define TG_ON_R         4UL         /* tg_on: S 1, T 2, R 4, Q 8 (Q stored only) */
 
 static const float ident[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
 
@@ -78,6 +82,16 @@ void Texgen_Forget(struct Core *c)
             c->hw_tm[u][i] = -12345.0f;
 }
 
+/* A unit's mode: the first of S, T, R generated (they share one input) */
+static ULONG Mode(struct Core *c, ULONG u)
+{
+    if (c->tg_on[u] & 1)
+        return c->tg_mode[u][0];
+    if (c->tg_on[u] & 2)
+        return c->tg_mode[u][1];
+    return c->tg_r_mode[u] ? c->tg_r_mode[u] : GL_EYE_LINEAR;
+}
+
 /* Which units take a sphere map (they need normals and the local viewer),
  * and whether any needs the eye position (sphere or eye linear) */
 static void Needs(struct Core *c)
@@ -89,12 +103,14 @@ static void Needs(struct Core *c)
     c->tg_eyepos = 0;
     for (u = 0; u < CORE_UNITS; u++)
     {
-        if (c->tg_on[u] == 0)
+        if ((c->tg_on[u] & 7) == 0)
             continue;
-        m = c->tg_mode[u][(c->tg_on[u] & 1) ? 0 : 1];
-        if (m == GL_SPHERE_MAP)
+        m = Mode(c, u);
+        /* tg_sphere: the units whose coordinates need the normals (and the
+         * local viewer): sphere, reflection and normal maps */
+        if (m == GL_SPHERE_MAP || m == GL_REFLECTION_MAP || m == GL_NORMAL_MAP)
             c->tg_sphere |= 1UL << u;
-        if (m == GL_SPHERE_MAP || m == GL_EYE_LINEAR)
+        if (m != GL_OBJECT_LINEAR)
             c->tg_eyepos |= 1UL << u;
     }
 }
@@ -121,6 +137,9 @@ void Core_UpdateVnorm(struct Core *c)
         if (core_state_hook != NULL)
             core_state_hook(c);
     }
+    c->vslow = (c->vnorm || c->wide_on) ? 1UL : 0UL;    /* vertex.c's slow way (tex13.c) */
+    if (c->tg_sphere)
+        c->dirty |= D_TEXGEN;       /* a reflection map's matrix follows lighting */
     Core_Extras(c);
 }
 
@@ -136,7 +155,8 @@ void Core_TexGenEnable(struct Core *c, ULONG cap, ULONG on)
     ULONG bit;
     ULONG u;
 
-    bit = (cap == GL_TEXTURE_GEN_S) ? 1UL : 2UL;
+    bit = (cap == GL_TEXTURE_GEN_S) ? 1UL : (cap == GL_TEXTURE_GEN_T) ? 2UL
+        : (cap == GL_TEXTURE_GEN_R) ? 4UL : 8UL;
     u = c->active_unit;
     if (((c->tg_on[u] & bit) != 0) == (on != 0))
         return;
@@ -146,7 +166,8 @@ void Core_TexGenEnable(struct Core *c, ULONG cap, ULONG on)
 
 ULONG Core_TexGenEnabled(struct Core *c, ULONG cap)
 {
-    return (c->tg_on[c->active_unit] & ((cap == GL_TEXTURE_GEN_S) ? 1UL : 2UL)) ? 1UL : 0UL;
+    return (c->tg_on[c->active_unit] & ((cap == GL_TEXTURE_GEN_S) ? 1UL : (cap == GL_TEXTURE_GEN_T) ? 2UL
+                                        : (cap == GL_TEXTURE_GEN_R) ? 4UL : 8UL)) ? 1UL : 0UL;
 }
 
 /* The inverse of a 4 x 4 column-major matrix by Gauss-Jordan; FALSE when
@@ -213,18 +234,43 @@ void Core_TexGenfv(struct Core *c, ULONG coord, ULONG pname, const float *v, ULO
         Core_Error(c, GL_INVALID_OPERATION);
         return;
     }
-    if ((coord != GL_S && coord != GL_T) || v == NULL)
+    if ((coord != GL_S && coord != GL_T && coord != GL_R && coord != GL_Q) || v == NULL)
     {
         Core_Error(c, GL_INVALID_ENUM);
         return;
     }
     u = c->active_unit;
+    if (coord == GL_R || coord == GL_Q)
+    {
+        /* R: reflection and normal maps for cube maps (GL 1.3 phase 1);
+         * linear modes and Q are stored, not generated */
+        if (pname == GL_TEXTURE_GEN_MODE)
+        {
+            mode = (ULONG) v[0];
+            if (mode != GL_OBJECT_LINEAR && mode != GL_EYE_LINEAR && mode != GL_REFLECTION_MAP
+                && mode != GL_NORMAL_MAP && (mode != GL_SPHERE_MAP || coord == GL_Q))
+            {
+                Core_Error(c, GL_INVALID_ENUM);
+                return;
+            }
+            if (coord == GL_R)
+                c->tg_r_mode[u] = mode;
+        }
+        else if ((pname != GL_OBJECT_PLANE && pname != GL_EYE_PLANE) || n < 4)
+        {
+            Core_Error(c, GL_INVALID_ENUM);
+            return;
+        }
+        Changed(c);
+        return;
+    }
     k = (coord == GL_S) ? 0 : 1;
     switch (pname)
     {
         case GL_TEXTURE_GEN_MODE:
             mode = (ULONG) v[0];
-            if (mode != GL_OBJECT_LINEAR && mode != GL_EYE_LINEAR && mode != GL_SPHERE_MAP)
+            if (mode != GL_OBJECT_LINEAR && mode != GL_EYE_LINEAR && mode != GL_SPHERE_MAP
+                && mode != GL_REFLECTION_MAP && mode != GL_NORMAL_MAP)
             {
                 Core_Error(c, GL_INVALID_ENUM);
                 return;
@@ -314,15 +360,35 @@ ULONG Texgen_Update(struct Core *c)
     {
         tm = c->texm[u][c->tex_top[u]].m;
         mats = 0;
-        if (c->tg_on[u] != 0)
+        if ((c->tg_on[u] & 7) != 0)
         {
-            mode = c->tg_mode[u][(c->tg_on[u] & 1) ? 0 : 1];
+            mode = Mode(c, u);
             v[0] &= ~(0xfUL << (4 * u));
-            v[0] |= (0xcUL | ((c->tg_on[u] & 1) ? 0 : TG_COMP_S)
-                           | ((c->tg_on[u] & 2) ? 0 : TG_COMP_T)) << (4 * u);
+            /* the components passed through: Q always, R unless a reflection
+             * or normal map generates it */
+            v[0] |= (0x8UL | ((c->tg_on[u] & 1) ? 0 : TG_COMP_S) | ((c->tg_on[u] & 2) ? 0 : TG_COMP_T)
+                     | (((c->tg_on[u] & TG_ON_R) && (mode == GL_REFLECTION_MAP || mode == GL_NORMAL_MAP))
+                        ? 0 : TG_COMP_R)) << (4 * u);
             v[3] &= ~(0xfUL << (4 * u));
             if (mode == GL_SPHERE_MAP)
                 v[3] |= TG_INPUT_SPHERE << (4 * u);
+            else if (mode == GL_NORMAL_MAP)
+                v[3] |= TG_INPUT_NORMAL << (4 * u);
+            else if (mode == GL_REFLECTION_MAP)
+            {
+                v[3] |= TG_INPUT_REFLECT << (4 * u);
+                if (c->enables & EN_LIGHTING)
+                {
+                    /* negated with lighting on (Mesa r200_validate_texgen: "pretty
+                     * weird"), the generated components only */
+                    for (i = 0; i < 16; i++)
+                        pl[i] = ident[i];
+                    if (c->tg_on[u] & 1) pl[0] = -1.0f;
+                    if (c->tg_on[u] & 2) pl[5] = -1.0f;
+                    if (c->tg_on[u] & TG_ON_R) pl[10] = -1.0f;
+                    mats = 1;
+                }
+            }
             else
             {
                 v[3] |= ((mode == GL_OBJECT_LINEAR) ? TG_INPUT_OBJ : TG_INPUT_EYE) << (4 * u);
