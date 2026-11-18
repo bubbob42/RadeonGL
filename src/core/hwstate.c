@@ -55,9 +55,16 @@ ULONG Core_UnitsOn(struct Core *c)
     ULONG on;
 
     on = 0;
-    for (u = 0; u < CORE_UNITS; u++)
+    for (u = 0; u < CORE_NARROW; u++)
         if (c->tex_enabled[u] && Core_Texture(c, u) != NULL)
             on |= 1UL << u;
+    /* Units 2.. only once one of them is on: wide_on (tex13.c sets it with
+     * every enable above unit 1), so GLQuake loops twice, as in 0.16.
+     * ab_gl13x 2026-11-18: a CORE_UNITS 2 build won half of phase 1's
+     * GLQuake cost, the per-draw unit loops being what it shortens. Their
+     * loop is tex13.c's: here it took seven registers on every call. */
+    if (c->wide_on)
+        return Tex13_UnitsOn(c, on);
     return on;
 }
 
@@ -349,9 +356,13 @@ static ULONG PpCntl(struct Core *c, ULONG units)
     ULONG u;
 
     v = R_TEX_BLEND_0_ENABLE;
-    for (u = 0; u < CORE_UNITS; u++)
+    for (u = 0; u < CORE_NARROW; u++)
         if (units & (1UL << u))
             v |= (R_TEX_0_ENABLE << u) | (R_TEX_BLEND_0_ENABLE << u);
+    if (units >> CORE_NARROW)       /* units 2.. (Core_UnitsOn) */
+        for (u = CORE_NARROW; u < CORE_UNITS; u++)
+            if (units & (1UL << u))
+                v |= (R_TEX_0_ENABLE << u) | (R_TEX_BLEND_0_ENABLE << u);
     if ((units & ~3UL) || (c->comb_x & units))
         v = Tex13_PpCntl(c, v, units);      /* its stages, compacted (tex13.c) */
     if (c->enables & EN_ALPHA_TEST)
@@ -447,6 +458,7 @@ static LONG ValidateOnce(struct Core *c)
     ULONG gen;
     ULONG units;
     ULONG u;
+    ULONG n;
     ULONG v[2];
     float mvp[16];
     float k;
@@ -542,7 +554,9 @@ static LONG ValidateOnce(struct Core *c)
     if (d & D_POINTSIZE)
         R2E_Reg(cs, R_RE_POINTSIZE, ((ULONG) Core_Floor(c->point_size * 16.0f) & 0xffffUL)
                                   | ((64UL * 16UL) << R_MAXPOINTSIZE_SHIFT));
-    for (u = 0; u < CORE_UNITS; u++)
+    /* one loop, so EmitTexture stays inlined once; units 2.. only when on */
+    n = (units >> CORE_NARROW) ? CORE_UNITS : CORE_NARROW;
+    for (u = 0; u < n; u++)
         if ((d & (D_TEX0 << u)) && (units & (1UL << u)))
             EmitTexture(c, u);
     if (d & D_COMBINE)

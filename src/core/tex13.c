@@ -61,6 +61,18 @@ static void SyncRoute(struct Core *c)
     }
 }
 
+/* Core_UnitsOn's units 2.. (hwstate.c, only with wide_on): here, not
+ * there, so its loop takes no registers on GLQuake's two-unit way */
+ULONG Tex13_UnitsOn(struct Core *c, ULONG on)
+{
+    ULONG u;
+
+    for (u = CORE_NARROW; u < CORE_UNITS; u++)
+        if (c->tex_enabled[u] && Core_Texture(c, u) != NULL)
+            on |= 1UL << u;
+    return on;
+}
+
 void Tex13_Update(struct Core *c)
 {
     ULONG u;

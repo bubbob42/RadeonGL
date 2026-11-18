@@ -934,6 +934,7 @@ void Core_Disk(struct Core *c, const struct CoreQuadric *q, float inner, float o
  * turns off to it where a value it does not know arrives (an error branch)
  * or where one of the routing fields above says so. */
 void  Tex13_Update(struct Core *c);     /* wide_on, vslow, x_route, comb_x, tex_x from the state */
+ULONG Tex13_UnitsOn(struct Core *c, ULONG on);      /* Core_UnitsOn's units 2.. (wide_on) */
 ULONG Tex13_Dw(struct Core *c, ULONG units);        /* a wide vertex's dwords */
 ULONG Tex13_Fmt1(struct Core *c, ULONG units);      /* SE_VTX_FMT_1 for it */
 void Tex13_ReCntl(struct Core *c, ULONG units);     /* RE_CNTL's STQn_D3D for the cube units */
