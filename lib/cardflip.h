@@ -164,6 +164,7 @@ struct CardFlip
     ULONG pace_waits;           /* pans held until the last pan's offset was taken (faster than the refresh) */
     ULONG pace_sleeps;          /* ... 1 ms sleeps */
     ULONG pace_gaveup;          /* ... CF_PACE_SLEEPS and still not known: panned anyway */
+    ULONG pace_samples;         /* ... line-time pairs their reads gave FlipLine (no bound yet) */
 };
 
 /* mglChooseNumberOfBuffers: the next screen context's wish (reset when a

@@ -712,7 +712,16 @@ static void PanNow(struct Card *k, struct CardFlip *f, ULONG to)
  * faster than the refresh waits
  * here (GLQuake's last pan is a 68k frame, ~32 ms, old). A bound too low
  * would only drop a frame: cure B, not this, keeps the Radeon out of a
- * third on show. 1 ms sleeps on timer.device. */
+ * third on show. 1 ms sleeps on timer.device.
+ *
+ * While FlipLine has no bound yet, the hold's own beam reads feed it: two
+ * reads in the picture, in one mode, FLIP_LINE_SPAN lines apart or more,
+ * with our screen in front at both, the E clock before the first and after
+ * the second (FlipLine_Sample's pair). MEASURED 2026-11-19 (Zod, A4000D,
+ * 640x480): its flushes (~1.7 ms) seldom gave BeamSampleB the 48 lines
+ * between the pan and the kick -- 24 samples in 1950 frames -- so for the
+ * first hundreds of frames every pan below the last reference slept out
+ * half a refresh (324..1232 holds a 60 s run). */
 static void PanPace(struct Card *k, struct CardFlip *f)
 {
     ULONG lft;
@@ -723,10 +732,26 @@ static void PanPace(struct Card *k, struct CardFlip *f)
     ULONG us;
     ULONG safe;
     ULONG i;
+    ULONG t0;
+    ULONG t1;
+    ULONG r;
+    ULONG p_line;               /* a pair's first read: its line, */
+    ULONG p_ticks;              /* ... the E clock before it, */
+    ULONG p_crtc;               /* ... its mode */
+    ULONG p_disp;
+    ULONG p_vtot;
+    BOOL ok;
+    BOOL p_ok;
 
     lft = f->last_left;
     if (lft >= CARD_FLIP_N)
         return;                     /* no pan since the open */
+    p_ok = FALSE;
+    p_line = 0;
+    p_ticks = 0;
+    p_crtc = 0;
+    p_disp = 0;
+    p_vtot = 0;
     for (i = 0; ; i++)
     {
         us = FlipUs(FlipTicks() - f->h_ticks[lft]);
@@ -738,9 +763,44 @@ static void PanPace(struct Card *k, struct CardFlip *f)
             safe = FlipLine_SafeUs(&f->line);
         if (FlipBeam_Refresh(us, safe))
             break;
-        if (f->h_ok[lft] && BeamRead(k, &crtc, &disp, &line, &vtot) && crtc == f->h_crtc[lft]
-            && disp == f->h_disp[lft] && line < f->h_line[lft])
-            break;                  /* back above the reference: through a whole blank */
+        if (f->h_ok[lft] || safe == 0)
+        {
+            t0 = FlipTicks();
+            ok = BeamRead(k, &crtc, &disp, &line, &vtot);
+            t1 = FlipTicks();
+            if (ok && safe == 0)
+            {
+                if (IntuitionBase->FirstScreen != k->scr || line >= disp)
+                    p_ok = FALSE;   /* behind another screen, or in the blank: no pair through here */
+                else if (p_ok && crtc == p_crtc && disp == p_disp && vtot == p_vtot
+                         && line >= p_line + FLIP_LINE_SPAN)
+                {
+                    r = FlipLine_Sample(&f->line, crtc, disp, vtot,
+                                        Card_ReadReg(k, crtc ? CF_CRTC2_H_TOTAL : CF_CRTC_H_TOTAL),
+                                        p_line, line, FlipUs(t1 - p_ticks));
+                    if (r == 1 || r == 2)
+                    {
+                        f->line_samples++;
+                        f->pace_samples++;
+                    }
+                    if (r == 2 || r == 3)
+                        f->line_resets++;
+                    p_ok = FALSE;   /* the next pair starts at the next read */
+                }
+                else if (!p_ok || crtc != p_crtc || disp != p_disp || vtot != p_vtot || line < p_line)
+                {
+                    p_ok = TRUE;    /* a pair starts here (the first, or the beam wrapped) */
+                    p_line = line;
+                    p_ticks = t0;
+                    p_crtc = crtc;
+                    p_disp = disp;
+                    p_vtot = vtot;
+                }
+            }
+            if (ok && f->h_ok[lft] && crtc == f->h_crtc[lft] && disp == f->h_disp[lft]
+                && line < f->h_line[lft])
+                break;              /* back above the reference: through a whole blank */
+        }
         if (i == 0)
             f->pace_waits++;
         if (i >= CF_PACE_SLEEPS)
@@ -1798,6 +1858,9 @@ void CardFlip_Log(struct LogOut *f, struct Card *k)
         LogU(f, FlipLine_SafeUs(&fl->line));
         LogPut(f, "), samples ");
         LogU(f, fl->line_samples);
+        LogPut(f, " (from held pans ");
+        LogU(f, fl->pace_samples);
+        LogPut(f, ")");
         LogPut(f, ", started over ");
         LogU(f, fl->line_resets);
         LogPut(f, "; the line it predicts at the kick within 32 lines ");
