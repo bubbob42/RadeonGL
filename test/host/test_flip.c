@@ -1414,6 +1414,7 @@ static const struct BeamMode beam_mode_rb = { "1920x1080@50 RB", 1111.0, 1080.0,
 #define RM_TV     0x0c00UL          /* 24 and 30 Hz */
 #define RM_RB     0x1000UL          /* the user's 1920 x 1080 at 50 Hz, reduced blanking */
 #define RM_ALL    0x1fffUL
+#define RM_VGA60  0x0001UL          /* 640x480@60, Zod's */
 
 #define R_HUGE    1e300
 
@@ -1435,6 +1436,8 @@ static const struct BeamMode beam_mode_rb = { "1920x1080@50 RB", 1111.0, 1080.0,
 #define RX_PACEBLANK 2048           /* PanPace's first build: passes by the beam already in the
                                      * blank (a blank may take two pans) -- the library now waits
                                      * until the beam is back above the reference */
+#define RX_NOHOLDPAIR 4096          /* PanPace without its own line-time pairs (0.16): FlipLine
+                                     * learns only from BeamSampleB's pan-to-kick pair */
 
 static double r_low = 0.95;         /* RX_R2LOW's refresh, of the true one */
 
@@ -1482,23 +1485,32 @@ struct RCfg
     double resize;              /* ... a resize: another mode, CardFlip_Open */
     unsigned long modes;        /* RM_* */
     double spike;               /* the chance a job takes 110-200 ms (Safe's fence wait gives up) */
+    double copy_lo, copy_hi;    /* the flush's CP start and copies, us (with the locks before them:
+                                 * the pan to the kick) */
 };
 
 static const struct RCfg r_regimes[] =
 {
-    { "steady GLQuake", 25000.0, 40000.0, 3000.0, 15000.0, 0, 1, 1, 0.0, 0.0, RM_STEADY, 0.0 },
-    { "1080p heavy (50 Hz RB)", 28000.0, 36000.0, 10000.0, 18000.0, 0, 1, 1, 0.0, 0.0, RM_RB, 0.0 },
-    { "near the refresh, 60-85 Hz", 14000.0, 24000.0, 3000.0, 12000.0, 1, 1, 1, 0.0, 0.0, RM_60UP, 0.0 },
-    { "near the refresh, 50 Hz", 17000.0, 26000.0, 3000.0, 12000.0, 1, 1, 1, 0.0, 0.0, RM_50, 0.0 },
-    { "fast (68k 3-12 ms)", 3000.0, 12000.0, 1000.0, 4000.0, 0, 1, 1, 0.0, 0.0, RM_STEADY, 0.0 },
+    { "steady GLQuake", 25000.0, 40000.0, 3000.0, 15000.0, 0, 1, 1, 0.0, 0.0, RM_STEADY, 0.0, 1000.0, 3000.0 },
+    { "1080p heavy (50 Hz RB)", 28000.0, 36000.0, 10000.0, 18000.0, 0, 1, 1, 0.0, 0.0, RM_RB, 0.0, 1000.0, 3000.0 },
+    { "near the refresh, 60-85 Hz", 14000.0, 24000.0, 3000.0, 12000.0, 1, 1, 1, 0.0, 0.0, RM_60UP, 0.0, 1000.0,
+      3000.0 },
+    { "near the refresh, 50 Hz", 17000.0, 26000.0, 3000.0, 12000.0, 1, 1, 1, 0.0, 0.0, RM_50, 0.0, 1000.0, 3000.0 },
+    { "fast (68k 3-12 ms)", 3000.0, 12000.0, 1000.0, 4000.0, 0, 1, 1, 0.0, 0.0, RM_STEADY, 0.0, 1000.0, 3000.0 },
     { "slow GPU 20-45 ms, mid-frame flushes", 15000.0, 30000.0, 20000.0, 45000.0, 1, 1, 1, 0.0, 0.0, RM_STEADY,
-      0.0 },
-    { "overlap off", 15000.0, 40000.0, 2000.0, 15000.0, 1, 1, 0, 0.0, 0.0, RM_STEADY, 0.0 },
-    { "behind another screen now and then", 25000.0, 40000.0, 3000.0, 15000.0, 1, 1, 1, 0.01, 0.0, RM_STEADY, 0.0 },
-    { "resizes", 25000.0, 40000.0, 3000.0, 15000.0, 1, 1, 1, 0.0, 0.005, RM_ALL, 0.0 },
-    { "24 and 30 Hz", 25000.0, 40000.0, 3000.0, 15000.0, 1, 1, 1, 0.0, 0.0, RM_TV, 0.0 },
+      0.0, 1000.0, 3000.0 },
+    { "overlap off", 15000.0, 40000.0, 2000.0, 15000.0, 1, 1, 0, 0.0, 0.0, RM_STEADY, 0.0, 1000.0, 3000.0 },
+    { "behind another screen now and then", 25000.0, 40000.0, 3000.0, 15000.0, 1, 1, 1, 0.01, 0.0, RM_STEADY, 0.0,
+      1000.0, 3000.0 },
+    { "resizes", 25000.0, 40000.0, 3000.0, 15000.0, 1, 1, 1, 0.0, 0.005, RM_ALL, 0.0, 1000.0, 3000.0 },
+    { "24 and 30 Hz", 25000.0, 40000.0, 3000.0, 15000.0, 1, 1, 1, 0.0, 0.0, RM_TV, 0.0, 1000.0, 3000.0 },
     { "GPU spikes (1% of jobs 110-200 ms), mid-frame flushes", 15000.0, 30000.0, 10000.0, 35000.0, 1, 1, 1, 0.0,
-      0.0, RM_STEADY, 0.01 }
+      0.0, RM_STEADY, 0.01, 1000.0, 3000.0 },
+    /* 2026-11-19: Zod at 640x480 -- frames longer than the refresh, flushes
+     * of ~1.7 ms (pan to kick mostly under BeamSampleB's 48 lines): FlipLine
+     * gets its bound from PanPace's own pairs */
+    { "short flushes (Zod: 640x480@60, 22-30 ms frames, ~1 ms copies)", 22000.0, 30000.0, 2000.0, 8000.0, 0, 1, 1,
+      0.0, 0.0, RM_VGA60, 0.0, 50.0, 300.0 }
 };
 
 #define R_REGIMES ((int) (sizeof(r_regimes) / sizeof(r_regimes[0])))
@@ -1513,12 +1525,14 @@ static const struct RCfg r_regimes[] =
 #define R_RESIZE  8
 #define R_TV      9
 #define R_SPIKE   10
+#define R_SHORT   11
 
 struct RStats
 {
     long runs, frames, flushes, pans, unseen, hidden_drops, spells, spells_same, resizes, dropped, spikes;
     long fin_lock, fin_fence, fence_waits, fence_sleeps, gaveup, pan_hidden;
     long pace_waits, pace_sleeps, pace_gaveup, pace_trusted;
+    long pace_samples;          /* line-time pairs from PanPace's own reads (no bound yet) */
     long b_kicks, b_waits, b_passed, b_aged, b_mode, b_late, b_polls, b_timed, b_refresh, ref_kick, would;
     long tears, unfinished, busy, show_bad, i1_bad, leave_bad, order_bad, idle_bad;
     long age1, age2, age_more;
@@ -1747,13 +1761,34 @@ static void RPace(struct RModel *m, struct RStats *st)
     ULONG htot;
     ULONG us;
     ULONG safe;
+    ULONG t0;
+    ULONG t1;
+    ULONG r;
+    ULONG p_line;
+    ULONG p_ticks;
+    ULONG p_crtc;
+    ULONG p_disp;
+    ULONG p_vtot;
+    long p_view;
+    int p_hid;
     BOOL wait;
+    BOOL p_ok;
+    int hid;
+    long view;
     int i;
 
     m->pace_why = 0;
     lft = m->last_left;
     if (lft >= FLIP_N)
         return;                     /* no pan since the open */
+    p_ok = FALSE;
+    p_line = 0;
+    p_ticks = 0;
+    p_crtc = 0;
+    p_disp = 0;
+    p_vtot = 0;
+    p_view = 0;
+    p_hid = 0;
     for (i = 0; ; i++)
     {
         RSync(m);
@@ -1776,15 +1811,62 @@ static void RPace(struct RModel *m, struct RStats *st)
             break;
         }
         m->t += Rand(2.0, 20.0);    /* the clock, FlipLine_SafeUs */
-        if (m->h_ok[lft])
+        if (m->h_ok[lft] || (safe == 0 && !(m->var & RX_NOHOLDPAIR)))
         {
+            /* the E clock, the read (a pre-emption may fall between), the
+             * E clock again: lib/cardflip.c's t0 / BeamRead / t1 */
+            t0 = RTicks(m, m->t);
+            m->t += Rand(1.0, 10.0);
+            if (Rand(0.0, 1.0) < m->preempt)
+                m->t += Rand(0.0, 2000.0);
+            hid = RHiddenAt(m, m->t);
+            view = RView(m, m->t);
             RRead(m, m->t, &crtc, &disp, &line, &vtot, &htot);
             m->t += Rand(3.0, 15.0);
-            if (m->var & RX_PACEBLANK)
+            if (Rand(0.0, 1.0) < m->preempt)
+                m->t += Rand(0.0, 2000.0);
+            t1 = RTicks(m, m->t);
+            if (safe == 0 && !(m->var & RX_NOHOLDPAIR))
+            {
+                /* the library's in-front test at the read (FirstScreen) */
+                if (hid || line >= disp)
+                    p_ok = FALSE;
+                else if (p_ok && crtc == p_crtc && disp == p_disp && vtot == p_vtot
+                         && line >= p_line + FLIP_LINE_SPAN)
+                {
+                    r = FlipLine_Sample(&m->line, crtc, disp, vtot, htot, p_line, line, EUs(t1 - p_ticks));
+                    if (LineTook(r))
+                    {
+                        st->samples++;
+                        st->pace_samples++;
+                        if (view != p_view)
+                            st->line_across++;
+                        if (hid || p_hid)
+                            st->line_hidden++;
+                    }
+                    if (r >= 2)
+                        st->resets++;
+                    p_ok = FALSE;
+                }
+                else if (!p_ok || crtc != p_crtc || disp != p_disp || vtot != p_vtot || line < p_line)
+                {
+                    p_ok = TRUE;
+                    p_line = line;
+                    p_ticks = t0;
+                    p_crtc = crtc;
+                    p_disp = disp;
+                    p_vtot = vtot;
+                    p_view = view;
+                    p_hid = hid;
+                }
+            }
+            if (!m->h_ok[lft])
+                wait = TRUE;        /* read only for the pair: no reference to test against */
+            else if (m->var & RX_PACEBLANK)
                 wait = FlipBeam_MustWait(m->h_line[lft], us, line, disp, vtot);
             else
                 wait = (BOOL) (line >= m->h_line[lft]);
-            if (crtc == m->h_crtc[lft] && disp == m->h_disp[lft] && !wait)
+            if (m->h_ok[lft] && crtc == m->h_crtc[lft] && disp == m->h_disp[lft] && !wait)
             {
                 m->pace_why = (line < disp) ? 3 : 4;
                 break;
@@ -2204,7 +2286,7 @@ static void RFlush(struct RModel *m, struct RStats *st, const struct RCfg *c, in
             st->i1_bad++;
     }
     /* the CP's start, the stream's and the upload cache's copies */
-    m->t += Rand(1000.0, 3000.0);
+    m->t += Rand(c->copy_lo, c->copy_hi);
     RSync(m);
     RMid(m, st, t_safe);
     wait = RBeamKick(m, st);
@@ -2611,6 +2693,20 @@ static void TestRunR(void)
         }
         if (ri == R_SLOW)
             CHECK(st.fence_waits > 0, "no fence wait with the Radeon slower than the 68k");
+        if (ri == R_SHORT)
+        {
+            /* Zod's case (2026-11-19): the pan-to-kick pair seldom spans
+             * 48 lines, so FlipLine's bound comes from PanPace's own pairs
+             * within the first holds -- then no pan waits, the frames being
+             * longer than the refresh */
+            CHECK(st.pace_samples > 0, "PanPace's own reads gave FlipLine no pair");
+            /* with only FLIP_LINE_TRUST samples the bound is their largest:
+             * one stretched by a pre-emption (up to 2 ms in a ~2 ms pair) is
+             * loose, never low, for the first frames (MEASURED in this model:
+             * safe 31.7 ms 0.25 s into a run) -- a wait then, no more */
+            CHECK(st.pace_trusted <= st.runs, "PanPace waited with FlipLine's refresh known more than once a run");
+            CHECK(st.pace_waits <= 3 * st.runs, "PanPace waited after the first frames");
+        }
         if (ri == R_SPELL)
         {
             CHECK(st.spells > 0 && st.pan_hidden > 0 && st.hidden_drops > 0, "no spell behind another screen");
@@ -2625,6 +2721,20 @@ static void TestRunR(void)
             CHECK(st.spikes > 0 && st.gaveup > 0, "no fence wait gave up");
         RPrint("R1", r_regimes[ri].name, &st);
     }
+
+    /* 0.16's PanPace (no pairs of its own) in Zod's regime: FlipLine waits
+     * long for BeamSampleB's samples and the holds go on far beyond the first
+     * frames -- the R_SHORT check above has teeth */
+    RunRegime(R_SHORT, RX_NOHOLDPAIR, 2000, &st);
+    regime = "R1, short flushes, PanPace without its own pairs (0.16)";
+    RCheckAll(&st);
+    CHECK(st.pace_waits > 3 * st.runs, "without its own pairs PanPace still waited only in the first frames: "
+                                       "the short-flush check has no teeth");
+    printf("test_flip: R1, short flushes, 0.16's PanPace (no pairs of its own): paced %ld in %ld runs (1 ms sleeps "
+           "%ld), samples %ld\n", st.pace_waits, st.runs, st.pace_sleeps, st.samples);
+    RunRegime(R_SHORT, 0, 2000, &st);
+    printf("test_flip: R1, short flushes, PanPace as built: paced %ld in %ld runs (1 ms sleeps %ld), samples %ld, "
+           "of them from the holds %ld\n", st.pace_waits, st.runs, st.pace_sleeps, st.samples, st.pace_samples);
 
     /* the first build's PanPace (passing already in the blank) must show
      * what the fix cured: two pans a blank somewhere, or the check above
