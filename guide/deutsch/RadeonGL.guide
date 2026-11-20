@@ -824,6 +824,29 @@ Hardware getestet.
 
 @{b}Versionen@{ub}
 
+0.17 (20.11.2026)
+    * die Texturen von GL 1.3, als Werte für die Aufrufe, die MiniGL 29.1
+      hat: sechs Textureinheiten (GL_TEXTURE0 bis GL_TEXTURE5),
+      Würfeltexturen mit Reflexions- und Normalen-Abbildung
+      (GL_TEXTURE_CUBE_MAP, glTexGen GL_REFLECTION_MAP und
+      GL_NORMAL_MAP), der volle Kombinierer (GL_COMBINE mit dot3,
+      crossbar und ATIs combine3), Randfarbe beim Begrenzen, gespiegeltes
+      Wiederholen, anisotrope Filterung, Steuerung und Verschiebung der
+      Detailstufen, eine getrennte Glanzfarbe, GL_RESCALE_NORMAL, GL_BGRA
+      und die gepackten Pixelarten, ARGB1555-Texturen. Die Liste der
+      Erweiterungen nennt jede davon. GLQuake behält sein Tempo (innerhalb
+      eines halben Prozents von 0.16)
+    * drei Puffer durch Verschieben: Ein Programm mit kurzen Bildern (Zod
+      Engine) wartete zu Beginn hunderte Bilder lang auf den Strahl, bis
+      die Bibliothek die Zeilendauer des Bildschirms kannte. Jetzt messen
+      die Wartezeiten selbst sie. Zods Standansicht auf dem Testrechner: 2
+      Wartezeiten statt 68 bis 702 in einer Minute, 38 bis 39 Bilder pro
+      Sekunde statt 31 bis 38; GLQuake unverändert
+    * ein Kontext in einem Fenster oder einer Bitmap beginnt mit einem
+      Texturspeicher von nur noch 1 MB, wenn der Speicher der Karte
+      zerstückelt ist (Heralds leere Mitte), und eine Ablehnung nennt den
+      freien Speicher der Karte
+
 0.16 (15.11.2026)
     * drei Puffer durch Verschieben sind schneller, weiterhin ohne
       Zerreißen: Der Task des Programms verschiebt jetzt selbst, zu

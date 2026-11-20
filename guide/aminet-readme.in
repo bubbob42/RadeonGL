@@ -42,9 +42,11 @@ FEATURES
     program sends again unchanged in the card's memory
   * Transformation and rasterising on the Radeon, the full float matrix
     stack
-  * Two texture units; RGB565, ARGB4444, ARGB8888 (GL_RGB8, GL_RGBA8),
-    I8, AI88 in up to 16 MB of card memory; nearest, linear and mipmap
-    filters; repeat and clamp; MODULATE, REPLACE, DECAL, BLEND, ADD
+  * Six texture units; RGB565, ARGB4444, ARGB1555, ARGB8888 (GL_RGB8,
+    GL_RGBA8), I8, AI88 in up to 16 MB of card memory; nearest, linear,
+    mipmap and anisotropic filters; repeat, clamp, border clamp and
+    mirrored repeat; MODULATE, REPLACE, DECAL, BLEND, ADD and GL 1.3's
+    combiner (GL_COMBINE, dot3, crossbar, ATI's combine3); cube maps
   * Lighting on the Radeon: eight lights, directional, local and spot,
     with attenuation, two-sided; materials, colour material, normal
     arrays
@@ -148,6 +150,13 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.17 (20.11.2026)
+  - GL 1.3's texturing: six units, cube maps, the full combiner, border
+    clamp, mirrored repeat, anisotropy, ARGB1555 (GLQuake keeps its speed)
+  - panning: programs with short frames no longer wait on the beam at
+    their start (Zod Engine: 2 waits instead of up to 702 a minute)
+  - window and bitmap contexts start with as little as 1 MB of heap
 
 0.16 (15.11.2026)
   - panning faster, still tear-free: the program's task pans (GLQuake

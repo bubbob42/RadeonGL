@@ -57,12 +57,21 @@ needs.
 - **Transformation and rasterising on the Radeon:** the full float matrix
   stack (`glFrustum`, `glOrtho`, `glRotatef`, `glTranslatef`, `glScalef`,
   push, pop, load, multiply), viewport, depth range.
-- **Textures:** two units (multitexture: `GL_ARB_multitexture`, also
-  under MiniGL's name `GL_MGL_ARB_multitexture`), RGB565, ARGB4444, ARGB8888 (for
-  `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
-  the card's memory (up to 16 MB), nearest, linear and mipmap filters,
-  repeat and clamp, the environments MODULATE, REPLACE, DECAL, BLEND and
-  ADD (`GL_EXT_texture_env_add`), `glTexSubImage2D` updates. 32-bit
+- **Textures:** six units (multitexture: `GL_ARB_multitexture`, also
+  under MiniGL's name `GL_MGL_ARB_multitexture`), RGB565, ARGB4444,
+  ARGB1555, ARGB8888 (for `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
+  the card's memory (up to 16 MB), nearest, linear, mipmap and anisotropic
+  filters, repeat, clamp, border clamp and mirrored repeat, the
+  environments MODULATE, REPLACE, DECAL, BLEND and ADD
+  (`GL_EXT_texture_env_add`), `glTexSubImage2D` updates.
+- **GL 1.3's texturing (since 0.17),** as values to the calls MiniGL 29.1
+  has: units 2 to 5, cube maps (`GL_TEXTURE_CUBE_MAP`, with `glTexGen`'s
+  `GL_REFLECTION_MAP` and `GL_NORMAL_MAP`), the full combiner (`GL_COMBINE`:
+  `GL_ARB_texture_env_combine`, dot3, crossbar and ATI's combine3), border
+  clamp, mirrored repeat, anisotropy, LOD control and bias, a separate
+  specular colour, `GL_RESCALE_NORMAL`, `GL_BGRA` and the packed pixel
+  types. The extension string names each. GLQuake's path is compiled as
+  before: within half a percent of 0.16. 32-bit
   textures also take `GL_BGRA` with `GL_UNSIGNED_INT_8_8_8_8_REV`: native
   0xAARRGGBB words, the card's own texel, copied as they are (a 422 x 102
   texture in 22 ms on a Mediator, the bus speed).
@@ -112,7 +121,10 @@ needs.
   since the pan. Panning is the fastest way without tearing: GLQuake's
   demo1 at 1280 x 720 runs at 32.4 fps (0.15: 31.3; the copy with
   vertical sync 29.9, without it 32.2), at 1920 x 1080 at 30.6 (0.15:
-  27.9; 22.4, 28.7).
+  27.9; 22.4, 28.7). Since 0.17 a program with short frames learns the
+  screen's line time from its own waits as well: Zod Engine waited on the
+  beam for hundreds of frames at its start before (68 to 702 waits a
+  minute), now twice.
 - **Windows and bitmaps:** a context in the program's window
   (`mglCreateContextFromWindow`), in a window of its own on the default
   public screen (`mglChooseWindowMode`), or drawing straight into the
