@@ -38,7 +38,17 @@ enum
     F_MODE_PRIMS,                     /* 10 entries: GL_POINTS .. GL_POLYGON */
     F_MODE_VERTS = F_MODE_PRIMS + 10,
     F_MODE_BYTES = F_MODE_VERTS + 10,
-    F_COUNT = F_MODE_BYTES + 10
+    /* 2026-11-20, the per-quad concept (docs/concept-quad-bytes.md): */
+    F_Q_QUADS = F_MODE_BYTES + 10,    /* immediate quads: GL_QUADS, and 4-vertex fans/polygons */
+    F_Q_FAN4,                         /* of them: 4-vertex GL_TRIANGLE_FAN / GL_POLYGON */
+    F_Q_RECT,                         /* of them: a rect list's three corners imply the fourth */
+    F_Q_RECT_COL,                     /* ... and one colour over all four */
+    F_Q_RECT_PRIM,                    /* quads of primitives whose every quad is F_Q_RECT */
+    F_V_CONSTCOL,                     /* immediate vertices of primitives of one colour */
+    F_LB_NOW, F_LB_COL, F_LB_RECT, F_LB_BOTH,   /* RadeonGL's immediate vertex bytes */
+    F_CC_SWITCH,                      /* one-colour <-> per-vertex colour between primitives */
+    F_CC_VALUE,                       /* one-colour primitives whose colour differs from the last one's */
+    F_COUNT
 };
 
 static const char *const cen_FName[F_COUNT] =
@@ -56,7 +66,9 @@ static const char *const cen_FName[F_COUNT] =
     "v_points", "v_lines", "v_lineloop", "v_linestrip", "v_tris",
     "v_tristrip", "v_trifan", "v_quads", "v_quadstrip", "v_polygon",
     "b_points", "b_lines", "b_lineloop", "b_linestrip", "b_tris",
-    "b_tristrip", "b_trifan", "b_quads", "b_quadstrip", "b_polygon"
+    "b_tristrip", "b_trifan", "b_quads", "b_quadstrip", "b_polygon",
+    "q_quads", "q_fan4", "q_rect", "q_rect_col", "q_rect_prim", "v_constcol",
+    "lb_now", "lb_col", "lb_rect", "lb_both", "cc_switch", "cc_value"
 };
 
 /* Slot categories, decided once from the slot names. */
@@ -104,6 +116,41 @@ static ULONG cen_PrimVerts;
 static ULONG cen_PrimAttr;
 static ULONG cen_PrimColors;
 static BOOL  cen_MatrixDirty = TRUE;
+
+/* The per-quad concept's counters: the values the current vertex takes
+ * (bit patterns, the library has no FPU), a serial that changes with the
+ * current colour's value, and whether the projection is affine (its last
+ * row 0 0 0 1: glOrtho, not glFrustum / gluPerspective), so that a rect
+ * list's implied fourth corner, v0 + v2 - v1, is the quad's fourth corner
+ * on the screen too. */
+#define Q_X 0
+#define Q_Y 1
+#define Q_Z 2
+#define Q_W 3
+#define Q_S0 4
+#define Q_T0 5
+#define Q_S1 6
+#define Q_T1 7
+#define Q_COL 8
+#define Q_TCQ 9
+#define Q_N 10
+static ULONG cen_Col[4];
+static ULONG cen_ColKind = 0;
+static ULONG cen_ColSerial = 0;
+static ULONG cen_Tc[2][2];
+static ULONG cen_TcQOk[2] = { 1, 1 };
+static ULONG cen_MatMode = GL_MODELVIEW;
+static BOOL  cen_ProjAffine[8] = { TRUE };
+static ULONG cen_ProjDepth = 0;
+static BOOL  cen_PrimAffine;
+static ULONG cen_PrimColFirst;
+static ULONG cen_PrimColLast;
+static ULONG cen_PrimQuads;
+static ULONG cen_PrimRect;
+static ULONG cen_PrimRectCol;
+static ULONG cen_Q[4][Q_N];
+static ULONG cen_LastOne = 2;           /* the last primitive: 0 per vertex, 1 one colour, 2 none yet */
+static ULONG cen_LastOneCol = 0xffffffffUL;
 
 /* Vertex-array state. */
 #define ARR_VERTEX 1
@@ -320,6 +367,101 @@ static ULONG ArrayVertexBytes(void)
 
 /* --- immediate mode ------------------------------------------------------ */
 
+/* One component of a quad that a rect list reproduces: v3 = v0 + v2 - v1
+ * holds when v0 = v1 and v2 = v3, or v1 = v2 and v0 = v3. */
+static BOOL QPair(ULONG k)
+{
+    return (BOOL) ((cen_Q[0][k] == cen_Q[1][k] && cen_Q[2][k] == cen_Q[3][k])
+                   || (cen_Q[1][k] == cen_Q[2][k] && cen_Q[0][k] == cen_Q[3][k]));
+}
+
+/* GLQuake for AmigaOS draws its 2D pictures and characters as 4-vertex
+ * GL_TRIANGLE_FANs (gl_draw.c): a quad too, the same corner order. */
+static BOOL FanLike(void)
+{
+    return (BOOL) (cen_PrimMode == GL_TRIANGLE_FAN || cen_PrimMode == GL_POLYGON);
+}
+
+/* The quad just completed (cen_Q): could a rect list draw it? */
+static void QuadDone(void)
+{
+    ULONG i;
+    BOOL ok;
+
+    cen_PrimQuads++;
+    ok = QPair(Q_X) && QPair(Q_Y) && QPair(Q_Z) && QPair(Q_S0) && QPair(Q_T0);
+    if (cen_PrimAttr & A_MTC)
+        ok = ok && QPair(Q_S1) && QPair(Q_T1);
+    for (i = 0; i < 4; i++)
+        if (cen_Q[i][Q_W] != 0x3f800000UL || cen_Q[i][Q_TCQ] == 0)
+            ok = FALSE;
+    if (!ok)
+        return;
+    cen_PrimRect++;
+    if (cen_Q[0][Q_COL] == cen_Q[3][Q_COL])
+        cen_PrimRectCol++;
+}
+
+/* RadeonGL's immediate vertex (src/core/vtxfast.h): x y z, the packed
+ * colour, s t per texture unit on (the census sees the units a primitive
+ * gave coordinates to), w when one was not 1. Now, with the colour left
+ * out of primitives of one colour, with rect lists for primitives whose
+ * every quad qualifies (three vertices a quad), and both. Vertex bytes
+ * only: the packet header is the same in every case. */
+static void LibBytes(void)
+{
+    ULONG vb;
+    ULONG verts;
+    ULONG rverts;
+    BOOL one;
+    BOOL rect;
+
+    if (FanLike() && cen_PrimVerts == 4)
+        QuadDone();                 /* a 4-vertex fan: one quad */
+    vb = 16;
+    if (cen_PrimAttr & A_TC)
+        vb += 8;
+    if (cen_PrimAttr & A_MTC)
+        vb += 8;
+    if (cen_PrimAttr & A_W)
+        vb += 4;
+    verts = cen_PrimVerts;
+    one = (BOOL) (verts != 0 && cen_PrimColFirst == cen_PrimColLast);
+    rect = (BOOL) (cen_PrimQuads != 0 && cen_PrimAffine && cen_PrimRect == cen_PrimQuads
+                   && (cen_PrimMode == GL_QUADS || verts == 4));
+    rverts = rect ? cen_PrimQuads * 3 : verts;
+    if (cen_PrimQuads != 0)
+    {
+        cen_F[F_Q_QUADS] += cen_PrimQuads;
+        if (cen_PrimMode != GL_QUADS)
+            cen_F[F_Q_FAN4] += cen_PrimQuads;
+        if (cen_PrimAffine)
+        {
+            cen_F[F_Q_RECT] += cen_PrimRect;
+            cen_F[F_Q_RECT_COL] += cen_PrimRectCol;
+        }
+        if (rect)
+            cen_F[F_Q_RECT_PRIM] += cen_PrimQuads;
+    }
+    if (one)
+        cen_F[F_V_CONSTCOL] += verts;
+    if (verts != 0)
+    {
+        if (cen_LastOne != 2 && cen_LastOne != (ULONG) one)
+            cen_F[F_CC_SWITCH]++;
+        if (one && cen_PrimColFirst != cen_LastOneCol)
+        {
+            cen_F[F_CC_VALUE]++;
+            cen_LastOneCol = cen_PrimColFirst;
+        }
+        cen_LastOne = (ULONG) one;
+    }
+    cen_F[F_LB_NOW] += verts * vb;
+    cen_F[F_LB_COL] += verts * (one ? vb - 4 : vb);
+    cen_F[F_LB_RECT] += rverts * vb;
+    cen_F[F_LB_BOTH] += rverts * (one ? vb - 4 : vb);
+}
+
 void Hook_GLBegin(GLcontext context, GLenum mode)
 {
     (void)context;
@@ -330,6 +472,10 @@ void Hook_GLBegin(GLcontext context, GLenum mode)
     cen_PrimVerts = 0;
     cen_PrimAttr = 0;
     cen_PrimColors = 0;
+    cen_PrimAffine = cen_ProjAffine[cen_ProjDepth];
+    cen_PrimQuads = 0;
+    cen_PrimRect = 0;
+    cen_PrimRectCol = 0;
     DrawStarts();
 }
 
@@ -356,14 +502,36 @@ void Hook_GLEnd(GLcontext context)
     cen_F[F_MODE_PRIMS + cen_PrimMode]++;
     cen_F[F_MODE_VERTS + cen_PrimMode] += cen_PrimVerts;
     cen_F[F_MODE_BYTES + cen_PrimMode] += bytes;
+    LibBytes();
 }
 
-static void Vertex(ULONG wbits)
+static void Vertex(ULONG x, ULONG y, ULONG z, ULONG wbits)
 {
+    ULONG *q;
+
     if (!cen_InPrim)
     {
         cen_F[F_PRIM_ERRORS]++;
         return;
+    }
+    if (cen_PrimVerts == 0)
+        cen_PrimColFirst = cen_ColSerial;
+    cen_PrimColLast = cen_ColSerial;
+    if (cen_PrimMode == GL_QUADS || (FanLike() && cen_PrimVerts < 4))
+    {
+        q = cen_Q[cen_PrimVerts & 3];
+        q[Q_X] = x;
+        q[Q_Y] = y;
+        q[Q_Z] = z;
+        q[Q_W] = wbits;
+        q[Q_S0] = cen_Tc[0][0];
+        q[Q_T0] = cen_Tc[0][1];
+        q[Q_S1] = cen_Tc[1][0];
+        q[Q_T1] = cen_Tc[1][1];
+        q[Q_COL] = cen_ColSerial;
+        q[Q_TCQ] = cen_TcQOk[0] & cen_TcQOk[1];
+        if ((cen_PrimVerts & 3) == 3 && cen_PrimMode == GL_QUADS)
+            QuadDone();
     }
     cen_PrimVerts++;
     if (wbits != 0x3f800000UL)
@@ -373,34 +541,43 @@ static void Vertex(ULONG wbits)
 void Hook_GLVertex2fv(GLcontext context, GLfloat *v)
 {
     (void)context;
-    (void)v;
-    Vertex(0x3f800000UL);
+    if (v)
+        Vertex(FloatBits(v[0]), FloatBits(v[1]), 0, 0x3f800000UL);
+    else
+        Vertex(0, 0, 0, 0x3f800000UL);
 }
 
 void Hook_GLVertex3fv(GLcontext context, GLfloat *v)
 {
     (void)context;
-    (void)v;
-    Vertex(0x3f800000UL);
+    if (v)
+        Vertex(FloatBits(v[0]), FloatBits(v[1]), FloatBits(v[2]), 0x3f800000UL);
+    else
+        Vertex(0, 0, 0, 0x3f800000UL);
 }
 
 void Hook_GLVertex4f(GLcontext context, GLfloat x, GLfloat y, GLfloat z, GLfloat w)
 {
     (void)context;
-    (void)x;
-    (void)y;
-    (void)z;
-    Vertex(FloatBits(w));
+    Vertex(FloatBits(x), FloatBits(y), FloatBits(z), FloatBits(w));
 }
 
 void Hook_GLVertex4fv(GLcontext context, GLfloat *v)
 {
     (void)context;
-    Vertex(v ? FloatBits(v[3]) : 0x3f800000UL);
+    if (v)
+        Vertex(FloatBits(v[0]), FloatBits(v[1]), FloatBits(v[2]), FloatBits(v[3]));
+    else
+        Vertex(0, 0, 0, 0x3f800000UL);
 }
 
-static void TexCoord(ULONG unit)
+/* s, t (bit patterns) and whether q is 1 (a projective coordinate is no
+ * rect list's) */
+static void TexCoord(ULONG unit, ULONG s, ULONG t, ULONG qok)
 {
+    cen_Tc[unit][0] = s;
+    cen_Tc[unit][1] = t;
+    cen_TcQOk[unit] = qok;
     if (cen_InPrim)
         cen_PrimAttr |= (unit == 1) ? A_MTC : A_TC;
 }
@@ -408,52 +585,57 @@ static void TexCoord(ULONG unit)
 void Hook_GLTexCoord2f(GLcontext context, GLfloat s, GLfloat t)
 {
     (void)context;
-    (void)s;
-    (void)t;
-    TexCoord(0);
+    TexCoord(0, FloatBits(s), FloatBits(t), 1);
 }
 
 void Hook_GLTexCoord2fv(GLcontext context, GLfloat *v)
 {
     (void)context;
-    (void)v;
-    TexCoord(0);
+    if (v)
+        TexCoord(0, FloatBits(v[0]), FloatBits(v[1]), 1);
 }
 
 void Hook_GLTexCoord4f(GLcontext context, GLfloat s, GLfloat t, GLfloat r, GLfloat q)
 {
     (void)context;
-    (void)s;
-    (void)t;
     (void)r;
-    (void)q;
-    TexCoord(0);
+    TexCoord(0, FloatBits(s), FloatBits(t), FloatBits(q) == 0x3f800000UL);
 }
 
 void Hook_GLTexCoord4fv(GLcontext context, GLfloat *v)
 {
     (void)context;
-    (void)v;
-    TexCoord(0);
+    if (v)
+        TexCoord(0, FloatBits(v[0]), FloatBits(v[1]), FloatBits(v[3]) == 0x3f800000UL);
 }
 
 void Hook_GLMultiTexCoord2fARB(GLcontext context, GLenum unit, GLfloat s, GLfloat t)
 {
     (void)context;
-    (void)s;
-    (void)t;
-    TexCoord(unit == GL_TEXTURE1_ARB ? 1 : 0);
+    TexCoord(unit == GL_TEXTURE1_ARB ? 1 : 0, FloatBits(s), FloatBits(t), 1);
 }
 
 void Hook_GLMultiTexCoord2fvARB(GLcontext context, GLenum unit, GLfloat *v)
 {
     (void)context;
-    (void)v;
-    TexCoord(unit == GL_TEXTURE1_ARB ? 1 : 0);
+    if (v)
+        TexCoord(unit == GL_TEXTURE1_ARB ? 1 : 0, FloatBits(v[0]), FloatBits(v[1]), 1);
 }
 
-static void Colour(void)
+/* kind 1: float bit patterns, 2: bytes; the serial moves only when the
+ * value does (a client that sets the same colour again keeps it) */
+static void Colour(ULONG kind, ULONG r, ULONG g, ULONG b, ULONG a)
 {
+    if (kind != cen_ColKind || r != cen_Col[0] || g != cen_Col[1] || b != cen_Col[2]
+        || a != cen_Col[3])
+    {
+        cen_ColKind = kind;
+        cen_Col[0] = r;
+        cen_Col[1] = g;
+        cen_Col[2] = b;
+        cen_Col[3] = a;
+        cen_ColSerial++;
+    }
     if (cen_InPrim)
         cen_PrimColors++;
     else
@@ -463,49 +645,159 @@ static void Colour(void)
 void Hook_GLColor3fv(GLcontext context, GLfloat *v)
 {
     (void)context;
-    (void)v;
-    Colour();
+    if (v)
+        Colour(1, FloatBits(v[0]), FloatBits(v[1]), FloatBits(v[2]), 0x3f800000UL);
 }
 
 void Hook_GLColor3ubv(GLcontext context, GLubyte *v)
 {
     (void)context;
-    (void)v;
-    Colour();
+    if (v)
+        Colour(2, v[0], v[1], v[2], 255);
 }
 
 void Hook_GLColor4f(GLcontext context, GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha)
 {
     (void)context;
-    (void)red;
-    (void)green;
-    (void)blue;
-    (void)alpha;
-    Colour();
+    Colour(1, FloatBits(red), FloatBits(green), FloatBits(blue), FloatBits(alpha));
 }
 
 void Hook_GLColor4fv(GLcontext context, GLfloat *v)
 {
     (void)context;
-    (void)v;
-    Colour();
+    if (v)
+        Colour(1, FloatBits(v[0]), FloatBits(v[1]), FloatBits(v[2]), FloatBits(v[3]));
 }
 
 void Hook_GLColor4ub(GLcontext context, GLubyte red, GLubyte green, GLubyte blue, GLubyte alhpa)
 {
     (void)context;
-    (void)red;
-    (void)green;
-    (void)blue;
-    (void)alhpa;
-    Colour();
+    Colour(2, red, green, blue, alhpa);
 }
 
 void Hook_GLColor4ubv(GLcontext context, GLubyte *v)
 {
     (void)context;
-    (void)v;
-    Colour();
+    if (v)
+        Colour(2, v[0], v[1], v[2], v[3]);
+}
+
+/* --- the projection: affine or not (the per-quad concept) ---------------- */
+
+static BOOL AffineF(const GLfloat *m)
+{
+    return (BOOL) ((FloatBits(m[3]) & 0x7fffffffUL) == 0 && (FloatBits(m[7]) & 0x7fffffffUL) == 0
+                   && (FloatBits(m[11]) & 0x7fffffffUL) == 0 && FloatBits(m[15]) == 0x3f800000UL);
+}
+
+static BOOL ZeroD(GLdouble d)
+{
+    union { GLdouble d; ULONG u[2]; } x;
+
+    x.d = d;
+    return (BOOL) ((x.u[0] & 0x7fffffffUL) == 0 && x.u[1] == 0);
+}
+
+static BOOL OneD(GLdouble d)
+{
+    union { GLdouble d; ULONG u[2]; } x;
+
+    x.d = d;
+    return (BOOL) (x.u[0] == 0x3ff00000UL && x.u[1] == 0);
+}
+
+static BOOL AffineD(const GLdouble *m)
+{
+    return (BOOL) (ZeroD(m[3]) && ZeroD(m[7]) && ZeroD(m[11]) && OneD(m[15]));
+}
+
+static void Proj(int how)       /* 1 affine now, 0 not affine now, -1 times a non-affine */
+{
+    if (cen_MatMode != GL_PROJECTION)
+        return;
+    if (how > 0)
+        cen_ProjAffine[cen_ProjDepth] = TRUE;
+    else
+        cen_ProjAffine[cen_ProjDepth] = FALSE;
+}
+
+void Hook_GLMatrixMode(GLcontext context, GLenum mode)
+{
+    (void)context;
+    cen_MatMode = mode;
+}
+
+void Hook_GLLoadIdentity(GLcontext context)
+{
+    (void)context;
+    Proj(1);
+}
+
+void Hook_GLLoadMatrixf(GLcontext context, const GLfloat *m)
+{
+    (void)context;
+    if (m)
+        Proj(AffineF(m) ? 1 : 0);
+}
+
+void Hook_GLLoadMatrixd(GLcontext context, const GLdouble *m)
+{
+    (void)context;
+    if (m)
+        Proj(AffineD(m) ? 1 : 0);
+}
+
+void Hook_GLMultMatrixf(GLcontext context, const GLfloat *m)
+{
+    (void)context;
+    if (m && !AffineF(m))
+        Proj(0);
+}
+
+void Hook_GLMultMatrixd(GLcontext context, const GLdouble *m)
+{
+    (void)context;
+    if (m && !AffineD(m))
+        Proj(0);
+}
+
+void Hook_GLFrustum(GLcontext context, GLdouble left, GLdouble right, GLdouble bottom, GLdouble top,
+                    GLdouble zNear, GLdouble zFar)
+{
+    (void)context;
+    (void)left;
+    (void)right;
+    (void)bottom;
+    (void)top;
+    (void)zNear;
+    (void)zFar;
+    Proj(0);
+}
+
+void Hook_GLUPerspective(GLfloat fovy, GLfloat aspect, GLfloat znear, GLfloat zfar)
+{
+    (void)fovy;
+    (void)aspect;
+    (void)znear;
+    (void)zfar;
+    Proj(0);
+}
+
+void Hook_GLPushMatrix(GLcontext context)
+{
+    (void)context;
+    if (cen_MatMode == GL_PROJECTION && cen_ProjDepth + 1 < 8)
+    {
+        cen_ProjAffine[cen_ProjDepth + 1] = cen_ProjAffine[cen_ProjDepth];
+        cen_ProjDepth++;
+    }
+}
+
+void Hook_GLPopMatrix(GLcontext context)
+{
+    (void)context;
+    if (cen_MatMode == GL_PROJECTION && cen_ProjDepth > 0)
+        cen_ProjDepth--;
 }
 
 void Hook_GLNormal3f(GLcontext context, GLfloat x, GLfloat y, GLfloat z)
@@ -935,6 +1227,9 @@ void *Hook_MGLCreateContext(int offx, int offy, int w, int h)
     if (c == NULL)
         return NULL;
     c->owner = FindTask(NULL);
+    cen_MatMode = GL_MODELVIEW;
+    cen_ProjDepth = 0;
+    cen_ProjAffine[0] = TRUE;
     c->buf = AllocVec(BUF_SIZE, MEMF_ANY);
     if (c->buf == NULL)
     {
