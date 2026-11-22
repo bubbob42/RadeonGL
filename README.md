@@ -40,7 +40,8 @@ needs.
   32-bit indices).
 - **The fast path:** compiled vertex arrays (`glLockArraysEXT`) go to the
   card as indexed draws; an upload cache keeps what a program sends again
-  unchanged in the card's memory.
+  unchanged in the card's memory. Since 0.18 it gives that memory to
+  textures that find no room, half at a time down to 1 MB, then all of it.
 - **Static arrays (`GL_RGL_static_arrays`, RadeonGL's own extension):** a
   program whose arrays never change says so with
   `glHint(GL_RGL_STATIC_ARRAYS_HINT, GL_NICEST)` (`0x52474C01`); the upload
@@ -60,8 +61,12 @@ needs.
 - **Textures:** six units (multitexture: `GL_ARB_multitexture`, also
   under MiniGL's name `GL_MGL_ARB_multitexture`), RGB565, ARGB4444,
   ARGB1555, ARGB8888 (for `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
-  the card's memory (up to 16 MB), nearest, linear, mipmap and anisotropic
-  filters, repeat, clamp, border clamp and mirrored repeat, the
+  the card's memory (up to 16 MB), nearest and linear filters, mipmaps
+  bilinear and trilinear (`GL_LINEAR_MIPMAP_LINEAR`, the R200's own
+  blend between two levels; up to 0.17 `GL_LINEAR_MIPMAP_NEAREST` and
+  `GL_NEAREST_MIPMAP_LINEAR` were drawn the wrong way round), anisotropic
+  filtering, repeat, clamp, border
+  clamp and mirrored repeat, the
   environments MODULATE, REPLACE, DECAL, BLEND and ADD
   (`GL_EXT_texture_env_add`), `glTexSubImage2D` updates.
 - **GL 1.3's texturing (since 0.17),** as values to the calls MiniGL 29.1

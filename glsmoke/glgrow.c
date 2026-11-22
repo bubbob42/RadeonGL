@@ -4,8 +4,9 @@
  * each its own locked draw under GL_RGL_STATIC_ARRAYS_HINT, drawn every
  * frame -- more than the 4 MB the cache starts with, so it misses blocks it
  * had to drop and must grow. Then 512 x 512 textures until the heap is
- * full: the cache must give memory back down to its start, and the frames
- * after that must still draw.
+ * full: the cache must give memory back, half at a time down to 1 MB, then
+ * all of it (2026-11-21; until then down to its start, 4 MB), and the
+ * frames after that must still draw (through the stream once it is off).
  *
  *   GLGrow BLOCKS/N,FRAMES/N
  *
@@ -147,7 +148,7 @@ int main(int argc, char **argv)
     /* 1. the scene, more than the start's 4 MB: the cache grows */
     Frames(nb, frames, "scene");
 
-    /* 2. textures until the heap is full: the cache gives back */
+    /* 2. textures until the heap is full: the cache gives back, down to off */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     for (ntex = 0; ntex < 200; ntex++)
     {
@@ -160,7 +161,7 @@ int main(int argc, char **argv)
     Printf("textures: %ld of %ldx%ld taken, then error 0x%lx\n", ntex, (LONG) TEXW, (LONG) TEXW, (ULONG) err);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    /* 3. the scene again, from the cache that is left */
+    /* 3. the scene again, from the cache that is left or the stream */
     Frames(nb, 20, "after the textures");
     err = glGetError();
     Printf("GL error at the end: 0x%lx\n", (ULONG) err);

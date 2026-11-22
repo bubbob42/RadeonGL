@@ -117,7 +117,7 @@ static void PutU(struct LogOut *f, ULONG v)
 static void PutCache(struct LogOut *f, const struct Core *c)
 {
     Put(f, "upload cache: ");
-    if (!c->ucache_on)
+    if (!c->ucache_on && c->stat_uc_shrinks == 0)
     {
         Put(f, "off (no room)\n");
         return;
@@ -127,7 +127,10 @@ static void PutCache(struct LogOut *f, const struct Core *c)
         Put(f, "off (RadeonGLUploadCache=0)\n");
         return;
     }
-    Put(f, c->ustaged ? "(staged, copied at the flush) " : "(written in place) ");
+    if (!c->ucache_on)
+        Put(f, "off (given to textures) ");     /* ucgrow.c: the counts until then */
+    else
+        Put(f, c->ustaged ? "(staged, copied at the flush) " : "(written in place) ");
     PutU(f, c->stat_uc_hits); Put(f, " hits, "); PutU(f, c->stat_uc_misses);
     Put(f, " misses; bytes not written again: "); PutU(f, c->stat_uc_saved);
     Put(f, ", written into it: "); PutU(f, c->stat_uc_written);

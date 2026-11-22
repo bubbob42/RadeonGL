@@ -1,0 +1,28 @@
+; GLGrowNull -- GLGrow on the null card with a 16 MB texture heap
+; (RadeonGLHeapMax 16, as Hamiller's screen heap), 2026-11-21: the upload
+; cache grows past its 4 MB start, then 512 x 512 textures fill the heap
+; and the cache gives way -- half at a time down to 1 MB, then off
+; (ucgrow.c; until then it stopped at 4 MB, and Zod Engine's next map found
+; no room: a black floor). Then the scene again, through the stream. The
+; library's log must say "off (given to textures)", "shrunk for textures 4"
+; (8 -> 4 -> 2 -> 1 MB -> off), "checker errors: 0", and the program rc=0.
+; Needs: gmake glsmoke.
+; LIMIT 300
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLLog DEV:Test/glgrow.log
+SetEnv RadeonGLHeapMax 16
+Echo "=== GLGrow (24 blocks, 40 frames), 16 MB heap ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLGrow >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLHeapMax
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+UnSetEnv RadeonGLLog
+Echo "=== the library's log ===" >>DEV:Test/auto.log
+Type DEV:Test/glgrow.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

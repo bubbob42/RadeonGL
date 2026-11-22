@@ -1,0 +1,19 @@
+; MapCheckNull -- MapCheck (src/probe/mapcheck.c) in FS-UAE, where the
+; Workbench's board is uaegfx, not a Radeon: the system and minigl.library
+; reports, the Picasso96 board report, the 4 MB block, and the refusal to
+; read registers of a board that is not a Radeon. Checks that the program
+; runs to its end on a machine without the card (it reads nothing there).
+; Needs: gmake probes.
+; LIMIT 120
+FailAt 1000
+Wait 8
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Echo "=== MapCheck ===" >>DEV:Test/auto.log
+DEV:Probe/C/MapCheck LOG=DEV:Test/mapcheck.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== MapCheck_sasc ===" >>DEV:Test/auto.log
+DEV:Probe/C/MapCheck_sasc LOG=RAM:mapcheck2.txt >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

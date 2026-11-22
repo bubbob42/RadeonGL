@@ -55,7 +55,7 @@
 #define CORE_DRAW_DW      64      /* an array draw's packets after the state */
 #define CORE_STREAM_BYTES (512UL * 1024)  /* VRAM for locked arrays and indices, refilled every frame */
 #define CORE_UCACHE_BYTES (4096UL * 1024)  /* VRAM keeping uploads across frames (array.c) */
-#define CORE_UCACHE_MIN   (1024UL * 1024)  /* when the heap has no room for the above (halved down to it) */
+#define CORE_UCACHE_MIN   (1024UL * 1024)  /* the smallest cache: at the start and for textures (halved down to it) */
 /* 4 MB since 2026-11-14 (the user): Reflector's Billiards model keeps ~2.3 MB
  * of static arrays, and in 2 MB it missed almost every block in every frame
  * (290 hits, 1090 misses). A heap or fast RAM without room for 4 MB gets 2,
@@ -535,7 +535,7 @@ struct Core
     /* 2026-11-14, the upload cache grows and shrinks (ucgrow.c,
      * docs/concept-dynamic-upload-cache.md) */
     ULONG ucache_region;            /* the heap block's bytes (>= ucache_size: a refused mirror) */
-    ULONG ucache_start;             /* the size it started with: never shrunk below */
+    ULONG ucache_start;             /* the size it started with (the log; the floor until 2026-11-21) */
     ULONG ucache_max;               /* the largest it reached */
     ULONG ucache_fixed;             /* RadeonGLUploadCache=n: this size, no growing */
     ULONG ug_run;                   /* frames in a row with too many capacity misses */
@@ -636,8 +636,9 @@ void  Core_UCacheCopied(struct Core *c);
  * of a frame, the GPU idle (Core_GpuIdle just called): the cache may grow.
  * Core_UCacheFix: RadeonGLUploadCache=n, n MB and no growing; before the
  * first draw, after Core_SetVram. Core_UCacheShrink: a texture found no
- * room; the cache gives half of itself back (waits for the GPU): TRUE if it
- * did, so the texture may try again. */
+ * room; the cache gives half of itself back, down to CORE_UCACHE_MIN, then
+ * all of it (waits for the GPU): TRUE if it did, so the texture may try
+ * again. */
 void  Core_UCacheFrame(struct Core *c);
 void  Core_UCacheFix(struct Core *c, ULONG bytes);
 ULONG Core_UCacheShrink(struct Core *c);

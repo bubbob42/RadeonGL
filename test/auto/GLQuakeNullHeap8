@@ -1,7 +1,12 @@
-; GLQuakeNullHeap8 -- GLQuakeNull1 on an 8 MB texture heap (RadeonGLHeapMax),
-; the heap RadeonGL 0.4 got on an 8-bit Workbench. demo1 needs about 8.7 MB:
-; textures are refused, and the run must still end (0.4 froze there on the
-; A4000D). The library log must show "allocations refused" above 0.
+; GLQuakeNullHeap8 -- GLQuakeNull1 on small texture heaps (RadeonGLHeapMax).
+; 8 MB is the heap RadeonGL 0.4 got on an 8-bit Workbench; demo1 needs
+; about 8.7 MB with the 4 MB upload cache beside it. Since 2026-11-21 the
+; cache gives way to textures down to off (ucgrow.c): at 8 MB demo1's
+; textures all fit -- the library log says "off (given to textures)",
+; "allocations refused" only the tries the shrinks rescued, GL error 0.
+; At 6 MB they cannot fit even then: textures are refused, and the run
+; must still end (0.4 froze there on the A4000D); "allocations refused"
+; above the shrinks.
 ; Needs: gmake glquake glquake-data rgl-lib.
 ; LIMIT 900
 FailAt 1000
@@ -12,6 +17,13 @@ Stack 1000000
 Delete >NIL: DEV:Test/null-#?
 Echo "=== demo1, 8 MB heap ===" >>DEV:Test/auto.log
 SetEnv RadeonGLHeapMax 8
+Run >NIL: Execute DEV:Test/RunNull demo1
+Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
+Type DEV:Test/null-demo1.log >>DEV:Test/auto.log
+Type DEV:Test/null-demo1-lib.log >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/null-#?
+Echo "=== demo1, 6 MB heap ===" >>DEV:Test/auto.log
+SetEnv RadeonGLHeapMax 6
 Run >NIL: Execute DEV:Test/RunNull demo1
 Execute DEV:Test/WaitDone DEV:Test/null-demo1.done
 UnSetEnv RadeonGLHeapMax

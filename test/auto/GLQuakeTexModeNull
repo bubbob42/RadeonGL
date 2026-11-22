@@ -1,0 +1,39 @@
+; GLQuakeTexModeNull -- GLQuake's texture filter (Video Options > Texture
+; filter, 2026-11-22) on the null card: config.cfg keeps it as the command
+; "gl_texturemode <mode>", and the next start sets it again.
+; Start 1 sets Sharp (GL_NEAREST_MIPMAP_LINEAR) on the command line and
+; ends after a timedemo (which writes config.cfg); its config.cfg must hold
+; "gl_texturemode GL_NEAREST_MIPMAP_LINEAR". Start 2 only asks: it must
+; print GL_NEAREST_MIPMAP_LINEAR (from config.cfg), then "bad filter name"
+; for a wrong one. The staged config.cfg goes back as it was (the A4000D
+; runners send it: a left-over Sharp would change their timings).
+; The menu row itself needs eyes on the card (the null card draws nothing).
+; Needs: gmake glquake glquake-data rgl-lib.
+; LIMIT 900
+FailAt 1000
+Wait 12
+Stack 1000000
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Copy DEV:Quake/id1/config.cfg DEV:Test/config.cfg-keep QUIET
+Delete >NIL: DEV:Test/texmode#?
+CD DEV:Quake
+Assign LIBS: DEV:Libs/RadeonGL ADD
+Echo "=== start 1: Sharp, then a timedemo ===" >>DEV:Test/auto.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +gl_texturemode GL_NEAREST_MIPMAP_LINEAR +gl_texturemode +timedemo demo1 >DEV:Test/texmode1.log
+Echo "start 1 rc=$RC" >>DEV:Test/auto.log
+Search DEV:Test/texmode1.log "MIPMAP" NONUM >>DEV:Test/auto.log
+Search DEV:Test/texmode1.log "frames" NONUM >>DEV:Test/auto.log
+Echo "=== its config.cfg ===" >>DEV:Test/auto.log
+Search DEV:Quake/id1/config.cfg "texturemode" NONUM >>DEV:Test/auto.log
+Echo "=== start 2: the mode it starts with, a wrong name ===" >>DEV:Test/auto.log
+GLQuake -anycpu -stdout -nosound -nocdaudio -noudp -nolan -timedemoquit +gl_texturemode +gl_texturemode GL_BOGUS +timedemo demo1 >DEV:Test/texmode2.log
+Echo "start 2 rc=$RC" >>DEV:Test/auto.log
+Search DEV:Test/texmode2.log "MIPMAP" NONUM >>DEV:Test/auto.log
+Search DEV:Test/texmode2.log "bad filter" NONUM >>DEV:Test/auto.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+Copy DEV:Test/config.cfg-keep DEV:Quake/id1/config.cfg QUIET
+Echo "=== config.cfg back ===" >>DEV:Test/auto.log
+Search DEV:Quake/id1/config.cfg "texturemode" NONUM >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

@@ -718,6 +718,13 @@ dist/Probe/C/R200Info: build/probe/r200info.o $(PROBE_OBJS)
 	@mkdir -p dist/Probe/C
 	$(GCC_CC) -noixemul $^ -o $@ -lamiga
 
+# MapCheck (2026-11-21): RadeonGL's card-address formula against the CRTC's
+# own scan-out address -- read only (a user's A1200 Mediator: every GL
+# program crashed)
+dist/Probe/C/MapCheck: build/probe/mapcheck.o $(PROBE_OBJS)
+	@mkdir -p dist/Probe/C
+	$(GCC_CC) -noixemul $^ -o $@ -lamiga
+
 # RadeonStat (2026-11-08): a line a second -- GPU busy, CP lag, P96's free
 # card memory, the front screen's pixel clock; read-only. Started from its
 # icon (or GUI) a ReAction window: rstatgui.c, rstatview.c (the readouts),
@@ -856,6 +863,10 @@ dist/Probe/C/R200Info_sasc: build/probe-sasc/r200info.o $(PROBE_SC_OBJS) | $(VAM
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
 
+dist/Probe/C/MapCheck_sasc: build/probe-sasc/mapcheck.o $(PROBE_SC_OBJS) | $(VAMOSRC)
+	@mkdir -p dist/Probe/C
+	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
+
 dist/Probe/C/RadeonStat_sasc: build/probe-sasc/radeonstat.o $(addprefix build/probe-sasc/,$(addsuffix .o,$(RSTAT_MODS))) $(PROBE_SC_OBJS) | $(VAMOSRC)
 	@mkdir -p dist/Probe/C
 	tools/slink-guard $@ 120 $(VAMOS_SLINK) slink FROM lib:c.o $(addprefix proj:,$^) TO proj:$@ LIB lib:sc.lib lib:amiga.lib
@@ -935,7 +946,7 @@ probes: dist/Probe/C/R200Info dist/Probe/C/BusBench dist/Probe/C/CPRing dist/Pro
         dist/Probe/C/RomDump dist/Probe/C/RomDump_sasc dist/Probe/C/VramProbe dist/Probe/C/VramProbe_sasc \
         dist/Probe/C/VoltLog dist/Probe/C/VoltLog_sasc \
         dist/Probe/C/Overlap dist/Probe/C/Overlap_sasc dist/Probe/C/RadeonStat dist/Probe/C/RadeonStat_sasc \
-        dist/Probe/C/RglPort dist/Probe/C/RglPort_sasc
+        dist/Probe/C/RglPort dist/Probe/C/RglPort_sasc dist/Probe/C/MapCheck dist/Probe/C/MapCheck_sasc
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/Probe/R200Info
 	@printf 'echo "R200Info: reading the Radeon (nothing is written). Move a window during the pause."\n' >> dist/Probe/R200Info
 	@printf 'DEV:Probe/C/R200Info LOG=DEV:Probe/R200Info.log SAMPLES=2 INTERVAL=8\n' >> dist/Probe/R200Info
@@ -1352,6 +1363,17 @@ $(GLCOMPAT): glsmoke/glcompat.c
 	    -I$(MGL_SDK_INC) -I$(P96_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
+# GLFilt (2026-11-21): every minification filter on the card, the mip
+# levels as solid colours and a checker level (glsmoke/glfilt.c; it found
+# two R200 modes swapped, fixed in 0.18)
+GLFILT := dist/GLSmoke/GLFilt
+
+$(GLFILT): glsmoke/glfilt.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -I$(P96_INC) -o $@ $< -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
+
 # GLGlut: minigl.library 29.1's GLUT on the card -- a window, the callbacks,
 # glutGet, the shapes and the normals they leave, game mode (glsmoke/glglut.c)
 GLGLUT := dist/GLSmoke/GLGlut
@@ -1363,7 +1385,7 @@ $(GLGLUT): glsmoke/glglut.c
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLGROW) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLGLUT) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLGROW) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLFILT) $(GLGLUT) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke

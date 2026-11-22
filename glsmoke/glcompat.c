@@ -41,7 +41,7 @@
 #define TEMPLATE "DEPTH/K/N,VERBOSE/S,NOLOOP/S"
 #define S 128                   /* the frame: S x S */
 
-const char ver[] = "$VER: GLCompat 0.3 (12.11.2026)";
+const char ver[] = "$VER: GLCompat 0.4 (21.11.2026)";
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
 struct Library *P96Base;
@@ -208,6 +208,89 @@ static void EnvCases(void)
 }
 
 /* --- uploads: alignment 1, float texels ------------------------------------------------ */
+
+/* 2026-11-21: trilinear filtering (GL_LINEAR_MIPMAP_LINEAR) on the card.
+ * A 64 x 64 texture whose levels are solid colours -- 0 red, 1 green, the
+ * rest blue -- over the whole frame with texture coordinates 0..k: the
+ * level of detail is log2(k * 64 / S), the same at every pixel (GL_REPEAT,
+ * solid levels: the filter within a level does not matter). Bilinear picks
+ * one level; trilinear blends the two around it by the fraction. The blend
+ * weight's precision is the card's: tolerance 24. */
+static void MipQuad(float k)
+{
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.0f, 0.0f, 0.0f);
+    glTexCoord2f(k, 0.0f);    glVertex3f((GLfloat) S, 0.0f, 0.0f);
+    glTexCoord2f(k, k);       glVertex3f((GLfloat) S, (GLfloat) S, 0.0f);
+    glTexCoord2f(0.0f, k);    glVertex3f(0.0f, (GLfloat) S, 0.0f);
+    glEnd();
+}
+
+/* the pixel at (x, y) against r, g, b in [0, 1] with a tolerance of its own */
+static void WantTol(const char *what, LONG x, LONG y, float r, float g, float b, LONG t)
+{
+    LONG keep;
+
+    keep = tol;
+    tol = t;
+    Want(what, x, y, r, g, b);
+    tol = keep;
+}
+
+static void FilterCases(void)
+{
+    static UBYTE lv[64 * 64 * 3];
+    GLuint tex;
+    LONG l, sz, i;
+    UBYTE r, g, b;
+
+    Ortho();
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    for (l = 0, sz = 64; sz >= 1; l++, sz >>= 1)
+    {
+        r = (UBYTE) (l == 0 ? 255 : 0);
+        g = (UBYTE) (l == 1 ? 255 : 0);
+        b = (UBYTE) (l >= 2 ? 255 : 0);
+        for (i = 0; i < sz * sz; i++)
+        {
+            lv[i * 3] = r;
+            lv[i * 3 + 1] = g;
+            lv[i * 3 + 2] = b;
+        }
+        glTexImage2D(GL_TEXTURE_2D, (GLint) l, GL_RGB, sz, sz, 0, GL_RGB, GL_UNSIGNED_BYTE, lv);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glEnable(GL_TEXTURE_2D);
+
+    /* LOD 0.25 (k = 2^1.25): bilinear stays on level 0, trilinear takes a quarter of level 1 */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+    Begin();
+    MipQuad(2.3784f);
+    Show();
+    Want("bilinear (LINEAR_MIPMAP_NEAREST), LOD 0.25: level 0", S / 2, S / 2, 1, 0, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    Begin();
+    MipQuad(2.3784f);
+    Show();
+    WantTol("trilinear, LOD 0.25: 3/4 level 0 + 1/4 level 1", S / 2, S / 2, 0.75f, 0.25f, 0, 24);
+    /* LOD 0.5: half and half */
+    Begin();
+    MipQuad(2.8284f);
+    Show();
+    WantTol("trilinear, LOD 0.5: half level 0, half level 1", S / 2, S / 2, 0.5f, 0.5f, 0, 24);
+    /* LOD 1.5: levels 1 and 2 */
+    Begin();
+    MipQuad(5.6569f);
+    Show();
+    WantTol("trilinear, LOD 1.5: half level 1, half level 2", S / 2, S / 2, 0, 0.5f, 0.5f, 24);
+
+    glDisable(GL_TEXTURE_2D);
+    glDeleteTextures(1, &tex);
+}
 
 static void UploadCases(void)
 {
@@ -1312,6 +1395,7 @@ int main(void)
     Printf("GLCompat on a %ld-bit screen, frame %ld x %ld, tolerance %ld\n", depth, (LONG) S, (LONG) S, tol);
     EnvCases();
     UploadCases();
+    FilterCases();
     GluCases();
     ArrayCases();
     MoreCases();

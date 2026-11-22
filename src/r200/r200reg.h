@@ -389,9 +389,15 @@
 #define R_PP_TXFILTER_0         0x2c00
 #define   R_MAG_FILTER_LINEAR     (1UL << 0)
 #define   R_MIN_FILTER_LINEAR     (1UL << 1)
+/* The minification field is bits (MEASURED 2026-11-21, glsmoke/glfilt.c on
+ * the A4000D's Radeon 9200, levels as solid colours): 1 linear within a
+ * level, 2 mipmapped, 4 linear between levels, 8 anisotropic. Until 0.17
+ * NEAREST_MIP_LINEAR was 3 and LINEAR_MIP_NEAREST 6 -- swapped: GL's
+ * LINEAR_MIPMAP_NEAREST (GLQuake's default) came out blended between
+ * levels, NEAREST_MIPMAP_LINEAR on one level. */
 #define   R_MIN_FILTER_NEAREST_MIP_NEAREST (2UL << 1)
-#define   R_MIN_FILTER_NEAREST_MIP_LINEAR  (3UL << 1)
-#define   R_MIN_FILTER_LINEAR_MIP_NEAREST (6UL << 1)
+#define   R_MIN_FILTER_LINEAR_MIP_NEAREST (3UL << 1)
+#define   R_MIN_FILTER_NEAREST_MIP_LINEAR  (6UL << 1)
 #define   R_MIN_FILTER_LINEAR_MIP_LINEAR  (7UL << 1)
 #define   R_MAX_MIP_LEVEL_SHIFT   16
 #define   R_MAX_MIP_LEVEL_MASK    (0xfUL << 16)
@@ -453,7 +459,10 @@
 #define   R_MIN_FILTER_ANISO_NEAREST          (8UL << 1)
 #define   R_MIN_FILTER_ANISO_LINEAR           (9UL << 1)
 #define   R_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST (10UL << 1)
-#define   R_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR  (11UL << 1)
+/* the bits above: 8 | 4 | 2. Until 0.17 this was 11 (8 | 2 | 1, no level
+ * blend): anisotropy with GL_LINEAR_MIPMAP_LINEAR stayed on one level
+ * (MEASURED, GLFilt, anisotropy 8) */
+#define   R_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR  (14UL << 1)
 #define   R_MAX_ANISO_SHIFT       5      /* 0 1:1, 1 2:1, 2 4:1, 3 8:1, 4 16:1 */
 #define   R_MAX_ANISO_MASK        (7UL << 5)
 #define   R_CLAMP_S_SHIFT         23     /* 0 wrap, 1 mirror, 2 clamp last, 4 clamp border */

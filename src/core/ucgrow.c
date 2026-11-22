@@ -14,8 +14,14 @@
  *           big (D1, revised: half of the free heap never let a 16 MB heap
  *           grow past 4 MB -- GLGrow on the A4000D) and fast RAM has the
  *           bigger mirror (D3);
- *   shrink  a texture found no room: half, down to the start size (D2),
- *           then the texture tries again (texture.c);
+ *   shrink  a texture found no room: half, down to CORE_UCACHE_MIN, then
+ *           off; RadeonGLUploadCache=0 (never used) off at once. The
+ *           texture tries again after each step (texture.c). Until
+ *           2026-11-21 the floor was the start size (D2 (a)), and 4 MB of a
+ *           16 MB heap never went to textures: Zod Engine's next map found
+ *           no room and its floor stayed black (ZodEngine, 0 hits, 584
+ *           allocations refused). A missing texture is a fault, a smaller
+ *           cache only costs speed; one that is off stays off;
  *   calm    no grow for UG_CALM frames after a shrink or a refused grow;
  *   fixed   RadeonGLUploadCache=n: n MB, never resized (D4).
  *
@@ -285,22 +291,41 @@ void Core_UCacheFrame(struct Core *c)
     c->ug_calm = UG_CALM;
 }
 
+/* The cache off for good, its video RAM, mirror and tables free (Resize's
+ * refused state). The GPU must be idle. */
+static void Off(struct Core *c)
+{
+    Heap_Free(c, c->ucache_off);
+    MirrorFree(c);                  /* frees ucache_size + 16: before the size goes */
+    Core_UTablesFree(c);
+    c->ucache_on = 0;
+    c->ucache_size = 0;
+    c->ucache_region = 0;
+    c->udirty_n = 0;
+    c->udirty_all = 0;
+}
+
 ULONG Core_UCacheShrink(struct Core *c)
 {
     ULONG want;
 
     c->ug_calm = UG_CALM;           /* a texture found no room: no grow for a while */
     c->ug_run = 0;
-    if (!c->ucache_on || c->ucache_fixed || c->ucache_size <= c->ucache_start)
+    if (!c->ucache_on || c->ucache_fixed || c->ucache_size == 0)
         return 0;
     want = c->ucache_size / 2;
-    if (want < c->ucache_start)
-        want = c->ucache_start;
+    if (c->no_ucache || c->ucache_size <= CORE_UCACHE_MIN)
+        want = 0;
+    else if (want < CORE_UCACHE_MIN)
+        want = CORE_UCACHE_MIN;
     if (c->env.wait_idle != NULL)
         c->env.wait_idle(c->env.env);
     c->stat_idle_waits++;
     Core_GpuIdle(c);
-    (void) Resize(c, want, 0);      /* refused: the cache is off, its memory free */
+    if (want == 0)
+        Off(c);
+    else
+        (void) Resize(c, want, 0);  /* refused: the cache is off, its memory free */
     c->stat_uc_shrinks++;
     return 1;
 }

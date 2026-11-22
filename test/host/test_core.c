@@ -4983,23 +4983,17 @@ static void test_ucache_grow(void)
     CHECK_INT(UgFrame(nb, 0), 0);
     CHECK_INT(core.stat_uc_grows, 1);                       /* and no more */
 
-    /* textures fill the heap: the cache gives back down to its start, and
-     * the texture that caused a shrink gets its room */
+    /* textures fill the heap: the first one without room makes the cache
+     * give back half (8 to 4 MB) and gets its room */
     Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    shr = 0;
     err = GL_NO_ERROR;
-    for (i = 10; i < 200 && err == GL_NO_ERROR; i++)
+    for (i = 10; i < 200 && err == GL_NO_ERROR && core.stat_uc_shrinks == 0; i++)
     {
         Core_BindTexture(&core, GL_TEXTURE_2D, i);
         Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, ug_tex);
         err = Core_GetError(&core);
-        if (core.stat_uc_shrinks != shr)
-        {
-            CHECK_INT(err, GL_NO_ERROR);                    /* room after the shrink */
-            shr = core.stat_uc_shrinks;
-        }
     }
-    CHECK_INT(err, GL_OUT_OF_MEMORY);       /* full even with the cache at its start */
+    CHECK_INT(err, GL_NO_ERROR);            /* room after the shrink */
     CHECK_INT(core.stat_uc_shrinks, 1);
     CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
     CHECK_INT(core.ug_calm, 300);
@@ -5015,6 +5009,97 @@ static void test_ucache_grow(void)
     CHECK(core.stat_uc_refused >= 1);
     CHECK_INT(core.ug_why, UG_HEAP);
     CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
+
+    /* more textures: below the start now (2026-11-21, Zod Engine's black
+     * floor): half, half again down to CORE_UCACHE_MIN, then off; every
+     * texture that caused a shrink gets its room */
+    shr = core.stat_uc_shrinks;
+    for (; i < 200 && err == GL_NO_ERROR; i++)
+    {
+        Core_BindTexture(&core, GL_TEXTURE_2D, i);
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, ug_tex);
+        err = Core_GetError(&core);
+        if (core.stat_uc_shrinks != shr)
+        {
+            CHECK_INT(err, GL_NO_ERROR);                    /* room after the shrink */
+            shr = core.stat_uc_shrinks;
+        }
+    }
+    CHECK_INT(err, GL_OUT_OF_MEMORY);       /* full only with the cache gone */
+    CHECK_INT(core.stat_uc_shrinks, 4);     /* 8 -> 4 -> 2 -> 1 MB -> off */
+    CHECK_INT(core.ucache_on, 0);
+    CHECK_INT(core.ucache_size, 0);
+    CHECK(core.uq == NULL && core.uslot == NULL && core.ughost == NULL);
+    CHECK_INT(Core_UCacheShrink(&core), 0); /* nothing more to give */
+    Core_BindTexture(&core, GL_TEXTURE_2D, 0);
+    (void) UgFrame(nb, 0);                  /* draws still clean, through the stream */
+    core.ug_calm = 0;
+    for (f = 0; f < 12; f++)
+        (void) UgFrame(nb, 0);
+    CHECK_INT(core.ucache_on, 0);           /* off stays off */
+    CHECK_INT(core.stat_uc_grows, 1);
+    UgDefault();
+}
+
+/* Zod Engine's round end (2026-11-21): a 16 MB heap, no locked arrays at
+ * all (0 hits, 0 misses), textures filling it. Until then 4 MB stayed the
+ * cache's and 584 allocations were refused; now the textures get all of
+ * the heap but the stream. RadeonGLUploadCache=0 gives it at once,
+ * RadeonGLUploadCache=n never. */
+static ULONG UgFill(ULONG *shrinks)
+{
+    ULONG i;
+    LONG err;
+
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    err = GL_NO_ERROR;
+    for (i = 10; i < 100 && err == GL_NO_ERROR; i++)
+    {
+        Core_BindTexture(&core, GL_TEXTURE_2D, i);
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, ug_tex);
+        err = Core_GetError(&core);
+    }
+    CHECK_INT(err, GL_OUT_OF_MEMORY);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 0);
+    *shrinks = core.stat_uc_shrinks;
+    return i - 11;                          /* the textures that fit */
+}
+
+static void test_ucache_yields(void)
+{
+    ULONG n, shr, tex;
+
+    tex = 512UL * 512 * 4 + 512UL * 512 * 4 / 3 + 4096;     /* a mip chain, about */
+    heap_gpu = BIG_GPU;
+    heap_size = 16UL << 20;
+    Fresh(1);
+    CHECK_INT(core.ucache_size, CORE_UCACHE_BYTES);
+    n = UgFill(&shr);
+    CHECK_INT(core.stat_uc_hits + core.stat_uc_misses, 0);
+    CHECK_INT(shr, 3);                      /* 4 -> 2 -> 1 MB -> off */
+    CHECK_INT(core.ucache_on, 0);
+    CHECK(n * tex > (16UL << 20) - CORE_STREAM_BYTES - (2UL << 20));  /* 13.5 MB; 11.5 beside 4 MB */
+    CHECK(core.heap.used > (16UL << 20) - CORE_STREAM_BYTES - tex);
+
+    /* RadeonGLUploadCache=0: never used, so all of it at the first miss */
+    heap_gpu = BIG_GPU;
+    heap_size = 16UL << 20;
+    Fresh(1);
+    core.no_ucache = 1;
+    n = UgFill(&shr);
+    CHECK_INT(shr, 1);
+    CHECK_INT(core.ucache_on, 0);
+    CHECK(core.heap.used > (16UL << 20) - CORE_STREAM_BYTES - tex);
+
+    /* RadeonGLUploadCache=2: fixed, never given (the user's choice) */
+    heap_gpu = BIG_GPU;
+    heap_size = 16UL << 20;
+    Fresh(1);
+    Core_UCacheFix(&core, 2UL << 20);
+    n = UgFill(&shr);
+    CHECK_INT(shr, 0);
+    CHECK_INT(core.ucache_on, 1);
+    CHECK_INT(core.ucache_size, 2UL << 20);
     UgDefault();
 }
 
@@ -6066,6 +6151,7 @@ int main(void)
     test_ucache_staged_tails();
     test_ucache_grow();
     test_ucache_nogrow();
+    test_ucache_yields();
     test_ucache_refused_fixed();
     test_ucache_grow_staged();
     test_packfast();

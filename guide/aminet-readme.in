@@ -44,9 +44,10 @@ FEATURES
     stack
   * Six texture units; RGB565, ARGB4444, ARGB1555, ARGB8888 (GL_RGB8,
     GL_RGBA8), I8, AI88 in up to 16 MB of card memory; nearest, linear,
-    mipmap and anisotropic filters; repeat, clamp, border clamp and
-    mirrored repeat; MODULATE, REPLACE, DECAL, BLEND, ADD and GL 1.3's
-    combiner (GL_COMBINE, dot3, crossbar, ATI's combine3); cube maps
+    bilinear and trilinear mipmaps, anisotropic filters; repeat, clamp,
+    border clamp and mirrored repeat; MODULATE, REPLACE, DECAL, BLEND, ADD
+    and GL 1.3's combiner (GL_COMBINE, dot3, crossbar, ATI's combine3);
+    cube maps
   * Lighting on the Radeon: eight lights, directional, local and spot,
     with attenuation, two-sided; materials, colour material, normal
     arrays
@@ -150,6 +151,11 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.18 (22.11.2026)
+  - fixed: GL_LINEAR_MIPMAP_NEAREST and GL_NEAREST_MIPMAP_LINEAR were
+    swapped (GLQuake's distant textures looked grainy)
+  - the upload cache gives its memory to textures that find no room
 
 0.17 (20.11.2026)
   - GL 1.3's texturing: six units, cube maps, the full combiner, border

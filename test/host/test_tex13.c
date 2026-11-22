@@ -694,6 +694,101 @@ static void test_sampling_regs(void)
 
 /* --- Separate specular, rescale, queries ---------------------------------------------- */
 
+/* 2026-11-21: every minification filter's R200 mode, plain (no
+ * anisotropy): trilinear (GL_LINEAR_MIPMAP_LINEAR) is LINEAR_MIP_LINEAR,
+ * a mip filter reaches the top of the uploaded chain, a filter without
+ * mipmaps and a texture of one level stay at level 0. (With anisotropy,
+ * test_sampling_regs: trilinear becomes ANISO_NEAREST_MIP_LINEAR.) */
+static void test_min_filters(void)
+{
+    static const ULONG gl[6] = { GL_NEAREST, GL_LINEAR, GL_NEAREST_MIPMAP_NEAREST,
+                                 GL_NEAREST_MIPMAP_LINEAR, GL_LINEAR_MIPMAP_NEAREST,
+                                 GL_LINEAR_MIPMAP_LINEAR };
+    static const ULONG hw[6] = { 0, R_MIN_FILTER_LINEAR, R_MIN_FILTER_NEAREST_MIP_NEAREST,
+                                 R_MIN_FILTER_NEAREST_MIP_LINEAR, R_MIN_FILTER_LINEAR_MIP_NEAREST,
+                                 R_MIN_FILTER_LINEAR_MIP_LINEAR };
+    static const ULONG top[6] = { 0, 0, 3, 3, 3, 3 };
+    UBYTE px[8 * 8 * 4];
+    ULONG i;
+    ULONG lvl;
+    ULONG f;
+
+    /* the field's bits as the card does them (GLFilt on the A4000D,
+     * 2026-11-21): 1 linear within a level, 2 mipmapped, 4 linear between
+     * levels, 8 anisotropic -- the values pinned, not only the names */
+    CHECK_HEX(R_MIN_FILTER_LINEAR, 1UL << 1);
+    CHECK_HEX(R_MIN_FILTER_NEAREST_MIP_NEAREST, 2UL << 1);
+    CHECK_HEX(R_MIN_FILTER_LINEAR_MIP_NEAREST, 3UL << 1);
+    CHECK_HEX(R_MIN_FILTER_NEAREST_MIP_LINEAR, 6UL << 1);
+    CHECK_HEX(R_MIN_FILTER_LINEAR_MIP_LINEAR, 7UL << 1);
+    CHECK_HEX(R_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST, 10UL << 1);
+    CHECK_HEX(R_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR, 14UL << 1);
+    memset(px, 0x80, sizeof(px));
+    for (i = 0; i < 6; i++)
+    {
+        Fresh();
+        Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+        for (lvl = 0; lvl < 4; lvl++)
+            Core_TexImage2D(&core, GL_TEXTURE_2D, lvl, GL_RGBA, 8 >> lvl, 8 >> lvl, 0, GL_RGBA,
+                            GL_UNSIGNED_BYTE, px);
+        Core_Enable(&core, GL_TEXTURE_2D, 1);
+        Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (LONG) gl[i]);
+        Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        Quad(0, 0, 10, 1);
+        f = LastReg(R_PP_TXFILTER_0);
+        CHECK_HEX(f & R_MIN_FILTER_MASK, hw[i]);
+        CHECK_HEX(f & R_MAX_ANISO_MASK, 0);
+        CHECK_HEX(f & R_MAG_FILTER_LINEAR, R_MAG_FILTER_LINEAR);
+        CHECK_INT((f & R_MAX_MIP_LEVEL_MASK) >> R_MAX_MIP_LEVEL_SHIFT, top[i]);
+    }
+    /* trilinear on a texture of one level: the mode stays, level 0 only */
+    Fresh();
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    Quad(0, 0, 10, 1);
+    f = LastReg(R_PP_TXFILTER_0);
+    CHECK_HEX(f & R_MIN_FILTER_MASK, R_MIN_FILTER_LINEAR_MIP_LINEAR);
+    CHECK_INT((f & R_MAX_MIP_LEVEL_MASK) >> R_MAX_MIP_LEVEL_SHIFT, 0);
+}
+
+/* 2026-11-21: GLCompat's trilinear block replayed (glsmoke/glcompat.c
+ * FilterCases): a texture of seven RGB levels made first, the filters set
+ * after it, GL_REPLACE -- which minification mode reaches the register for
+ * each draw. On the card the first draw (LINEAR_MIPMAP_NEAREST) came out
+ * blended between levels like a MIP_LINEAR mode. */
+static void test_filter_after_upload(void)
+{
+    static UBYTE lv[64 * 64 * 3];
+    ULONG l, sz, f;
+
+    Fresh();
+    memset(lv, 0x40, sizeof(lv));
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    for (l = 0, sz = 64; sz >= 1; l++, sz >>= 1)
+        Core_TexImage2D(&core, GL_TEXTURE_2D, (LONG) l, GL_RGB, (LONG) sz, (LONG) sz, 0, GL_RGB,
+                        GL_UNSIGNED_BYTE, lv);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    Core_TexEnvi(&core, GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+    Quad(0, 0, 10, 1);
+    f = LastReg(R_PP_TXFILTER_0);
+    printf("  replay: after LINEAR_MIPMAP_NEAREST: TXFILTER 0x%08lx (min 0x%lx, top %lu)\n",
+           (unsigned long) f, (unsigned long) (f & R_MIN_FILTER_MASK),
+           (unsigned long) ((f & R_MAX_MIP_LEVEL_MASK) >> R_MAX_MIP_LEVEL_SHIFT));
+    CHECK_HEX(f & R_MIN_FILTER_MASK, R_MIN_FILTER_LINEAR_MIP_NEAREST);
+    CHECK_INT((f & R_MAX_MIP_LEVEL_MASK) >> R_MAX_MIP_LEVEL_SHIFT, 6);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    Quad(0, 0, 10, 1);
+    f = LastReg(R_PP_TXFILTER_0);
+    CHECK_HEX(f & R_MIN_FILTER_MASK, R_MIN_FILTER_LINEAR_MIP_LINEAR);
+}
+
 static void test_light_and_queries(void)
 {
     float v[4];
@@ -951,6 +1046,8 @@ int main(void)
     test_texgen_reflect();
     test_formats();
     test_sampling_regs();
+    test_min_filters();
+    test_filter_after_upload();
     test_light_and_queries();
     pic_six_units();
     pic_combine();
