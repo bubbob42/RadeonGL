@@ -422,6 +422,8 @@ void Card_Trace(ULONG n, ULONG v)
 }
 #endif
 
+static void PreSettle(struct Card *k);    /* at the end: cold */
+
 static BOOL LockBm(struct Card *k, ULONG i, BOOL any_place)
 {
     struct CardBm *b;
@@ -430,6 +432,8 @@ static BOOL LockBm(struct Card *k, ULONG i, BOOL any_place)
     b = &k->b[i];
     if (b->bm == NULL || b->lock != 0)
         return FALSE;
+    if (k->pending && k->prewait)
+        PreSettle(k);               /* the kicked frame first, with our own timeout */
     WHERE(50 + i, any_place);
     b->lock = p96LockBitMap(b->bm, (UBYTE *) &ri, sizeof(ri));
     WHERE(55 + i, b->lock);
@@ -971,7 +975,8 @@ static void SettleAlone(struct Card *k, BOOL closing)
     WHERE(45, closing);
     locked = LockBm(k, CARD_RING, TRUE);
     k->clock_base = Ticks();
-    Settle(k, closing);
+    if (k->pending)                 /* PreSettle may have given it up */
+        Settle(k, closing);
     if (locked)
         UnlockBm(k, CARD_RING);
 }
@@ -2848,6 +2853,7 @@ void Card_Close(struct Card *k)
     Card_Obtain();
     UnlockAll(k);
     k->vram_lock = 0;
+    k->closing = 1;                 /* PreSettle: no Core_Forget, the core is gone */
     SettleAlone(k, TRUE);           /* the last frame drawn, the CP off */
     WaitBlit();
     /* Radeon.card's display FIFO setting back (RadeonGLDisplayPriority) */
@@ -2913,4 +2919,151 @@ void Card_Close(struct Card *k)
         TimerBase = NULL;           /* (every card's timer.device is the same base) */
     P96Release(k);
     Card_Release();
+}
+
+/* --- the wait before a lock (2026-11-24) ------------------------------------------------ */
+
+/* RadeonGLSerial=1: exec's RawPutChar (LVO -516, as the trace build and
+ * MuForce: a busy wait at 9600 baud, ~1 ms a character) -- a line or two
+ * when a frame never ended, so a serial capture shows it at once. */
+static void SerialChar(ULONG c)
+{
+    register ULONG d0 __asm("d0") = c;
+    register struct ExecBase *a6 __asm("a6") = SysBase;
+
+    __asm__ __volatile__ ("jsr -516(%%a6)"
+                          : "+d" (d0)
+                          : "a" (a6)
+                          : "d1", "a0", "a1", "cc", "memory");
+}
+
+static void SerialStr(const char *s)
+{
+    while (*s != '\0')
+        SerialChar((ULONG) (UBYTE) *s++);
+}
+
+static void SerialHex(ULONG v)
+{
+    int i;
+
+    for (i = 28; i >= 0; i -= 4)
+        SerialChar((ULONG) (UBYTE) "0123456789abcdef"[(v >> i) & 15]);
+}
+
+/* DevilutionX's fight freeze on Hamiller (2026-11-23: the game READY for
+ * 17 minutes inside glTexSubImage2D) and Pelt's (2026-11-11: the trace
+ * stopped inside p96LockBitMap): a P96 lock waits for the 3D engine with
+ * NO timeout (Overlap probe B), so a kicked frame that never ended froze
+ * the machine inside the lock -- Settle's own 500 ms timeout runs only
+ * after the lock is granted. Here, before every lock while a frame is
+ * pending (RadeonGLPreWait, on unless 0): its fence, waited for outside
+ * the lock (a register read, as RadeonStat reads; sleeping on timer.device
+ * after ~200 us, so the other tasks run). The fence follows a WAIT_UNTIL
+ * 2D/3D idle-clean (R2E_Fence): once it is there, the engine was idle and
+ * the lock does not wait. This waits no longer than the lock would have.
+ * When it never comes: the CP stopped and the 3D engine reset right here,
+ * outside the lock (P96 cannot use a hung engine; its own wait ends with
+ * the reset), the frame given up and the commands built since dropped
+ * (Settle's reset path) -- a lost frame and a log line instead of a
+ * frozen machine. If the reset does not bring the engine back, StopCp
+ * loses the context (CARD_LOST_CP): the picture stops, the machine runs. */
+#ifdef RGL_TESTHANG
+static ULONG test_hang_every = 0, test_hang_mode = 1, test_hang_n = 0;
+static ULONG test_hang_seq = 0;     /* the frame counted last: the first lock of its round only */
+
+/* RadeonGLTestHang="N M" (Card_Open: the opening task's variables) */
+void Card_TestHangSetup(void)
+{
+    char v[24];
+    ULONG i;
+
+    test_hang_every = 0;
+    test_hang_mode = 1;
+    test_hang_n = 0;
+    if (GetVar((STRPTR) "RadeonGLTestHang", (STRPTR) v, sizeof(v), 0) <= 0)
+        return;
+    for (i = 0; v[i] >= '0' && v[i] <= '9'; i++)
+        test_hang_every = test_hang_every * 10 + (ULONG) (v[i] - '0');
+    while (v[i] == ' ')
+        i++;
+    if (v[i] == '2')
+        test_hang_mode = 2;
+}
+#endif
+
+static void PreSettle(struct Card *k)
+{
+    ULONG t0;
+    ULONG us;
+    ULONG st;
+    LONG e;
+    ULONG seq;
+#ifdef RGL_TESTHANG
+    ULONG inject;
+#endif
+
+    seq = k->pend_seq;
+#ifdef RGL_TESTHANG
+    /* The test build (RGL_DEFS=-DRGL_TESTHANG): RadeonGLTestHang="N M"
+     * gives up every Nth pending frame on purpose, at the first lock of
+     * its round (no lock held, as in the real case) -- the wait is for a
+     * fence 4096 past it, so the real 500 ms timeout runs out; M 2 also
+     * resets the 3D engine as a hung one would be (M 1: the CP stop
+     * only, the engine is idle). The frame itself has finished. */
+    inject = 0;
+    if (test_hang_every != 0 && k->pend_seq != test_hang_seq
+        && (test_hang_seq = k->pend_seq, ++test_hang_n % test_hang_every == 0))
+    {
+        inject = test_hang_mode;
+        seq += 0x1000;
+    }
+    else
+#endif
+    if (R2Ring_FenceDone(&k->ring, seq))
+        return;
+    WHERE(46, seq);
+    k->pre_waits++;
+    t0 = HwClock(k);
+    e = Card_WaitFenceSleep(&k->ring, seq);
+    us = HwClock(k) - t0;
+    if (us > k->pre_us_max)
+        k->pre_us_max = us;
+    WHERE(47, us);
+    if (e == R2_OK)
+        return;                     /* the lock finds the engine idle; Settle stops the CP under it */
+    st = HwRead(k, R_RBBM_STATUS);
+    k->hang_status = st;
+    k->hangs++;
+    k->pending = 0;
+    if (StopCp(k, (BOOL) (k->closing != 0)) && !k->closing)
+        k->drop_next = 1;
+#ifdef RGL_TESTHANG
+    if (inject == 2 && k->lost == 0)
+    {
+        /* StopCp's reset path, which an idle engine does not take */
+        k->cp_resets++;
+        if (!Reset3D(k))
+            k->lost = CARD_LOST_CP;
+        if (!k->closing)
+        {
+            Core_Forget(k->core);
+            R2Chk_Reset(&k->chk);
+            k->drop_next = 1;
+        }
+        k->reload_ucode = 1;
+    }
+#endif
+    WHERE(48, k->lost);
+    if (k->serial)
+    {
+        SerialStr("RadeonGL: a frame never ended (fence ");
+        SerialHex(k->pend_seq);
+        SerialStr(", done ");
+        SerialHex(k->ring.fence_done);
+        SerialStr(", RBBM_STATUS ");
+        SerialHex(st);
+        SerialStr(k->lost != 0 ? "): CP stopped, the 3D reset FAILED, context lost\n"
+                               : "): CP stopped, 3D engine reset, frame dropped\n");
+    }
 }

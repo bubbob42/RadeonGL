@@ -249,7 +249,19 @@ struct Card
      * move the hot CardFlush behind them (tools/hot_layout.py). 427 dwords
      * (16 more) keeps 0.15's copy code to the byte. Adding fields: take them
      * from here. */
-    ULONG layout_spare[10];
+    /* 2026-11-24 (DevilutionX's fight freeze, Pelt's): RadeonGLPreWait (on
+     * unless 0) waits for a pending frame's fence BEFORE a P96 lock, with
+     * RadeonGL's own timeout (card.c PreSettle); RadeonGLSerial=1 writes a
+     * line to the serial port when a frame never ended. Seven of the
+     * spare dwords. */
+    ULONG prewait;
+    ULONG serial;
+    ULONG closing;              /* Card_Close settles: the core is gone */
+    ULONG pre_waits;            /* for the log: fence waits before a lock */
+    ULONG pre_us_max;           /* ... the longest, us */
+    ULONG hangs;                /* frames that never ended: CP stopped, 3D reset, dropped */
+    ULONG hang_status;          /* RBBM_STATUS when the last one was given up */
+    ULONG layout_spare[3];
 };
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
@@ -267,6 +279,9 @@ void CardView_Unlock(struct Card *k);
 struct LogOut;
 void CardView_Log(struct LogOut *f, struct Card *k);
 
+#ifdef RGL_TESTHANG
+void Card_TestHangSetup(void);  /* the test build: RadeonGLTestHang="N M" (card.c PreSettle) */
+#endif
 extern ULONG Card_ScreensLeft;  /* GL screens a visitor window kept open at Card_Close */
 /* Breadcrumbs for the debug trap catcher (trapcatch.h, RGL_TRAPCATCH):
  * where the card code is, and the bitmaps' CPU addresses at the last

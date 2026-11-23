@@ -620,6 +620,20 @@ static void *CreateContext(const struct Ask *a)
     if (r->real)
         r->rad.overlap = (GetVar((STRPTR) "RadeonGLOverlap", (STRPTR) flag, sizeof(flag), 0) > 0
                           && flag[0] == '0') ? 0UL : 1UL;
+    /* 2026-11-24, RadeonGLPreWait=0: a pending frame waited for inside the
+     * P96 lock only, as up to 0.18 (card.c PreSettle); RadeonGLSerial=1: a
+     * line on the serial port when a frame never ended */
+    if (r->real)
+    {
+        r->rad.prewait = (GetVar((STRPTR) "RadeonGLPreWait", (STRPTR) flag, sizeof(flag), 0) > 0
+                          && flag[0] == '0') ? 0UL : 1UL;
+        r->rad.serial = (GetVar((STRPTR) "RadeonGLSerial", (STRPTR) flag, sizeof(flag), 0) > 0
+                         && flag[0] == '1') ? 1UL : 0UL;
+    }
+#ifdef RGL_TESTHANG
+    if (r->real)
+        Card_TestHangSetup();
+#endif
     /* 2026-11-07, RadeonGLMove16=1 (with a data-cache push) or 2 (without):
      * the flush's copies into video RAM as MOVE16 line bursts -- a 68060
      * only, off unless set; a HARDWARE RISK until Move16Bench has shown the

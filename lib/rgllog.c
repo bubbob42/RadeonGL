@@ -281,6 +281,20 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     Put(f, r->core.stream_direct ? "into video RAM, a lock a draw\n"
                                  : "staged in fast RAM, copied at the flush\n");
     Put(f, "CP resets: "); PutU(f, k->cp_resets); Put(f, "\n");
+    if (k->prewait)
+    {
+        Put(f, "waits before a lock for the frame still drawing: "); PutU(f, k->pre_waits);
+        Put(f, ", longest "); PutU(f, k->pre_us_max);
+        Put(f, " us; frames that never ended (CP stopped, 3D engine reset, frame dropped): ");
+        PutU(f, k->hangs);
+        if (k->hangs != 0)
+        {
+            Put(f, ", RBBM_STATUS at the last: "); PutX(f, k->hang_status);
+        }
+        Put(f, "\n");
+    }
+    else
+        Put(f, "waits before a lock: off (RadeonGLPreWait=0)\n");
     if (k->overlap)
     {
         Put(f, "overlap: on; frames the Radeon finished after the unlock: "); PutU(f, k->ov_frames);
