@@ -91,6 +91,18 @@ static void P96Release(struct Card *k)
 #define SOFT_RESET_SE (1UL << 2)
 #define SOFT_RESET_RE (1UL << 3)
 #define SOFT_RESET_PP (1UL << 4)
+/* 2026-11-24 (DevilutionX run 5 on Hamiller: a 3D hang -- RBBM_STATUS
+ * 0x83f96100, the command FIFO full, the CP stream, RB3D, SE, RE, the
+ * texture units and PB busy -- survived SE|RE|PP, and the next P96 lock
+ * froze the machine in Radeon.card): Reset3D goes further when that is
+ * not enough. Stage 2 as Linux's r100_asic_reset (SE|RE|PP|RB, then the
+ * CP), stage 3 everything the old DRM's engine reset took
+ * (CP|HI|SE|RE|PP|E2|RB). The render backend and the 2D engine are
+ * Radeon.card's too, but a hung engine freezes every P96 lock and with it
+ * the machine. */
+#define SOFT_RESET_HI (1UL << 1)
+#define SOFT_RESET_E2 (1UL << 5)
+#define SOFT_RESET_RB (1UL << 6)
 
 /* --- small helpers ------------------------------------------------------------ */
 
@@ -353,18 +365,54 @@ static ULONG HwClock(APTR hw)
     return TicksUs(Ticks() - ((struct Card *) hw)->clock_base);
 }
 
-static BOOL Reset3D(struct Card *k)
+#ifdef RGL_TESTHANG
+static ULONG test_reset_from = 0;   /* the test build: stages below it count as failed */
+#endif
+
+/* bits of RBBM_SOFT_RESET held us microseconds, then cleared */
+static void ResetHold(struct Card *k, ULONG bits, ULONG us)
 {
     ULONG t;
 
-    HwWrite(k, R_RBBM_SOFT_RESET, SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP);
+    HwWrite(k, R_RBBM_SOFT_RESET, bits);
     (void) HwRead(k, R_RBBM_SOFT_RESET);
     t = HwClock(k);
-    while (HwClock(k) - t < 200)
-        ;                           /* held 200 us, as Linux does */
+    while (HwClock(k) - t < us)
+        ;
     HwWrite(k, R_RBBM_SOFT_RESET, 0);
     (void) HwRead(k, R_RBBM_SOFT_RESET);
-    return (BOOL) (R2Cp_WaitIdle(&k->hw, TIMEOUT_US) == R2_OK);
+}
+
+/* the engine idle after stage n: RBBM_STATUS noted for the log */
+static BOOL ResetDone(struct Card *k, ULONG n)
+{
+    BOOL idle;
+
+    idle = (BOOL) (R2Cp_WaitIdle(&k->hw, TIMEOUT_US) == R2_OK);
+    k->reset_stage = n;
+    k->reset_status = HwRead(k, R_RBBM_STATUS);
+#ifdef RGL_TESTHANG
+    if (n < test_reset_from)
+        idle = FALSE;
+#endif
+    return idle;
+}
+
+static BOOL Reset3D(struct Card *k)
+{
+    /* 1: the 3D blocks, held 200 us, as Linux does */
+    ResetHold(k, SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP, 200);
+    if (ResetDone(k, 1))
+        return TRUE;
+    /* 2: and the render backend, then the CP (Linux r100_asic_reset) */
+    ResetHold(k, SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP | SOFT_RESET_RB, 10000);
+    ResetHold(k, R_SOFT_RESET_CP, 10000);
+    if (ResetDone(k, 2))
+        return TRUE;
+    /* 3: the whole engine (the old DRM's radeon_do_engine_reset) */
+    ResetHold(k, R_SOFT_RESET_CP | SOFT_RESET_HI | SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP
+                 | SOFT_RESET_E2 | SOFT_RESET_RB, 10000);
+    return ResetDone(k, 3);
 }
 
 /* --- the bitmaps -------------------------------------------------------------------- */
@@ -423,6 +471,7 @@ void Card_Trace(ULONG n, ULONG v)
 #endif
 
 static void PreSettle(struct Card *k);    /* at the end: cold */
+static BOOL EngineIdle(struct Card *k);   /* ditto */
 
 static BOOL LockBm(struct Card *k, ULONG i, BOOL any_place)
 {
@@ -434,6 +483,8 @@ static BOOL LockBm(struct Card *k, ULONG i, BOOL any_place)
         return FALSE;
     if (k->pending && k->prewait)
         PreSettle(k);               /* the kicked frame first, with our own timeout */
+    if (k->lost != 0 && !EngineIdle(k))
+        return FALSE;               /* a hung engine: a P96 lock would wait for ever */
     WHERE(50 + i, any_place);
     b->lock = p96LockBitMap(b->bm, (UBYTE *) &ri, sizeof(ri));
     WHERE(55 + i, b->lock);
@@ -2987,8 +3038,8 @@ void Card_TestHangSetup(void)
         test_hang_every = test_hang_every * 10 + (ULONG) (v[i] - '0');
     while (v[i] == ' ')
         i++;
-    if (v[i] == '2')
-        test_hang_mode = 2;
+    if (v[i] >= '2' && v[i] <= '4')
+        test_hang_mode = (ULONG) (v[i] - '0');
 }
 #endif
 
@@ -3039,12 +3090,15 @@ static void PreSettle(struct Card *k)
     if (StopCp(k, (BOOL) (k->closing != 0)) && !k->closing)
         k->drop_next = 1;
 #ifdef RGL_TESTHANG
-    if (inject == 2 && k->lost == 0)
+    if (inject >= 2 && k->lost == 0)
     {
-        /* StopCp's reset path, which an idle engine does not take */
+        /* StopCp's reset path, which an idle engine does not take; M 3
+         * and 4 run stages 2 and 3 as if the ones before had failed */
         k->cp_resets++;
+        test_reset_from = inject - 1;
         if (!Reset3D(k))
             k->lost = CARD_LOST_CP;
+        test_reset_from = 0;
         if (!k->closing)
         {
             Core_Forget(k->core);
@@ -3063,7 +3117,48 @@ static void PreSettle(struct Card *k)
         SerialHex(k->ring.fence_done);
         SerialStr(", RBBM_STATUS ");
         SerialHex(st);
-        SerialStr(k->lost != 0 ? "): CP stopped, the 3D reset FAILED, context lost\n"
-                               : "): CP stopped, 3D engine reset, frame dropped\n");
+        SerialStr(k->lost != 0 ? "): CP stopped, the 3D reset FAILED, context lost"
+                               : "): CP stopped, 3D engine reset, frame dropped");
+        SerialStr("; reset stage ");
+        SerialHex(k->reset_stage);
+        SerialStr(", RBBM_STATUS after it ");
+        SerialHex(k->reset_status);
+        SerialStr("\n");
     }
+}
+
+/* 2026-11-24 (DevilutionX run 5: after a reset that failed, the game's
+ * next GL call took a P96 lock, and Radeon.card waited for the hung
+ * engine for ever): with the context lost, a lock first sees the engine
+ * idle -- a register read with a timeout of our own (0.1 s, room for a
+ * P96 blit of another task) -- tries the reset again when it is not, and
+ * is refused when that fails too. The program draws nothing more but
+ * keeps running and can be quit; anything else drawing on the board
+ * still meets the hung engine in Radeon.card. */
+static BOOL EngineIdle(struct Card *k)
+{
+    k->clock_base = Ticks();
+    if (R2Cp_WaitIdle(&k->hw, 100000UL) == R2_OK)
+        return TRUE;
+    k->hangs++;
+    if (Reset3D(k))
+    {
+        k->cp_resets++;
+        k->reload_ucode = 1;
+        if (k->serial)
+        {
+            SerialStr("RadeonGL: the engine was still hung at a lock; reset stage ");
+            SerialHex(k->reset_stage);
+            SerialStr(" brought it back\n");
+        }
+        return TRUE;
+    }
+    k->hang_status = HwRead(k, R_RBBM_STATUS);
+    if (k->serial)
+    {
+        SerialStr("RadeonGL: the engine is still hung (RBBM_STATUS ");
+        SerialHex(k->hang_status);
+        SerialStr("): the lock refused\n");
+    }
+    return FALSE;
 }

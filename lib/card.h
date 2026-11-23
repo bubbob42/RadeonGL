@@ -261,7 +261,9 @@ struct Card
     ULONG pre_us_max;           /* ... the longest, us */
     ULONG hangs;                /* frames that never ended: CP stopped, 3D reset, dropped */
     ULONG hang_status;          /* RBBM_STATUS when the last one was given up */
-    ULONG layout_spare[3];
+    ULONG reset_stage;          /* Reset3D: the last stage it ran (1-3) */
+    ULONG reset_status;         /* ... and RBBM_STATUS after it */
+    ULONG layout_spare[1];
 };
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);

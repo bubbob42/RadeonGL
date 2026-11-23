@@ -290,6 +290,9 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
         if (k->hangs != 0)
         {
             Put(f, ", RBBM_STATUS at the last: "); PutX(f, k->hang_status);
+            Put(f, ", the reset's last stage "); PutU(f, k->reset_stage);
+            Put(f, " (1: 3D blocks, 2: and the render backend + CP, 3: the whole engine), RBBM_STATUS after it: ");
+            PutX(f, k->reset_status);
         }
         Put(f, "\n");
     }
