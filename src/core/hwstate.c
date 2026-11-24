@@ -158,6 +158,7 @@ static ULONG HasAlpha(ULONG base)
 void Hw_VertexFormat(struct Core *c, ULONG units)
 {
     ULONG fmt1;
+    ULONG out1;
     ULONG compsel;
 
     /* lighting switched sets D_VTXFMT (state.c), so units decide alone */
@@ -176,9 +177,14 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
     /* lighting, fog, texgen (light.c Core_Extras): the normal, the lit
      * colour, the fog factor's colour, computed texture coordinates */
     compsel = R_OUTPUT_XYZW | c->x_compsel;
+    /* RadeonGLTc4 (branch hang-probe): 4 coordinates out of TCL per unit
+     * (input stays 2: TCL fills r = 0, q = 1), as Mesa always does */
+    out1 = fmt1;
+    if (R2E_Tc4 && !c->wide_on)
+        out1 = ((units & 1) ? 4UL : 0) | ((units & 2) ? 4UL << 3 : 0);
     R2E_VertexFormat(c->cs, R_VTX_Z0 | c->x_fmt0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
                      fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT) | c->x_out0,
-                     fmt1, compsel);
+                     out1, compsel);
     /* A cube map's third coordinate is r, not q: RE_CNTL's STQn_D3D for its
      * coordinate set, or the rasterizer hands the sampler s/q, t/q and no r
      * -- every face read as +Z (MEASURED, GLSmoke13 T4, 2026-11-14; Mesa

@@ -286,6 +286,7 @@ struct Card
     ULONG wd_resets;            /* resets it made */
     ULONG wd_status;            /* RBBM_STATUS when it fired last */
     ULONG wd_after;             /* ... and after its reset */
+    ULONG wd_stage3;            /* resets that needed the whole engine (stage 3) */
     ULONG wd_beat;              /* RadeonGLSerial=2: a '.' every 250 vblanks (the CPU alive) */
     ULONG wd_busy;              /* vblanks the engine was busy with no frame of ours pending */
     ULONG wd_busy_said;         /* ... reported for this busy stretch */
@@ -295,10 +296,17 @@ struct Card
     ULONG isync;
     ULONG isync_saved;
     ULONG isync_have;
+    /* RadeonGLDcLine=N (0-3, branch hang-probe): RB3D_DSTCACHE_MODE bits 3:2
+     * (2D/3D cache line size 128) as ATI's CAIL sets them on RV280 -- the card
+     * reads $F00 (line size 0); the old value back at the close */
+    ULONG dc_line;              /* 0xff: untouched */
+    ULONG dc_saved;
+    ULONG dc_have;
 };
 
 ULONG Card_WdCheck(struct Card *k);     /* the VERTB server's body (interrupt) */
 void Card_WdArm(struct Card *k, ULONG limit, ULONG test, ULONG isync);
+void Card_DcLine(struct Card *k, ULONG line);
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
  * 0 = taken (gpu, pitch in bytes, CORE_VIEW_* format, handle 1..CARD_NVIEW) */

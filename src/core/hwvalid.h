@@ -52,7 +52,8 @@ static HWV_INLINE ULONG HWV(Rb3dCntl)(struct Core *c)
      * that set equations or separate alpha factors (compat.c): always on,
      * as Mesa's r200 has it, cost GLQuake 0.05 s (MEASURED 2026-11-08) */
     if (c->enables & EN_BLEND)
-        v |= R_ALPHA_BLEND_ENABLE | c->blend_x * R_SEPARATE_ALPHA_ENABLE;    /* blend_x: 0 or 1 */
+        v |= R_ALPHA_BLEND_ENABLE
+           | ((c->blend_x || R2E_SepBlend) ? R_SEPARATE_ALPHA_ENABLE : 0);   /* RadeonGLSepBlend: Mesa's */
     if (c->color_mask != 0xf)
         v |= R_PLANE_MASK_ENABLE;
     if ((c->enables & EN_DITHER) && (c->target.color_format == R_COLOR_FORMAT_RGB565
@@ -174,7 +175,7 @@ static LONG HWV(EmitTexture)(struct Core *c, ULONG u)
         r.pitch = t->pitch[0] - 32;
         r.filter |= R_CLAMP_S_CLAMP_LAST | R_CLAMP_T_CLAMP_LAST;
     }
-    r.format_x = R_LOD_BIAS_CORRECTION;
+    r.format_x = R_LOD_BIAS_CORRECTION | (R2E_Tc4 ? (3UL << 16) : 0);     /* RadeonGLTc4: PROJ */
     r.multi = 0;
     r.offset = t->gpu;
 #if HWV_WIDE
@@ -354,10 +355,24 @@ static LONG HWV(ValidateOnce)(struct Core *c)
         R2E_Reg(cs, R_RB3D_ZSTENCILCNTL, R_DEPTH_FORMAT_16BIT_INT_Z
                 | (Hw_DepthFunc(c->depth_func) << R_Z_TEST_SHIFT) | R_STENCIL_TEST_ALWAYS
                 | (c->depth_mask ? R_Z_WRITE_ENABLE : 0));
+    if (R2E_SepBlend && (d & D_RB3D))
+        d |= D_BLEND;               /* RadeonGLSepBlend: the factors follow blending on/off */
     if (d & D_BLEND)
     {
         if (c->blend_x)
             Compat_EmitBlend(c);    /* equations, separate alpha factors (compat.c) */
+        else if (R2E_SepBlend)
+        {
+            v[0] = R_COMB_FCN_ADD_CLAMP | (R_BLEND_GL_ONE << R_SRC_BLEND_SHIFT)
+                 | (R_BLEND_GL_ZERO << R_DST_BLEND_SHIFT);
+            v[1] = (c->enables & EN_BLEND)
+                 ? (R_COMB_FCN_ADD_CLAMP | (Hw_BlendFactor(c->blend_src) << R_SRC_BLEND_SHIFT)
+                    | (Hw_BlendFactor(c->blend_dst) << R_DST_BLEND_SHIFT))
+                 : v[0];
+            R2E_Reg(cs, R_RB3D_BLENDCNTL, v[0]);
+            R2E_Reg(cs, R_RB3D_ABLENDCNTL, v[1]);
+            R2E_Reg(cs, R_RB3D_CBLENDCNTL, v[1]);
+        }
         else
         {
             v[0] = R_COMB_FCN_ADD_CLAMP | (Hw_BlendFactor(c->blend_src) << R_SRC_BLEND_SHIFT)
@@ -396,6 +411,26 @@ static LONG HWV(ValidateOnce)(struct Core *c)
     if (d & D_POINTSIZE)
         R2E_Reg(cs, R_RE_POINTSIZE, ((ULONG) Core_Floor(c->point_size * 16.0f) & 0xffffUL)
                                   | ((64UL * 16UL) << R_MAXPOINTSIZE_SHIFT));
+    /* branch hang-probe: RadeonGLNoDedup (a PP_CNTL change writes every
+     * enabled unit's registers again), RadeonGLTexFlush (after an image
+     * change: PP_MISC and the units' TXOFFSET again) */
+    if ((R2E_NoDedup && (d & D_PPCNTL)) || (R2E_TexFlush && R2E_TexDirty))
+    {
+        for (u = 0; u < HWV_UNITS; u++)
+            if (units & (1UL << u))
+            {
+                if (R2E_NoDedup && (d & D_PPCNTL))
+                    c->hw_tex[u][0] = c->hw_tex[u][5] = 0xffffffffUL;
+                c->hw_tex[u][6] = 0xffffffffUL;
+                d |= D_TEX0 << u;
+            }
+        if (R2E_TexFlush && R2E_TexDirty)
+        {
+            R2E_Reg(cs, R_PP_MISC, Core_Unit255(c->alpha_ref)
+                    | (Hw_DepthFunc(c->alpha_func) << R_ALPHA_TEST_SHIFT));
+            R2E_TexDirty = 0;
+        }
+    }
     for (u = 0; u < HWV_UNITS; u++)
         if ((d & (D_TEX0 << u)) && (units & (1UL << u)))
             HWV(EmitTexture)(c, u);
@@ -406,6 +441,10 @@ static LONG HWV(ValidateOnce)(struct Core *c)
         v[0] = HWV(PpCntl)(c, units);
         if (v[0] != c->hw_ppcntl)
         {
+            /* RadeonGLPpWait: unit 1 or the alpha test switched only on an
+             * idle engine */
+            if (R2E_PpWait && ((v[0] ^ c->hw_ppcntl) & R2E_PpWaitMask[R2E_PpWait & 7]))
+                R2E_Reg(cs, R_WAIT_UNTIL, R2E_PpWaitNoClean ? R_WAIT_3D_IDLE : R_WAIT_3D_IDLECLEAN);
             c->hw_ppcntl = v[0];
             R2E_Reg(cs, R_PP_CNTL, v[0]);
         }

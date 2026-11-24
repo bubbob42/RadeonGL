@@ -663,6 +663,7 @@ static void Upload(struct Core *c, struct CoreTex *t, ULONG l, ULONG x, ULONG y,
     ULONG stride;
     ULONG *p;
 
+    R2E_TexDirty = 1;               /* RadeonGLTexFlush (branch hang-probe) */
     /* GL_UNPACK_ALIGNMENT 4, GL's default (glPixelStorei is not in
      * GLQuake's slots; the rest of the pixel store comes with it) */
     stride = (w * bpp + 3) & ~3UL;

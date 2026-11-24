@@ -512,6 +512,25 @@ ULONG Card_WdCheck(struct Card *k)
     ResetHold(k, SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP | SOFT_RESET_RB, WD_HOLD_US);
     ResetHold(k, R_SOFT_RESET_CP, WD_HOLD_US);
     k->wd_after = HwRead(k, R_RBBM_STATUS);
+    /* 2026-11-24 night (s8-all: every probe switch on): a hang the short
+     * stage 2 did not clear -- RBBM_STATUS 83f8613d after it, the same
+     * frame reset again and again, the machine frozen. Escalate as
+     * Reset3D does: stage 2 with its 10 ms holds, then stage 3 (the whole
+     * engine, E2 and HI too; this morning's forced stage 3 left the
+     * Workbench drawing). ~30 ms more in the interrupt, only then. */
+    if (k->wd_after & R_RBBM_ACTIVE)
+    {
+        ResetHold(k, SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP | SOFT_RESET_RB, 10000);
+        ResetHold(k, R_SOFT_RESET_CP, 10000);
+        k->wd_after = HwRead(k, R_RBBM_STATUS);
+        k->wd_stage3 += (k->wd_after & R_RBBM_ACTIVE) ? 1 : 0;
+        if (k->wd_after & R_RBBM_ACTIVE)
+        {
+            ResetHold(k, R_SOFT_RESET_CP | SOFT_RESET_HI | SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP
+                         | SOFT_RESET_E2 | SOFT_RESET_RB, 10000);
+            k->wd_after = HwRead(k, R_RBBM_STATUS);
+        }
+    }
     k->wd_resets++;
     k->wd_fired = 1;
     if (k->serial)
@@ -574,6 +593,17 @@ void Card_WdArm(struct Card *k, ULONG limit, ULONG test, ULONG isync)
     k->wd_test = test;
     k->isync = isync;
     WdStart(k);
+}
+
+/* RadeonGLDcLine (branch hang-probe): at the open, the engine idle */
+void Card_DcLine(struct Card *k, ULONG line)
+{
+    k->dc_line = line;
+    if (line > 3 || k->dc_have)
+        return;
+    k->dc_saved = HwRead(k, R_RB3D_DSTCACHE_MODE);
+    k->dc_have = 1;
+    HwWrite(k, R_RB3D_DSTCACHE_MODE, (k->dc_saved & ~0xcUL) | (line << 2));
 }
 
 /* RadeonGLIsync=1: the 2D/3D interlock while the CP runs (Radeon.card's
@@ -3094,6 +3124,11 @@ void Card_Close(struct Card *k)
     SettleAlone(k, TRUE);           /* the last frame drawn, the CP off */
     WaitBlit();
     WdStop(k);                      /* nothing pending any more */
+    if (k->dc_have)
+    {
+        HwWrite(k, R_RB3D_DSTCACHE_MODE, k->dc_saved);  /* RadeonGLDcLine: as found */
+        k->dc_have = 0;
+    }
     /* Radeon.card's display FIFO setting back (RadeonGLDisplayPriority) */
     if (k->grph_saved && k->b[CARD_TARGET].bm != NULL && LockBm(k, CARD_TARGET, FALSE))
     {

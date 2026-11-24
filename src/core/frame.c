@@ -93,9 +93,10 @@ void Core_Clear(struct Core *c, ULONG mask)
     R2E_Immd(cs, R_VF_PRIM_RECT_LIST | R_VF_COLOR_ORDER_RGBA, 4, 3, v);
     /* RadeonGLTclFlush=1 (branch hang-watchdog): the TCL-off clear drained
      * before TCL comes back, as the DRM's R200 depth clear ends
-     * (linux-ums radeon_state.c:1367) */
+     * (linux-ums radeon_state.c:1367, less HOST_IDLECLEAN, which the checker
+     * refuses and the fence does not use either) */
     if (R2E_TclFlushOn)
-        R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN | R_WAIT_HOST_IDLECLEAN);
+        R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN);   /* as the fence */
 
     /* back to the client's state at the next draw */
     c->dirty |= D_VAP | D_VTXFMT | D_PPCNTL | D_COMBINE | D_RB3D | D_PLANEMASK

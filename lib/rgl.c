@@ -651,11 +651,18 @@ static void *CreateContext(const struct Ask *a)
          * on an idle engine; RadeonGLIsync=1 sets the 2D/3D interlock */
         Card_WdArm(&r->rad, EnvNum("RadeonGLWatchdog", 50),
                    EnvNum("RadeonGLTestWatchdog", 0), EnvNum("RadeonGLIsync", 0));
+        Card_DcLine(&r->rad, EnvNum("RadeonGLDcLine", 0xff));   /* branch hang-probe */
     }
     /* the audit's switches, library-wide (r2emit.h, texgen.c) */
     R2E_TclFlushOn = EnvNum("RadeonGLTclFlush", 0);
     R2E_TamDebug = EnvNum("RadeonGLTamDebug", 0);
     Texgen_FixUnits = EnvNum("RadeonGLTexgenFix", 0);
+    R2E_PpWait = EnvNum("RadeonGLPpWait", 0);       /* branch hang-probe (r2emit.h) */
+    R2E_PpWaitNoClean = EnvNum("RadeonGLPpWaitNoClean", 0);
+    R2E_NoDedup = EnvNum("RadeonGLNoDedup", 0);
+    R2E_TexFlush = EnvNum("RadeonGLTexFlush", 0);
+    R2E_Tc4 = EnvNum("RadeonGLTc4", 0);
+    R2E_SepBlend = EnvNum("RadeonGLSepBlend", 0);
 #ifdef RGL_TESTHANG
     if (r->real)
         Card_TestHangSetup();

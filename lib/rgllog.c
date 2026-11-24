@@ -315,12 +315,27 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
         {
             Put(f, ", RBBM_STATUS at the last: "); PutX(f, k->wd_status);
             Put(f, ", after its reset: "); PutX(f, k->wd_after);
+            Put(f, ", stage 3 needed: "); PutU(f, k->wd_stage3);
         }
     }
     Put(f, "\ntest switches: TclFlush "); PutU(f, R2E_TclFlushOn);
     Put(f, ", TamDebug "); PutX(f, R2E_TamDebug);
     Put(f, ", TexgenFix "); PutU(f, Texgen_FixUnits);
     Put(f, ", Isync "); PutU(f, k->isync);
+    Put(f, ", PpWait "); PutU(f, R2E_PpWait);
+    if (R2E_PpWaitNoClean)
+        Put(f, " (3D_IDLE)");
+    Put(f, ", NoDedup "); PutU(f, R2E_NoDedup);
+    Put(f, ", TexFlush "); PutU(f, R2E_TexFlush);
+    Put(f, ", Tc4 "); PutU(f, R2E_Tc4);
+    Put(f, ", SepBlend "); PutU(f, R2E_SepBlend);
+    Put(f, ", DcLine ");
+    if (k->dc_have)
+    {
+        PutU(f, k->dc_line); Put(f, " (RB3D_DSTCACHE_MODE was "); PutX(f, k->dc_saved); Put(f, ")");
+    }
+    else
+        Put(f, "-");
     if (k->isync && k->isync_have)
     {
         Put(f, " (Radeon.card's ISYNC_CNTL "); PutX(f, k->isync_saved); Put(f, ")");

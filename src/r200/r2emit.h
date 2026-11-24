@@ -73,6 +73,34 @@ LONG R2E_TclDefaults(struct R2Cs *cs);
  * cache LRU hang workaround writes 6, r200_texstate.c:1576-1620). */
 extern ULONG R2E_TclFlushOn;
 extern ULONG R2E_TamDebug;
+/* branch hang-probe (the night of 2026-11-24, the user: try everything ATI
+ * and the history do), each off unless set:
+ *   R2E_PpWait   (RadeonGLPpWait=1)   WAIT_UNTIL 3D_IDLECLEAN before a
+ *                PP_CNTL write that changes TEX_1 or ALPHA_TEST (the D3D
+ *                "T2T0HangWorkaround" idea, the DRM's waits between streams)
+ *   R2E_NoDedup  (RadeonGLNoDedup=1)  every enabled unit's texture registers
+ *                written again whenever PP_CNTL changes (DRI CVS 2002-07-03
+ *                "fix q3 hang": both units' state whenever any unit is on)
+ *   R2E_TexFlush (RadeonGLTexFlush=1) after a texture image changes, PP_MISC
+ *                and the enabled units' TXOFFSET written again (ATI
+ *                __R200FlushTexelCache, Mesa 99e0236046)
+ *   R2E_Tc4      (RadeonGLTc4=1)      4 texture coordinates out of TCL per
+ *                unit with TEXCOORD_PROJ (Mesa r200_texstate.c:1386/1429,
+ *                keithw 2002-08-12 "always output size 4 textures")
+ *   R2E_TexDirty set by the TexImage/TexSubImage paths for R2E_TexFlush */
+extern ULONG R2E_PpWait;        /* 1 TEX_1|ALPHA, 2 TEX_1, 3 ALPHA, 4 any TEX_n, 5 any change */
+extern const ULONG R2E_PpWaitMask[8];
+extern ULONG R2E_PpWaitNoClean; /* RadeonGLPpWaitNoClean=1: WAIT_3D_IDLE, not IDLECLEAN */
+extern ULONG R2E_NoDedup;
+extern ULONG R2E_TexFlush;
+extern ULONG R2E_Tc4;
+extern ULONG R2E_TexDirty;
+/* R2E_SepBlend (RadeonGLSepBlend=1): Mesa's blending -- SEPARATE_ALPHA_ENABLE
+ * whenever blending is on, BLENDCNTL ONE/ZERO, the factors in ABLENDCNTL and
+ * CBLENDCNTL, both back to ONE/ZERO while blending is off (r200_state.c
+ * r200_set_blend_state; the bisect of 2026-11-24 night: the hang needs unit
+ * 1 AND blending) */
+extern ULONG R2E_SepBlend;
 LONG R2E_VapCntl(struct R2Cs *cs, ULONG val);
 
 /* Rasteriser, pixel pipe and render backend: GL defaults (depth LESS +

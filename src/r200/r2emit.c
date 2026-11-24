@@ -168,6 +168,23 @@ LONG R2E_Matrix(struct R2Cs *cs, ULONG vec, const float *m)
 
 ULONG R2E_TclFlushOn = 0;
 ULONG R2E_TamDebug = 0;
+ULONG R2E_PpWait = 0;
+ULONG R2E_PpWaitNoClean = 0;
+/* the PP_CNTL bits whose change waits (index = RadeonGLPpWait) */
+const ULONG R2E_PpWaitMask[8] = {
+    0,
+    (R_TEX_0_ENABLE << 1) | R_ALPHA_TEST_ENABLE,
+    R_TEX_0_ENABLE << 1,
+    R_ALPHA_TEST_ENABLE,
+    R_TEX_ENABLE_MASK,
+    0xffffffffUL,
+    0, 0
+};
+ULONG R2E_NoDedup = 0;
+ULONG R2E_TexFlush = 0;
+ULONG R2E_Tc4 = 0;
+ULONG R2E_TexDirty = 0;
+ULONG R2E_SepBlend = 0;
 
 LONG R2E_VapCntl(struct R2Cs *cs, ULONG val)
 {

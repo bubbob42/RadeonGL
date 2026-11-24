@@ -1174,6 +1174,7 @@ void Tex13_TexSubImage2D(struct Core *c, ULONG target, LONG level, LONG x, LONG 
     ULONG have;
     LONG face;
 
+    R2E_TexDirty = 1;               /* RadeonGLTexFlush (branch hang-probe) */
     face = FaceOf(target);
     if (target != GL_TEXTURE_2D && face < 0)
     {

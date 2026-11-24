@@ -146,6 +146,7 @@
 #define   R_WAIT_HOST_IDLECLEAN   (1UL << 18)
 #define R_ISYNC_CNTL            0x1724
 #define R_PP_TAM_DEBUG3         0x2d9c    /* Mesa: texture cache LRU hang workaround (R200) */
+#define R_RB3D_DSTCACHE_MODE    0x3258    /* bits 3:2 cache line size 128 (ATI CAIL on RV280) */
 #define R_RBBM_GUICNTL          0x172c
 
 /* --- 3D: pixel pipe, render backend, setup engine (Mesa r200_reg.h) ------- */
