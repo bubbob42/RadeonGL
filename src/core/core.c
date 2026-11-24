@@ -194,6 +194,7 @@ void Core_UCacheCopied(struct Core *c)
 void Core_GpuIdle(struct Core *c)
 {
     c->epoch++;
+    c->blend_since = 0;     /* the engine idle: no blended pixel in flight */
     c->stream_pos = 0;      /* everything in the stream has been read */
     c->stream_gen++;
     c->lk_valid = 0;

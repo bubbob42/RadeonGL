@@ -118,6 +118,8 @@ LONG R2E_Vectors(struct R2Cs *cs, ULONG addr, ULONG n, const ULONG *vals)
 
     if (n == 0 || (n & 3) != 0 || n > MAX_PAYLOAD)
         return Fail(cs, R2_EARG);
+    if (R2E_TclWait)
+        R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_3D_IDLE);     /* RadeonGLTclWait (probe) */
     p = R2_ROOM(cs, 5 + n);
     if (p == NULL)
         return cs->error;
@@ -139,6 +141,8 @@ LONG R2E_Scalars(struct R2Cs *cs, ULONG addr, ULONG n, const ULONG *vals)
 
     if (n == 0 || n > MAX_PAYLOAD)
         return Fail(cs, R2_EARG);
+    if (R2E_TclWait)
+        R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_3D_IDLE);     /* RadeonGLTclWait (probe) */
     p = R2_ROOM(cs, 3 + n);
     if (p == NULL)
         return cs->error;
@@ -168,8 +172,12 @@ LONG R2E_Matrix(struct R2Cs *cs, ULONG vec, const float *m)
 
 ULONG R2E_TclFlushOn = 0;
 ULONG R2E_TamDebug = 0;
-ULONG R2E_PpWait = 0;
-ULONG R2E_PpWaitNoClean = 0;
+ULONG R2E_PpWait = 4;            /* branch hang-fix: on by default, any TEX_n change */
+ULONG R2E_PpWaitNoClean = 1;     /* 3D idle is enough (GLMix w6) */
+ULONG R2E_PpWaitBlend = 0;
+ULONG R2E_TclWait = 0;
+ULONG R2E_MiscWait = 0;
+ULONG R2E_BlendMtWait = 1;
 /* the PP_CNTL bits whose change waits (index = RadeonGLPpWait) */
 const ULONG R2E_PpWaitMask[8] = {
     0,

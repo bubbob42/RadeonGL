@@ -91,6 +91,26 @@ extern ULONG R2E_TamDebug;
 extern ULONG R2E_PpWait;        /* 1 TEX_1|ALPHA, 2 TEX_1, 3 ALPHA, 4 any TEX_n, 5 any change */
 extern const ULONG R2E_PpWaitMask[8];
 extern ULONG R2E_PpWaitNoClean; /* RadeonGLPpWaitNoClean=1: WAIT_3D_IDLE, not IDLECLEAN */
+extern ULONG R2E_PpWaitBlend;   /* RadeonGLPpWaitBlend=1: only after blending since the last idle */
+/* Pelt still hangs with the unit wait (2026-11-25 00:10: 48 hangs at 4
+ * shells; 0 at 2): between its blended two-unit shells it changes only the
+ * alpha reference (PP_MISC), unit 1's texture matrix and the material (TCL
+ * vector/scalar uploads). Probes, off by default:
+ *   R2E_TclWait  (RadeonGLTclWait=1)  WAIT_UNTIL 3D_IDLE before every TCL
+ *                vector and scalar upload
+ *   R2E_MiscWait (RadeonGLMiscWait=1) WAIT_UNTIL 3D_IDLE before every
+ *                PP_MISC write (the alpha reference and function) */
+extern ULONG R2E_TclWait;
+extern ULONG R2E_MiscWait;
+/* R2E_BlendMtWait (RadeonGLBlendWait, default 1; 0 off): WAIT_UNTIL 3D_IDLE
+ * at the head of every state block sent while blending is on (or was, since
+ * the engine was last idle) and unit 1 textures -- Pelt, 6 shells, 1500
+ * frames: the unit wait alone 31 hangs; a wait before the TCL uploads or
+ * before PP_MISC at the shell boundary: 0 each. The general rule: no state
+ * change between blended multi-texture draws while their pixels are in
+ * flight (ATI and Mesa resend the texture registers with every state block
+ * and so wait implicitly). GLQuake never blends with two units: no cost. */
+extern ULONG R2E_BlendMtWait;
 extern ULONG R2E_NoDedup;
 extern ULONG R2E_TexFlush;
 extern ULONG R2E_Tc4;

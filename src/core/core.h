@@ -369,6 +369,7 @@ struct Core
     ULONG hw_tex[CORE_UNITS][7];    /* TXFILTER..TXPITCH, TXMULTI_CTL, TXOFFSET */
     ULONG hw_comb[CORE_UNITS][4];   /* TXCBLEND, TXCBLEND2, TXABLEND, TXABLEND2 */
     ULONG hw_ppcntl;
+    ULONG blend_since;              /* blending on since the engine was last idle (hwvalid.h, the unit wait) */
     ULONG mat_ver;          /* the last matrix version handed out */
     ULONG hw_mv_ver;        /* the modelview and projection versions whose */
     ULONG hw_proj_ver;      /* product is in the TCL's MVP now (~0: none) */
@@ -406,6 +407,7 @@ struct Core
     /* statistics for tests and the census */
     ULONG stat_prims, stat_verts, stat_splits, stat_state_emits, stat_idle_waits;
     ULONG stat_lock_uploads, stat_lock_draws, stat_stream_wraps;
+    ULONG stat_unit_waits;          /* the R200 hang fix: WAIT_UNTILs before a texture-unit switch */
 
     /* The upload cache (array.c): locked ranges and index lists kept in
      * video RAM across frames. With a staged stream (ustaged) its new

@@ -657,8 +657,12 @@ static void *CreateContext(const struct Ask *a)
     R2E_TclFlushOn = EnvNum("RadeonGLTclFlush", 0);
     R2E_TamDebug = EnvNum("RadeonGLTamDebug", 0);
     Texgen_FixUnits = EnvNum("RadeonGLTexgenFix", 0);
-    R2E_PpWait = EnvNum("RadeonGLPpWait", 0);       /* branch hang-probe (r2emit.h) */
-    R2E_PpWaitNoClean = EnvNum("RadeonGLPpWaitNoClean", 0);
+    R2E_PpWait = EnvNum("RadeonGLPpWait", 4);       /* the R200 hang's fix, on (r2emit.h) */
+    R2E_PpWaitNoClean = EnvNum("RadeonGLPpWaitNoClean", 1);
+    R2E_PpWaitBlend = EnvNum("RadeonGLPpWaitBlend", 0);
+    R2E_TclWait = EnvNum("RadeonGLTclWait", 0);
+    R2E_BlendMtWait = EnvNum("RadeonGLBlendWait", 1);   /* the hang fix, general form (r2emit.h) */
+    R2E_MiscWait = EnvNum("RadeonGLMiscWait", 0);
     R2E_NoDedup = EnvNum("RadeonGLNoDedup", 0);
     R2E_TexFlush = EnvNum("RadeonGLTexFlush", 0);
     R2E_Tc4 = EnvNum("RadeonGLTc4", 0);

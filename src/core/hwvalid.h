@@ -326,6 +326,16 @@ static LONG HWV(ValidateOnce)(struct Core *c)
         Fog_Forget(c);
     }
     units = Core_UnitsOn(c);
+    /* the R200 hang, general form (r2emit.h R2E_BlendMtWait): a state
+     * block between blended multi-texture draws waits for the engine
+     * first -- the hardware state units 1+ and blending use must not
+     * change under pixels still in flight */
+    if (R2E_BlendMtWait && (units & ~1UL) && ((c->enables & EN_BLEND) || c->blend_since))
+    {
+        R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_3D_IDLE);
+        c->blend_since = 0;
+        c->stat_unit_waits++;
+    }
     if (d & D_VAP)
     {
         R2E_VapCntl(cs, R_VAP_TCL_ENABLE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
@@ -348,6 +358,8 @@ static LONG HWV(ValidateOnce)(struct Core *c)
     if (d & D_RB3D)
     {
         R2E_Reg(cs, R_RB3D_CNTL, HWV(Rb3dCntl)(c));
+        if (c->enables & EN_BLEND)
+            c->blend_since = 1;     /* blended pixels may be in flight: the unit wait */
         if (c->blend_x)
             d |= D_BLEND;           /* blending on or off: Compat_EmitBlend follows */
     }
@@ -383,8 +395,12 @@ static LONG HWV(ValidateOnce)(struct Core *c)
         }
     }
     if (d & D_ALPHA)
+    {
+        if (R2E_MiscWait)
+            R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_3D_IDLE);  /* RadeonGLMiscWait (probe) */
         R2E_Reg(cs, R_PP_MISC, Core_Unit255(c->alpha_ref)
                 | (Hw_DepthFunc(c->alpha_func) << R_ALPHA_TEST_SHIFT));
+    }
     if (d & D_PLANEMASK)
         R2E_Reg(cs, R_RB3D_PLANEMASK, PlaneMask(c));
     if (d & D_SECNTL)
@@ -441,10 +457,24 @@ static LONG HWV(ValidateOnce)(struct Core *c)
         v[0] = HWV(PpCntl)(c, units);
         if (v[0] != c->hw_ppcntl)
         {
-            /* RadeonGLPpWait: unit 1 or the alpha test switched only on an
-             * idle engine */
-            if (R2E_PpWait && ((v[0] ^ c->hw_ppcntl) & R2E_PpWaitMask[R2E_PpWait & 7]))
+            /* 2026-11-25, THE R200 HANG (docs/audit-2026-11-24-r200-hang.md):
+             * a texture unit switched on or off while blended pixels are
+             * still in flight wedges the RV280's pixel pipe (TIM/TAM/TDM/
+             * PB/RB3D busy, only an RB + CP reset recovers). Mesa and ATI
+             * never meet it: they write every enabled unit's registers
+             * again with each change, which waits implicitly. So a texture
+             * unit is switched only on an idle 3D engine (GLMix 0.2's
+             * death screen: 40 hangs in 600 frames -> 0). RadeonGLPpWait=0
+             * turns it off (1-5: other bit sets, the night's probes);
+             * RadeonGLPpWaitBlend=1 waits only when blending was on since
+             * the engine was last idle. */
+            if (R2E_PpWait && ((v[0] ^ c->hw_ppcntl) & R2E_PpWaitMask[R2E_PpWait & 7])
+                && (!R2E_PpWaitBlend || c->blend_since || (c->enables & EN_BLEND)))
+            {
                 R2E_Reg(cs, R_WAIT_UNTIL, R2E_PpWaitNoClean ? R_WAIT_3D_IDLE : R_WAIT_3D_IDLECLEAN);
+                c->blend_since = 0;
+                c->stat_unit_waits++;
+            }
             c->hw_ppcntl = v[0];
             R2E_Reg(cs, R_PP_CNTL, v[0]);
         }

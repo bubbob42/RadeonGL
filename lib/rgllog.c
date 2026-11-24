@@ -325,6 +325,12 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     Put(f, ", PpWait "); PutU(f, R2E_PpWait);
     if (R2E_PpWaitNoClean)
         Put(f, " (3D_IDLE)");
+    if (R2E_PpWaitBlend)
+        Put(f, " (after blending only)");
+    Put(f, " -- unit waits sent: "); PutU(f, r->core.stat_unit_waits);
+    Put(f, ", BlendWait "); PutU(f, R2E_BlendMtWait);
+    Put(f, ", TclWait "); PutU(f, R2E_TclWait);
+    Put(f, ", MiscWait "); PutU(f, R2E_MiscWait);
     Put(f, ", NoDedup "); PutU(f, R2E_NoDedup);
     Put(f, ", TexFlush "); PutU(f, R2E_TexFlush);
     Put(f, ", Tc4 "); PutU(f, R2E_Tc4);
