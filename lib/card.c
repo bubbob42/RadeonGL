@@ -20,6 +20,7 @@
 #include <proto/intuition.h>
 #include <proto/timer.h>
 #include <proto/Picasso96.h>
+#include <hardware/intbits.h>
 
 #include "card.h"
 #include "cardflip.h"
@@ -413,6 +414,186 @@ static BOOL Reset3D(struct Card *k)
     ResetHold(k, R_SOFT_RESET_CP | SOFT_RESET_HI | SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP
                  | SOFT_RESET_E2 | SOFT_RESET_RB, 10000);
     return ResetDone(k, 3);
+}
+
+/* --- the vertical-blank watchdog (branch hang-watchdog, 2026-11-24) ----------------
+ * prewait (PreSettle) recovers a hung frame only when THIS task reaches its
+ * next lock first. Twice tonight (GLMix 0.2, GLBench Pelt) a hang after
+ * several recovered ones froze the machine with no serial line: another
+ * task (a CON handler, Workbench, input.device's rendering) met the hung
+ * engine in Radeon.card's untimed engine wait (0:2006-201E, from
+ * rtg.library) and, above our priority, never let PreSettle run. The
+ * server runs in every vertical blank (50 Hz on PAL, whatever the RTG
+ * screen does) in interrupt context: while a kicked frame is pending and
+ * neither PreSettle nor the flush is touching the engine, it reads the
+ * fence; when the fence stands still for wd_limit vblanks and RBBM_STATUS
+ * shows the engine busy, it stops the CSQ and runs the stage-2 reset
+ * (SE|RE|PP|RB, then CP: tonight's 38/38) with 2 ms holds -- the spinning
+ * task's wait then sees the engine idle and goes on. The task's next
+ * PreSettle sees wd_fired and drops the frame as for its own reset. Only
+ * register accesses and ReadEClock (interrupt-safe) here, no serial
+ * output (9600 baud would hold the interrupt for 100 ms): PreSettle
+ * prints the line. */
+#define WD_HOLD_US 2000
+
+static void SerialChar(ULONG c);
+static void SerialStr(const char *s);
+static void SerialHex(ULONG v);
+
+ULONG Card_WdCheck(struct Card *k) __attribute__((noinline, used));
+ULONG Card_WdCheck(struct Card *k)
+{
+    ULONG f;
+    ULONG st;
+
+    /* not k->in_flush: the flush's own PreSettle waits inside it, and that
+     * wait is what a spinning task starves. While the flush touches the
+     * CP, pending is 0 (PreSettle or Settle cleared it) or the frame has
+     * ended (Settle after a PreSettle that found the fence done). */
+    /* the diagnostics (wd-1 froze after 24 recovered hangs with no line):
+     * with RadeonGLSerial=2 a '.' every 5 s shows the CPU still running;
+     * with RadeonGLSerial set, an engine busy for 2 s with nothing of ours
+     * pending (Radeon.card's 2D wedged by our RB reset?) is reported once
+     * a stretch, straight from here (60 characters at 9600 baud: 60 ms) */
+    if (k->serial >= 2 && ++k->wd_beat >= 250)
+    {
+        k->wd_beat = 0;
+        SerialChar('.');
+    }
+    /* not k->closing either (2026-11-24, ham-clk-1 and ham-snd-2 froze at
+     * the END of a fight: the game quit with its last frame hung, and a
+     * task drawing in 2D -- Intuition for the close gadget, a console --
+     * met the hung engine; Card_Close's SettleAlone/PreSettle was starved).
+     * PreSettle's drop handles closing (no Core_Forget), and WdStop comes
+     * only after the last frame is settled. */
+    if (!k->pending || k->wd_hold || k->wd_fired || k->lost != 0)
+    {
+        k->wd_ticks = 0;
+        if (k->serial && !k->pending && !k->wd_hold && !k->closing)
+        {
+            st = HwRead(k, R_RBBM_STATUS);
+            if (!(st & R_RBBM_ACTIVE))
+            {
+                k->wd_busy = 0;
+                k->wd_busy_said = 0;
+            }
+            else if (++k->wd_busy >= 100 && !k->wd_busy_said)
+            {
+                k->wd_busy_said = 1;
+                SerialStr("\nRadeonGL WD: engine busy 2 s, no frame of ours pending: RBBM_STATUS ");
+                SerialHex(st);
+                SerialStr("\n");
+            }
+        }
+        return 0;
+    }
+    f = HwRead(k, k->ring.fence_reg);
+    if ((LONG) (f - k->wd_seq) >= 0)
+    {
+        k->wd_ticks = 0;            /* the frame ended: the task settles it */
+        return 0;
+    }
+    if (f != k->wd_last)
+    {
+        k->wd_last = f;
+        k->wd_ticks = 0;
+        return 0;
+    }
+    if (++k->wd_ticks < k->wd_limit && !k->wd_now)
+        return 0;
+    k->wd_ticks = 0;
+    k->wd_now = 0;
+    st = HwRead(k, R_RBBM_STATUS);
+    if (!(st & R_RBBM_ACTIVE) && !k->wd_test)
+        return 0;                   /* idle: a fence late for another reason, not a hang */
+    k->wd_status = st;
+    HwWrite(k, R_CP_CSQ_MODE, 0);
+    HwWrite(k, R_CP_CSQ_CNTL, R_CSQ_PRIDIS_INDDIS);
+    ResetHold(k, SOFT_RESET_SE | SOFT_RESET_RE | SOFT_RESET_PP | SOFT_RESET_RB, WD_HOLD_US);
+    ResetHold(k, R_SOFT_RESET_CP, WD_HOLD_US);
+    k->wd_after = HwRead(k, R_RBBM_STATUS);
+    k->wd_resets++;
+    k->wd_fired = 1;
+    if (k->serial)
+    {
+        /* straight away: the task's own line follows only if it runs again */
+        SerialStr("\nRadeonGL WD: reset ");
+        SerialHex(st);
+        SerialStr(" -> ");
+        SerialHex(k->wd_after);
+        SerialStr("\n");
+    }
+    return 0;
+}
+
+/* exec's server entry: A1 = is_Data; GCC's callee-saved registers kept,
+ * D0 = 0 with Z set (the chain goes on) */
+void Card_WdStub(void);
+__asm__(
+    "\t.text\n"
+    "\t.align\t2\n"
+    "\t.globl\t_Card_WdStub\n"
+    "_Card_WdStub:\n"
+    "\tmovem.l d2-d7/a2-a6,-(sp)\n"
+    "\tmove.l a1,-(sp)\n"
+    "\tjsr _Card_WdCheck\n"
+    "\taddq.l #4,sp\n"
+    "\tmovem.l (sp)+,d2-d7/a2-a6\n"
+    "\tmoveq #0,d0\n"
+    "\trts\n");
+
+static void WdStart(struct Card *k)
+{
+    if (k->wd_on || k->wd_limit == 0 || !k->prewait)
+        return;
+    k->wd_fired = 0;
+    k->wd_hold = 0;
+    k->wd_ticks = 0;
+    k->wd_int.is_Node.ln_Type = NT_INTERRUPT;
+    k->wd_int.is_Node.ln_Pri = -10;
+    k->wd_int.is_Node.ln_Name = (char *) "RadeonGL watchdog";
+    k->wd_int.is_Data = (APTR) k;
+    k->wd_int.is_Code = (VOID (*)()) Card_WdStub;
+    AddIntServer(INTB_VERTB, &k->wd_int);
+    k->wd_on = 1;
+}
+
+static void WdStop(struct Card *k)
+{
+    if (!k->wd_on)
+        return;
+    RemIntServer(INTB_VERTB, &k->wd_int);
+    k->wd_on = 0;
+}
+
+/* after the settings are read (rgl.c, once the card opened): the watchdog
+ * in unless limit is 0 or prewait is off; the interlock switch */
+void Card_WdArm(struct Card *k, ULONG limit, ULONG test, ULONG isync)
+{
+    k->wd_limit = limit;
+    k->wd_test = test;
+    k->isync = isync;
+    WdStart(k);
+}
+
+/* RadeonGLIsync=1: the 2D/3D interlock while the CP runs (Radeon.card's
+ * value noted once, put back at every stop) */
+static void IsyncOn(struct Card *k)
+{
+    if (!k->isync)
+        return;
+    if (!k->isync_have)
+    {
+        k->isync_saved = HwRead(k, R_ISYNC_CNTL);
+        k->isync_have = 1;
+    }
+    HwWrite(k, R_ISYNC_CNTL, 0x33UL);   /* ANY2D_IDLE3D ANY3D_IDLE2D WAIT_IDLEGUI CPSCRATCH_IDLEGUI */
+}
+
+static void IsyncOff(struct Card *k)
+{
+    if (k->isync && k->isync_have)
+        HwWrite(k, R_ISYNC_CNTL, k->isync_saved);
 }
 
 /* --- the bitmaps -------------------------------------------------------------------- */
@@ -974,6 +1155,7 @@ static BOOL StopCp(struct Card *k, BOOL closing)
 
     WHERE(85, closing);
     tf = R2Cp_Stop(&k->hw, &k->saved, TIMEOUT_US, &reset);
+    IsyncOff(k);
     WHERE(86, tf);
     if (reset)
         k->cp_resets++;
@@ -1372,6 +1554,7 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         k->lost = CARD_LOST_CP;
         goto stop;
     }
+    IsyncOn(k);
     WHERE(76, ring_gpu);
     k->ring.kick = 2048;
 
@@ -1426,6 +1609,9 @@ static LONG CardFlush(struct Card *k, BOOL present, BOOL wait)
         WHERE(80, seq);
         if (e == R2_OK)
         {
+            k->wd_seq = seq;        /* the watchdog's fence, before pending */
+            k->wd_last = k->ring.fence_done;
+            k->wd_ticks = 0;
             k->pending = 1;
             k->pend_seq = seq;
             k->ov_frames++;
@@ -2907,6 +3093,7 @@ void Card_Close(struct Card *k)
     k->closing = 1;                 /* PreSettle: no Core_Forget, the core is gone */
     SettleAlone(k, TRUE);           /* the last frame drawn, the CP off */
     WaitBlit();
+    WdStop(k);                      /* nothing pending any more */
     /* Radeon.card's display FIFO setting back (RadeonGLDisplayPriority) */
     if (k->grph_saved && k->b[CARD_TARGET].bm != NULL && LockBm(k, CARD_TARGET, FALSE))
     {
@@ -3050,6 +3237,8 @@ static void PreSettle(struct Card *k)
     ULONG st;
     LONG e;
     ULONG seq;
+    ULONG fired;
+    ULONG i;
 #ifdef RGL_TESTHANG
     ULONG inject;
 #endif
@@ -3071,26 +3260,74 @@ static void PreSettle(struct Card *k)
     }
     else
 #endif
-    if (R2Ring_FenceDone(&k->ring, seq))
+    if (!k->wd_fired && R2Ring_FenceDone(&k->ring, seq))
         return;
     WHERE(46, seq);
     k->pre_waits++;
     t0 = HwClock(k);
-    e = Card_WaitFenceSleep(&k->ring, seq);
+    if (k->wd_fired)
+        e = R2_ETIMEOUT;            /* the watchdog gave the frame up already */
+#ifdef RGL_TESTHANG
+    else if (inject && k->wd_test && k->wd_on)
+    {
+        /* RadeonGLTestWatchdog=1: wait longer than the watchdog (3 s)
+         * for the injected fence, so that the server fires first, as for
+         * a task starved by a spinner */
+        k->wd_seq = seq;
+        for (i = 0; i < 150 && !k->wd_fired; i++)
+            Delay(1);
+        e = R2_ETIMEOUT;
+    }
+#endif
+    else
+        e = Card_WaitFenceSleep(&k->ring, seq);
     us = HwClock(k) - t0;
     if (us > k->pre_us_max)
         k->pre_us_max = us;
     WHERE(47, us);
     if (e == R2_OK)
         return;                     /* the lock finds the engine idle; Settle stops the CP under it */
-    st = HwRead(k, R_RBBM_STATUS);
+    /* 2026-11-24, tam-1 (TaskWatch): the third hang's own recovery was
+     * preempted inside StopCp's timed spin by a CON (pri 5) spinning in
+     * Radeon.card's untimed wait for the hung engine -- and the server had
+     * been told to keep off (wd_hold): priority inversion, the machine
+     * froze (everything at pri 0 starved, the USB network too). So the
+     * reset is the interrupt's job, which no task can starve: ask it for
+     * one now and SLEEP until it has run (or 2 s, when the engine turns
+     * out idle and the server declines); only then the bookkeeping below,
+     * on an idle engine, with the server held off. */
+    if (k->wd_on && !k->wd_fired)
+    {
+        k->wd_now = 1;
+        for (i = 0; i < 100 && !k->wd_fired; i++)
+            Delay(1);
+        k->wd_now = 0;
+    }
+    k->wd_hold = 1;                 /* from here the engine is ours: the server keeps off */
+    fired = k->wd_fired;            /* read after the hold: it cannot fire in between */
+    st = fired ? k->wd_status : HwRead(k, R_RBBM_STATUS);
     k->hang_status = st;
     k->hangs++;
     k->pending = 0;
     if (StopCp(k, (BOOL) (k->closing != 0)) && !k->closing)
         k->drop_next = 1;
+    if (fired)
+    {
+        /* the server's stage-2 reset discarded the 3D state: as StopCp's
+         * reset path */
+        k->cp_resets++;
+        k->reset_stage = 2;
+        k->reset_status = k->wd_after;
+        if (!k->closing)
+        {
+            Core_Forget(k->core);
+            R2Chk_Reset(&k->chk);
+            k->drop_next = 1;
+        }
+        k->reload_ucode = 1;
+    }
 #ifdef RGL_TESTHANG
-    if (inject >= 2 && k->lost == 0)
+    if (inject >= 2 && k->lost == 0 && !fired)
     {
         /* StopCp's reset path, which an idle engine does not take; M 3
          * and 4 run stages 2 and 3 as if the ones before had failed */
@@ -3118,13 +3355,16 @@ static void PreSettle(struct Card *k)
         SerialStr(", RBBM_STATUS ");
         SerialHex(st);
         SerialStr(k->lost != 0 ? "): CP stopped, the 3D reset FAILED, context lost"
-                               : "): CP stopped, 3D engine reset, frame dropped");
+                               : fired ? "): the WATCHDOG reset the 3D engine, frame dropped"
+                                       : "): CP stopped, 3D engine reset, frame dropped");
         SerialStr("; reset stage ");
         SerialHex(k->reset_stage);
         SerialStr(", RBBM_STATUS after it ");
         SerialHex(k->reset_status);
         SerialStr("\n");
     }
+    k->wd_fired = 0;
+    k->wd_hold = 0;
 }
 
 /* 2026-11-24 (DevilutionX run 5: after a reset that failed, the game's

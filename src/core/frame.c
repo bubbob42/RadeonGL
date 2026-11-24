@@ -63,7 +63,7 @@ void Core_Clear(struct Core *c, ULONG mask)
         rb3d |= R_Z_ENABLE;
 
     /* TCL off, window coordinates in (Mesa r200_blit emit_vtx_state) */
-    R2E_Reg(cs, R_SE_VAP_CNTL, R_VAP_FORCE_W_TO_ONE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
+    R2E_VapCntl(cs, R_VAP_FORCE_W_TO_ONE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
     R2E_Reg(cs, R_SE_VTE_CNTL, R_VTX_XY_FMT | R_VTX_Z_FMT);
     R2E_VertexFormat(cs, R_VTX_Z0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT), 0,
                      R_VTX_Z0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT), 0,
@@ -91,6 +91,11 @@ void Core_Clear(struct Core *c, ULONG mask)
     v[4] = R2Cs_FloatBits(x1);   v[5] = R2Cs_FloatBits(y1); v[6] = R2Cs_FloatBits(z); v[7] = color;
     v[8] = R2Cs_FloatBits(x1);   v[9] = R2Cs_FloatBits(0.0f); v[10] = R2Cs_FloatBits(z); v[11] = color;
     R2E_Immd(cs, R_VF_PRIM_RECT_LIST | R_VF_COLOR_ORDER_RGBA, 4, 3, v);
+    /* RadeonGLTclFlush=1 (branch hang-watchdog): the TCL-off clear drained
+     * before TCL comes back, as the DRM's R200 depth clear ends
+     * (linux-ums radeon_state.c:1367) */
+    if (R2E_TclFlushOn)
+        R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN | R_WAIT_HOST_IDLECLEAN);
 
     /* back to the client's state at the next draw */
     c->dirty |= D_VAP | D_VTXFMT | D_PPCNTL | D_COMBINE | D_RB3D | D_PLANEMASK
@@ -139,7 +144,7 @@ void Core_Present(struct Core *c, const struct CoreScreen *s, LONG x, LONG y)
 
     /* vertex state of Mesa's blit: TCL off, window xy, one st pair */
     R2E_Reg(cs, R_SE_VAP_CNTL_STATUS, cs->swap ? R_VC_NO_SWAP : R_VC_32BIT_SWAP);
-    R2E_Reg(cs, R_SE_VAP_CNTL, R_VAP_FORCE_W_TO_ONE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
+    R2E_VapCntl(cs, R_VAP_FORCE_W_TO_ONE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
     R2E_Reg(cs, R_SE_VTX_STATE_CNTL, 0);
     R2E_Reg(cs, R_SE_VTE_CNTL, 0);
     R2E_VertexFormat(cs, 0, 2UL << R_VTX_TEX0_COMP_CNT_SHIFT, 0, 2UL << R_VTX_TEX0_COMP_CNT_SHIFT,

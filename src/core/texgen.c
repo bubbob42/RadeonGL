@@ -334,6 +334,13 @@ static BOOL IsIdentity(const float *m)
     return TRUE;
 }
 
+/* RadeonGLTexgenFix=1 (branch hang-watchdog, audit finding 5): a disabled
+ * unit's texture matrix or texgen stays out of TEX_PROC_CTL / COMP_SEL, as
+ * Mesa's disable_tex_obj_state clears it (r200_texstate.c:944-972) -- else
+ * the TCL computes a texcoord set the output format has no slot for
+ * (GLBench Pelt: unit 1's matrix while only unit 0 draws). */
+ULONG Texgen_FixUnits = 0;
+
 ULONG Texgen_Update(struct Core *c)
 {
     float m[16];
@@ -349,7 +356,9 @@ ULONG Texgen_Update(struct Core *c)
     ULONG mode;
     ULONG same;
     ULONG old;
+    ULONG on;
 
+    on = Texgen_FixUnits ? Core_UnitsOn(c) : ~0UL;
     v[0] = 0x00ffffffUL;
     v[1] = 0x00543210UL;
     v[2] = 0;
@@ -358,6 +367,8 @@ ULONG Texgen_Update(struct Core *c)
     tcl = 0;
     for (u = 0; u < CORE_UNITS; u++)
     {
+        if (!(on & (1UL << u)))
+            continue;               /* RadeonGLTexgenFix: a disabled unit */
         tm = c->texm[u][c->tex_top[u]].m;
         mats = 0;
         if ((c->tg_on[u] & 7) != 0)

@@ -166,12 +166,22 @@ LONG R2E_Matrix(struct R2Cs *cs, ULONG vec, const float *m)
     return R2E_Vectors(cs, vec, 16, rows);
 }
 
+ULONG R2E_TclFlushOn = 0;
+ULONG R2E_TamDebug = 0;
+
+LONG R2E_VapCntl(struct R2Cs *cs, ULONG val)
+{
+    if (R2E_TclFlushOn)
+        R2E_Reg(cs, R_SE_TCL_STATE_FLUSH, 0);
+    return R2E_Reg(cs, R_SE_VAP_CNTL, val);
+}
+
 LONG R2E_TclDefaults(struct R2Cs *cs)
 {
     ULONG v[6];
 
     R2E_Reg(cs, R_SE_VAP_CNTL_STATUS, cs->swap ? R_VC_NO_SWAP : R_VC_32BIT_SWAP);
-    R2E_Reg(cs, R_SE_VAP_CNTL, R_VAP_TCL_ENABLE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
+    R2E_VapCntl(cs, R_VAP_TCL_ENABLE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
     R2E_Reg(cs, R_SE_VTE_CNTL, R_VPORT_X_SCALE_ENA | R_VPORT_X_OFFSET_ENA
                              | R_VPORT_Y_SCALE_ENA | R_VPORT_Y_OFFSET_ENA
                              | R_VPORT_Z_SCALE_ENA | R_VPORT_Z_OFFSET_ENA
@@ -250,6 +260,8 @@ LONG R2E_RasterDefaults(struct R2Cs *cs)
     R2E_Reg(cs, R_PP_CNTL_X, 0);
     R2E_Reg(cs, R_RB3D_DEPTHXY_OFFSET, 0);
     R2E_Reg(cs, R_RE_AUX_SCISSOR_CNTL, 0);
+    if (R2E_TamDebug != 0)
+        R2E_Reg(cs, R_PP_TAM_DEBUG3, R2E_TamDebug);
 
     /* combiner stages 0 and 1: out = diffuse (A * B + C with A = B = 0) */
     R2E_Combiner(cs, 0,

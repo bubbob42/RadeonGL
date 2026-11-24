@@ -27,6 +27,7 @@
 #include "cardflip.h"
 #include "rglint.h"
 #include "rgltable.h"
+#include "r2emit.h"
 
 /* --- The log -------------------------------------------------------------------------- */
 
@@ -298,6 +299,33 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     }
     else
         Put(f, "waits before a lock: off (RadeonGLPreWait=0)\n");
+    /* branch hang-watchdog: the vertical-blank server and the audit's switches */
+    Put(f, "watchdog: ");
+    if (k->wd_limit == 0 || !k->prewait)
+        Put(f, k->wd_limit == 0 ? "off (RadeonGLWatchdog=0)" : "off (needs prewait)");
+    else
+    {
+        PutU(f, k->wd_limit);
+        Put(f, " vblanks");
+        if (k->wd_test)
+            Put(f, " (TEST: fires on an idle engine)");
+        Put(f, "; engine resets it made: ");
+        PutU(f, k->wd_resets);
+        if (k->wd_resets != 0)
+        {
+            Put(f, ", RBBM_STATUS at the last: "); PutX(f, k->wd_status);
+            Put(f, ", after its reset: "); PutX(f, k->wd_after);
+        }
+    }
+    Put(f, "\ntest switches: TclFlush "); PutU(f, R2E_TclFlushOn);
+    Put(f, ", TamDebug "); PutX(f, R2E_TamDebug);
+    Put(f, ", TexgenFix "); PutU(f, Texgen_FixUnits);
+    Put(f, ", Isync "); PutU(f, k->isync);
+    if (k->isync && k->isync_have)
+    {
+        Put(f, " (Radeon.card's ISYNC_CNTL "); PutX(f, k->isync_saved); Put(f, ")");
+    }
+    Put(f, "\n");
     if (k->overlap)
     {
         Put(f, "overlap: on; frames the Radeon finished after the unlock: "); PutU(f, k->ov_frames);

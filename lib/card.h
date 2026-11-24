@@ -31,6 +31,7 @@
 #define RADEONGL_CARD_H
 
 #include <exec/types.h>
+#include <exec/interrupts.h>
 #include <intuition/intuition.h>
 #include <graphics/gfx.h>
 
@@ -264,7 +265,40 @@ struct Card
     ULONG reset_stage;          /* Reset3D: the last stage it ran (1-3) */
     ULONG reset_status;         /* ... and RBBM_STATUS after it */
     ULONG layout_spare[1];
+    /* 2026-11-24, branch hang-watchdog (GLMix 0.2 and Pelt froze the
+     * machine after recovered hangs: another task met the hung engine in
+     * Radeon.card's untimed wait before PreSettle ran). A vertical-blank
+     * interrupt server (card.c Card_WdCheck) resets the 3D engine itself
+     * when a kicked frame's fence stands still for wd_limit vblanks with
+     * the engine busy -- whichever task waits; the next PreSettle finishes
+     * the drop. Appended after the spare dwords: this is a test branch,
+     * the copy code's layout is not kept. */
+    struct Interrupt wd_int;
+    ULONG wd_on;                /* the server is in the VERTB chain */
+    ULONG wd_limit;             /* vblanks (RadeonGLWatchdog=N; 0 = off; default 50) */
+    ULONG wd_test;              /* test build: fire without GUI_ACTIVE (RadeonGLTestWatchdog) */
+    volatile ULONG wd_hold;     /* the task touches the CP/engine: the server keeps off */
+    volatile ULONG wd_fired;    /* the server reset the engine; PreSettle finishes the drop */
+    volatile ULONG wd_seq;      /* the fence the server waits for */
+    volatile ULONG wd_now;      /* PreSettle timed out: reset at the next vblank, no wd_limit */
+    ULONG wd_last;              /* the fence it read last */
+    ULONG wd_ticks;             /* vblanks without progress */
+    ULONG wd_resets;            /* resets it made */
+    ULONG wd_status;            /* RBBM_STATUS when it fired last */
+    ULONG wd_after;             /* ... and after its reset */
+    ULONG wd_beat;              /* RadeonGLSerial=2: a '.' every 250 vblanks (the CPU alive) */
+    ULONG wd_busy;              /* vblanks the engine was busy with no frame of ours pending */
+    ULONG wd_busy_said;         /* ... reported for this busy stretch */
+    /* RadeonGLIsync=1: ISYNC_CNTL = 0x33 while the CP runs (the 2D/3D
+     * interlock Linux and X set at CP start), Radeon.card's value back at
+     * the stop */
+    ULONG isync;
+    ULONG isync_saved;
+    ULONG isync_have;
 };
+
+ULONG Card_WdCheck(struct Card *k);     /* the VERTB server's body (interrupt) */
+void Card_WdArm(struct Card *k, ULONG limit, ULONG test, ULONG isync);
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
  * 0 = taken (gpu, pitch in bytes, CORE_VIEW_* format, handle 1..CARD_NVIEW) */

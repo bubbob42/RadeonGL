@@ -54,6 +54,7 @@
 #include "backend.h"
 #include "core.h"
 #include "coreint.h"
+#include "r2emit.h"
 #include "r2ring.h"
 #include "r2check.h"
 #include "r200reg.h"
@@ -100,6 +101,21 @@ ULONG Rgl_UnimplEarly[(DISPATCH_SLOTS + 31) / 32];    /* rgllog.c reads it */
 static ULONG rgl_busy = 0;
 
 /* --- Memory and the core's environment ------------------------------------------ */
+
+/* a decimal environment variable, def when unset or not a number
+ * (branch hang-watchdog's switches) */
+static ULONG EnvNum(const char *name, ULONG def)
+{
+    char v[16];
+    ULONG n;
+    ULONG i;
+
+    if (GetVar((STRPTR) name, (STRPTR) v, sizeof(v), 0) <= 0)
+        return def;
+    for (i = 0, n = 0; v[i] >= '0' && v[i] <= '9'; i++)
+        n = n * 10 + (ULONG) (v[i] - '0');
+    return i > 0 ? n : def;
+}
 
 static APTR EnvAlloc(APTR env, ULONG size)
 {
@@ -627,9 +643,19 @@ static void *CreateContext(const struct Ask *a)
     {
         r->rad.prewait = (GetVar((STRPTR) "RadeonGLPreWait", (STRPTR) flag, sizeof(flag), 0) > 0
                           && flag[0] == '0') ? 0UL : 1UL;
-        r->rad.serial = (GetVar((STRPTR) "RadeonGLSerial", (STRPTR) flag, sizeof(flag), 0) > 0
-                         && flag[0] == '1') ? 1UL : 0UL;
+        r->rad.serial = EnvNum("RadeonGLSerial", 0);    /* 1 lines, 2 also a heartbeat */
+        /* branch hang-watchdog (docs/audit-2026-11-24-r200-hang.md):
+         * RadeonGLWatchdog=N vblanks without fence progress before the
+         * vertical-blank server resets a hung engine (default 50 = 1 s on
+         * PAL, 0 off); RadeonGLTestWatchdog=1 (test build) lets it fire
+         * on an idle engine; RadeonGLIsync=1 sets the 2D/3D interlock */
+        Card_WdArm(&r->rad, EnvNum("RadeonGLWatchdog", 50),
+                   EnvNum("RadeonGLTestWatchdog", 0), EnvNum("RadeonGLIsync", 0));
     }
+    /* the audit's switches, library-wide (r2emit.h, texgen.c) */
+    R2E_TclFlushOn = EnvNum("RadeonGLTclFlush", 0);
+    R2E_TamDebug = EnvNum("RadeonGLTamDebug", 0);
+    Texgen_FixUnits = EnvNum("RadeonGLTexgenFix", 0);
 #ifdef RGL_TESTHANG
     if (r->real)
         Card_TestHangSetup();

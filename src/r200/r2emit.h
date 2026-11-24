@@ -64,6 +64,17 @@ LONG R2E_Matrix(struct R2Cs *cs, ULONG vec, const float *m);
  * exactly when the stream does not (cs->swap clear: choice b). */
 LONG R2E_TclDefaults(struct R2Cs *cs);
 
+/* 2026-11-24, branch hang-watchdog (docs/audit-2026-11-24-r200-hang.md),
+ * library-wide test switches set from the environment at context open:
+ * R2E_TclFlushOn (RadeonGLTclFlush=1): SE_TCL_STATE_FLUSH before every
+ * SE_VAP_CNTL write, as the UMS DRM (radeon_state.c:182-187) and Mesa's
+ * doom3 note (r200_state.c:1954); R2E_TamDebug (RadeonGLTamDebug=N, 0 =
+ * untouched): PP_TAM_DEBUG3 = N with the raster defaults (Mesa's texture
+ * cache LRU hang workaround writes 6, r200_texstate.c:1576-1620). */
+extern ULONG R2E_TclFlushOn;
+extern ULONG R2E_TamDebug;
+LONG R2E_VapCntl(struct R2Cs *cs, ULONG val);
+
 /* Rasteriser, pixel pipe and render backend: GL defaults (depth LESS +
  * write, blend ONE/ZERO, alpha test off, no culling, scissor on,
  * perspective-correct texturing, all planes written), combiner stages 0

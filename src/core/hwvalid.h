@@ -327,7 +327,7 @@ static LONG HWV(ValidateOnce)(struct Core *c)
     units = Core_UnitsOn(c);
     if (d & D_VAP)
     {
-        R2E_Reg(cs, R_SE_VAP_CNTL, R_VAP_TCL_ENABLE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
+        R2E_VapCntl(cs, R_VAP_TCL_ENABLE | (9UL << R_VAP_VF_MAX_VTX_NUM_SHIFT));
         R2E_Reg(cs, R_SE_VTE_CNTL, R_VPORT_X_SCALE_ENA | R_VPORT_X_OFFSET_ENA
                                  | R_VPORT_Y_SCALE_ENA | R_VPORT_Y_OFFSET_ENA
                                  | R_VPORT_Z_SCALE_ENA | R_VPORT_Z_OFFSET_ENA
