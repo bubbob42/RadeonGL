@@ -64,14 +64,21 @@ What it costs, and why that is acceptable:
   (CORE_LATE), so GLQuake's layout cannot move. GLQuake never touches the
   switch.
 
-## The library version (separate commit)
+## The library version: NOT raised (checked 2026-11-25 05:05)
 
-After the arrays work: lib/shell.c VERSION 29 -> 30 (REVISION from 1),
-so programs that open minigl.library 30 get RadeonGL. Check before that
-commit: what V30's own library reports, the Installer's version
-comparison (install/Install:19 assumes every 29.1 has the same version),
-the guides/readme wording, and that clients opening version 29 still
-open 30 (OpenLibrary takes "at least").
+The plan was lib/shell.c VERSION 29 -> 30 "so programs that open
+minigl.library 30 get RadeonGL". Checked against PiStorm3D (HEAD 047136a,
+2026-11-20): **V30's own library is still VERSION 29, REVISION 1**
+(`local/shell/libraryroot/library/minigl_library.c:35-36`), and its SDK --
+even the copy labelled minigl-30.0 -- still opens with MINIGL_VERSION 29
+(`include/libraries/minigl.h:54-56`; the comment there says Heretic II
+and glxsglut pin the number on their compile lines and move with it).
+
+So no program asks for 30 today, and a RadeonGL 30.x would only look
+newer than V30's 29.1 to installers that compare versions (copylib keeps
+"not older" files: installing PiStorm3D's library after RadeonGL's would
+then keep ours). The bump stays on watch: raise it in the same release
+in which V30's SDK moves MINIGL_VERSION to 30.
 
 ## Tests
 
@@ -89,3 +96,5 @@ open 30 (OpenLibrary takes "at least").
 1. The version gate above: only if a program with the old meaning turns up?
 2. Is the slow route acceptable for now, or does a V30 port already exist
    that needs speed with little-endian arrays?
+3. The library version stays 29.1 until V30's SDK asks for 30 (above):
+   agreed?
