@@ -64,20 +64,51 @@ LONG R2E_Matrix(struct R2Cs *cs, ULONG vec, const float *m);
  * exactly when the stream does not (cs->swap clear: choice b). */
 LONG R2E_TclDefaults(struct R2Cs *cs);
 
-/* 2026-11-24, branch hang-watchdog (docs/audit-2026-11-24-r200-hang.md),
- * library-wide test switches set from the environment at context open:
+/* THE R200 HANG's fix (docs/audit-2026-11-24-r200-hang.md), set from the
+ * environment at context open (cardwait.c Card_ReadSwitches). The release
+ * sends its waits from compat.c Compat_HangWait, before a state block and
+ * only while blending is on or was since the engine was last idle; the
+ * probe build (RGL_PROBES) keeps the night's forms inside ValidateOnce:
+ *   R2E_PpWait   (RadeonGLPpWait, default on; 0 off) WAIT_UNTIL 3D_IDLE
+ *                when a texture unit is switched (RGL_PROBES: before the
+ *                PP_CNTL write, with or without blending; 1-5 pick the
+ *                night's bit sets, R2E_PpWaitMask)
+ *   R2E_PpWaitNoClean (RGL_PROBES, RadeonGLPpWaitNoClean, default 1):
+ *                WAIT_3D_IDLE, not IDLECLEAN (GLMix w6: idle is enough)
+ *   R2E_PpWaitBlend (RGL_PROBES, RadeonGLPpWaitBlend=1): only after
+ *                blending since the engine was last idle (0 hangs too, the
+ *                same GLQuake speed; the release keeps the wider wait)
+ * R2E_BlendMtWait (RadeonGLBlendWait, default 1; 0 off): WAIT_UNTIL 3D_IDLE
+ * at the head of every state block sent while blending is on (or was, since
+ * the engine was last idle) and unit 1 textures -- Pelt, 6 shells, 1500
+ * frames: the unit wait alone 31 hangs; a wait before the TCL uploads or
+ * before PP_MISC at the shell boundary: 0 each. The general rule: no state
+ * change between blended multi-texture draws while their pixels are in
+ * flight (ATI and Mesa resend the texture registers with every state block
+ * and so wait implicitly). GLQuake never blends with two units: no cost. */
+extern ULONG R2E_PpWait;
+extern ULONG R2E_BlendMtWait;
+#ifdef RGL_PROBES
+extern const ULONG R2E_PpWaitMask[8];   /* 1 TEX_1|ALPHA, 2 TEX_1, 3 ALPHA, 4 any TEX_n, 5 any change */
+extern ULONG R2E_PpWaitNoClean;
+extern ULONG R2E_PpWaitBlend;
+#define R2E_PPWAIT_MASK(n) R2E_PpWaitMask[(n) & 7]
+#else
+#define R2E_PpWaitNoClean 1UL
+#define R2E_PpWaitBlend 0UL
+#define R2E_PPWAIT_MASK(n) R_TEX_ENABLE_MASK   /* any texture unit (r200reg.h) */
+#endif
+
+/* The night's probe switches (branches hang-watchdog, hang-probe; the
+ * results are in the audit), compiled in only with RGL_DEFS=-DRGL_PROBES:
+ * in the release they cost GLQuake ~2% through the hot code's layout
+ * (ValidateOnce +1.5 KB, MEASURED 2026-11-25), so there they are constant
+ * 0 and the code they guard compiles away.
  * R2E_TclFlushOn (RadeonGLTclFlush=1): SE_TCL_STATE_FLUSH before every
  * SE_VAP_CNTL write, as the UMS DRM (radeon_state.c:182-187) and Mesa's
  * doom3 note (r200_state.c:1954); R2E_TamDebug (RadeonGLTamDebug=N, 0 =
  * untouched): PP_TAM_DEBUG3 = N with the raster defaults (Mesa's texture
- * cache LRU hang workaround writes 6, r200_texstate.c:1576-1620). */
-extern ULONG R2E_TclFlushOn;
-extern ULONG R2E_TamDebug;
-/* branch hang-probe (the night of 2026-11-24, the user: try everything ATI
- * and the history do), each off unless set:
- *   R2E_PpWait   (RadeonGLPpWait=1)   WAIT_UNTIL 3D_IDLECLEAN before a
- *                PP_CNTL write that changes TEX_1 or ALPHA_TEST (the D3D
- *                "T2T0HangWorkaround" idea, the DRM's waits between streams)
+ * cache LRU hang workaround writes 6, r200_texstate.c:1576-1620).
  *   R2E_NoDedup  (RadeonGLNoDedup=1)  every enabled unit's texture registers
  *                written again whenever PP_CNTL changes (DRI CVS 2002-07-03
  *                "fix q3 hang": both units' state whenever any unit is on)
@@ -87,41 +118,36 @@ extern ULONG R2E_TamDebug;
  *   R2E_Tc4      (RadeonGLTc4=1)      4 texture coordinates out of TCL per
  *                unit with TEXCOORD_PROJ (Mesa r200_texstate.c:1386/1429,
  *                keithw 2002-08-12 "always output size 4 textures")
- *   R2E_TexDirty set by the TexImage/TexSubImage paths for R2E_TexFlush */
-extern ULONG R2E_PpWait;        /* 1 TEX_1|ALPHA, 2 TEX_1, 3 ALPHA, 4 any TEX_n, 5 any change */
-extern const ULONG R2E_PpWaitMask[8];
-extern ULONG R2E_PpWaitNoClean; /* RadeonGLPpWaitNoClean=1: WAIT_3D_IDLE, not IDLECLEAN */
-extern ULONG R2E_PpWaitBlend;   /* RadeonGLPpWaitBlend=1: only after blending since the last idle */
-/* Pelt still hangs with the unit wait (2026-11-25 00:10: 48 hangs at 4
- * shells; 0 at 2): between its blended two-unit shells it changes only the
- * alpha reference (PP_MISC), unit 1's texture matrix and the material (TCL
- * vector/scalar uploads). Probes, off by default:
+ *   R2E_TexDirty set by the TexImage/TexSubImage paths for R2E_TexFlush
  *   R2E_TclWait  (RadeonGLTclWait=1)  WAIT_UNTIL 3D_IDLE before every TCL
  *                vector and scalar upload
  *   R2E_MiscWait (RadeonGLMiscWait=1) WAIT_UNTIL 3D_IDLE before every
- *                PP_MISC write (the alpha reference and function) */
+ *                PP_MISC write (the alpha reference and function)
+ *   R2E_SepBlend (RadeonGLSepBlend=1) Mesa's blending: SEPARATE_ALPHA_ENABLE
+ *                whenever blending is on, BLENDCNTL ONE/ZERO, the factors in
+ *                ABLENDCNTL and CBLENDCNTL (r200_state.c r200_set_blend_state) */
+#ifdef RGL_PROBES
+extern ULONG R2E_TclFlushOn;
+extern ULONG R2E_TamDebug;
 extern ULONG R2E_TclWait;
 extern ULONG R2E_MiscWait;
-/* R2E_BlendMtWait (RadeonGLBlendWait, default 1; 0 off): WAIT_UNTIL 3D_IDLE
- * at the head of every state block sent while blending is on (or was, since
- * the engine was last idle) and unit 1 textures -- Pelt, 6 shells, 1500
- * frames: the unit wait alone 31 hangs; a wait before the TCL uploads or
- * before PP_MISC at the shell boundary: 0 each. The general rule: no state
- * change between blended multi-texture draws while their pixels are in
- * flight (ATI and Mesa resend the texture registers with every state block
- * and so wait implicitly). GLQuake never blends with two units: no cost. */
-extern ULONG R2E_BlendMtWait;
 extern ULONG R2E_NoDedup;
 extern ULONG R2E_TexFlush;
 extern ULONG R2E_Tc4;
 extern ULONG R2E_TexDirty;
-/* R2E_SepBlend (RadeonGLSepBlend=1): Mesa's blending -- SEPARATE_ALPHA_ENABLE
- * whenever blending is on, BLENDCNTL ONE/ZERO, the factors in ABLENDCNTL and
- * CBLENDCNTL, both back to ONE/ZERO while blending is off (r200_state.c
- * r200_set_blend_state; the bisect of 2026-11-24 night: the hang needs unit
- * 1 AND blending) */
 extern ULONG R2E_SepBlend;
 LONG R2E_VapCntl(struct R2Cs *cs, ULONG val);
+#else
+#define R2E_TclFlushOn 0UL
+#define R2E_TamDebug 0UL
+#define R2E_TclWait 0UL
+#define R2E_MiscWait 0UL
+#define R2E_NoDedup 0UL
+#define R2E_TexFlush 0UL
+#define R2E_Tc4 0UL
+#define R2E_SepBlend 0UL
+#define R2E_VapCntl(cs, val) R2E_Reg((cs), R_SE_VAP_CNTL, (val))
+#endif
 
 /* Rasteriser, pixel pipe and render backend: GL defaults (depth LESS +
  * write, blend ONE/ZERO, alpha test off, no culling, scissor on,

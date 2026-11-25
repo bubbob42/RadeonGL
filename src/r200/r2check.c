@@ -91,7 +91,9 @@ static const struct Rule rules[] =
     { 0x2d0c, 0x2d84, 0x18, 0, "PP_CUBIC_OFFSET_F3_n" },
     { 0x2d10, 0x2d88, 0x18, 0, "PP_CUBIC_OFFSET_F4_n" },
     { 0x2d14, 0x2d8c, 0x18, 0, "PP_CUBIC_OFFSET_F5_n" },
-    { 0x2d9c, 0x2d9c, 0x04, 0, "PP_TAM_DEBUG3" },
+#ifdef RGL_PROBES
+    { 0x2d9c, 0x2d9c, 0x04, 0, "PP_TAM_DEBUG3" },  /* RadeonGLTamDebug */
+#endif
     { 0x2ee0, 0x2efc, 0x04, 0, "PP_TFACTOR_n" },
     { 0x2f00, 0x2f7c, 0x04, 0, "PP_TXCBLEND/ABLEND_n" },
     { 0x3218, 0x3218, 0x04, 0, "RB3D_BLENDCOLOR" },

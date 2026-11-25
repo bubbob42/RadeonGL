@@ -152,6 +152,12 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.19 (24.11.2026)
+  - fixed: the 3D engine hung now and then in programs that blend with two
+    texture units (DevilutionX: 51 hangs in 2149 frames -> 0 in 3503)
+  - a hung engine no longer freezes the machine: own timeouts, a staged
+    reset and a vertical-blank watchdog (RadeonGLWatchdog)
+
 0.18 (22.11.2026)
   - fixed: GL_LINEAR_MIPMAP_NEAREST and GL_NEAREST_MIPMAP_LINEAR were
     swapped (GLQuake's distant textures looked grainy)

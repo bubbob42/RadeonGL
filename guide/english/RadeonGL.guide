@@ -411,6 +411,26 @@ that is not set means the default.
     missing texture is worse than a slower frame). Given up, it stays
     off for the rest of the program.
 
+@{b}RadeonGLWatchdog@{ub}  (default: 50)
+    How many vertical blanks (50 a second on PAL) a frame may stand still
+    with the 3D engine busy before the watchdog resets the engine and the
+    frame is dropped. 0 turns the watchdog off.
+
+@{b}RadeonGLPreWait@{ub}  (default: on)
+    0 waits for the last frame inside the Picasso96 lock, as before 0.19,
+    without RadeonGL's own timeout.
+
+@{b}RadeonGLPpWait@{ub}, @{b}RadeonGLBlendWait@{ub}  (default: on)
+    0 turns off the waits that keep the R200 from hanging when the
+    texture setup changes under blended drawing (for comparing only:
+    programs that blend with two texture units then hang now and then,
+    and the watchdog brings the engine back).
+
+@{b}RadeonGLSerial@{ub}  (default: off)
+    1 writes a line to the serial port (9600 baud) each time a frame
+    never ended and the engine was reset; 2 adds a dot every five
+    seconds.
+
 @{b}RadeonGLLocked@{ub}  (default: on)
     0 draws a program's vertex arrays the slow, direct way (for
     comparing, or if indexed drawing misbehaves).
@@ -768,6 +788,20 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.19 (24.11.2026)
+    * fixed: the Radeon's 3D engine stopped now and then in programs that
+      blend with two texture units -- DevilutionX's see-through walls and
+      lit tiles, GLBench's fur. The chip loses its way when the texture
+      setup changes while blended pixels are still in flight; RadeonGL
+      now lets the engine finish first at exactly those moments.
+      DevilutionX: 51 hangs in 2149 frames before, none in 3503 now, at
+      the same speed; GLQuake keeps its speed (within one percent)
+    * a hung engine no longer freezes the machine: RadeonGL waits for a
+      frame with a timeout of its own before every Picasso96 lock, resets
+      the 3D engine in stages, and a watchdog in the vertical blank resets
+      it even when another program is stuck waiting for the card
+      (RadeonGLWatchdog). Before, a hang could stop the whole Amiga
 
 0.18 (22.11.2026)
     * fixed: two mipmap filters were drawn the wrong way round.

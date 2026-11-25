@@ -1144,7 +1144,10 @@ RGL_CFLAGS := -Wall -Wextra -Wno-pointer-sign -Werror=implicit-function-declarat
               -fno-strict-aliasing -m68060 -m68881 -DRGL_CPU_040 -noixemul -I$(MGL_SDK_INC) -Ilib -Ibuild/rgl \
               -Isrc/core -Isrc/r200 -I$(P96_INC) $(RGL_DEFS)
 # RGL_DEFS=-DCARD_OVERLAP_STAT: a measurement build with the overlap estimate
-# in the log (lib/card.c); remove build/rgl first, the objects do not see it
+# in the log (lib/card.c); remove build/rgl first, the objects do not see it.
+# -DRGL_PROBES: the R200 hang hunt's probe switches (src/r200/r2emit.h:
+# RadeonGLTclFlush, RadeonGLNoDedup, RadeonGLSepBlend and the rest), out of
+# the release because in the hot code they cost GLQuake ~3% (2026-11-25).
 RGL_DEFS   ?=
 # rgllight.o goes last: code added in front of the core moved its hot
 # functions and cost GLQuake ~0.8% (lib/rgllight.c, MEASURED 2026-11-07)
@@ -1185,7 +1188,21 @@ CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow tex13
 # ab_main1), so it moved into cardwait.o, linked last, with the
 # RadeonGLWaitSleep read; struct Card keeps 0.15's copy code (card.h,
 # layout_spare). card.o is 0.15's 22284 bytes again: 10668 - 52.
-RGL_DISPATCH_PAD := 10616
+# 2026-11-25, 0.19 (the R200 hang: watchdog, prelock wait, the fix's two
+# waits): built as committed, the core sat 4176 bytes further on, the probe
+# switches grew ValidateOnce by 1.5 KB and GLQuake ran 3% slower (32.8 ->
+# 31.8 fps; the prelock-wait branch alone measured equal). Now the probes
+# compile only with RGL_PROBES; the switch reads went to cardwait.o (late);
+# seven cold hooks moved to rglcompat.o, so rgl.o is 0.18's 11508 bytes
+# with its hooks in place; the fix itself moved out of ValidateOnce into
+# compat.o (Compat_HangWait, called by Core_Validate only while blending):
+# both ValidateOnce copies are 0.18's code. card.o +2816 (the watchdog;
+# CardFlush.part and ToVram move with it, GCC emits the clone after every
+# function of the file), core_core.o +12, hwstate.o +36 (Core_Validate's
+# blend test): 10616 - 2816 - 48, everything from core_vertex.o on at 0.18's
+# places (ab_r019/ab_r019w/ab_r019f: first build +2.40%, the fix in
+# ValidateOnce +1.52%, this +0.84% on four pads, no fix code at all +0.48%).
+RGL_DISPATCH_PAD := 7752
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \
@@ -1296,6 +1313,7 @@ GLCOST := dist/GLSmoke/GLCost
 GLFILL := dist/GLSmoke/GLFill
 GLVIEW := dist/GLSmoke/GLView
 GLGROW := dist/GLSmoke/GLGrow
+GLMIX := dist/GLSmoke/GLMix
 
 # 2026-11-14: R4, GL_RGL_bitmap_view checked on the card (pixels back)
 $(GLVIEW): glsmoke/glview.c lib/rglview.h
@@ -1308,6 +1326,12 @@ $(GLGROW): glsmoke/glgrow.c
 	@mkdir -p dist/GLSmoke
 	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
 	    -I$(MGL_SDK_INC) -o $@ glsmoke/glgrow.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
+
+# 2026-11-24: DevilutionX's fight mix as a stress test (the R200 hangs)
+$(GLMIX): glsmoke/glmix.c
+	@mkdir -p dist/GLSmoke
+	$(GCC_CC) -std=gnu99 -noixemul -m68060 -m68881 -O2 -Wall -Wextra -Wno-pointer-sign \
+	    -I$(MGL_SDK_INC) -o $@ glsmoke/glmix.c -Lsdk/minigl-29.1/lib -lminigl -lm -lamiga
 
 # 2026-11-14: fill rate of big quads, Doom64's wipe and its variants
 $(GLFILL): glsmoke/glfill.c
@@ -1385,7 +1409,7 @@ $(GLGLUT): glsmoke/glglut.c
 	GCC_OBJDUMP=$(GCC_OBJDUMP) $(PYTHON) -I tools/check_fpu060.py $@
 
 .PHONY: glsmoke
-glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLGROW) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLFILT) $(GLGLUT) $(RGL_LIB)
+glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLGROW) $(GLMIX) $(GLMODES) $(GLWINDOW) $(GLLIGHT) $(GLCOMPAT) $(GLFILT) $(GLGLUT) $(RGL_LIB)
 	@mkdir -p dist/GLSmoke/Libs
 	@cp $(RGL_LIB) dist/GLSmoke/Libs/minigl.library
 	@printf '%s\n' '$(WB_ASSIGN_DEV)' > dist/GLSmoke/RunGLSmoke

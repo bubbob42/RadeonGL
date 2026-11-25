@@ -2,14 +2,14 @@ Short:        minigl.library for R200 Radeons on P96
 Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
 Author:       marcus.gerards@googlemail.com (Marcus Gerards)
 Type:         driver/video
-Version:      0.18
+Version:      0.19
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
 Requires:     R200 Radeon 8500-9250, Picasso96 3.6+, 68020+ with FPU
 Kurz:         minigl.library fuer R200-Radeons an P96
 
-RadeonGL 0.18  --  22.11.2026
+RadeonGL 0.19  --  24.11.2026
 
 
 WHAT IT IS
@@ -151,6 +151,12 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.19 (24.11.2026)
+  - fixed: the 3D engine hung now and then in programs that blend with two
+    texture units (DevilutionX: 51 hangs in 2149 frames -> 0 in 3503)
+  - a hung engine no longer freezes the machine: own timeouts, a staged
+    reset and a vertical-blank watchdog (RadeonGLWatchdog)
 
 0.18 (22.11.2026)
   - fixed: GL_LINEAR_MIPMAP_NEAREST and GL_NEAREST_MIPMAP_LINEAR were

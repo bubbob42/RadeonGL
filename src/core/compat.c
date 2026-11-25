@@ -1783,3 +1783,45 @@ void Compat_Free(struct Core *c)
     Pm_Free(c);
 }
 
+/* 2026-11-25, THE R200 HANG's waits (docs/audit-2026-11-24-r200-hang.md):
+ * a state change between blended draws while their pixels are still in
+ * flight wedges the RV280's pixel pipe (TIM/TAM/TDM/PB/RB3D busy; only an
+ * RB + CP reset recovers) when unit 1 or more textures or a texture unit
+ * is switched. Mesa and ATI never meet it: they write every enabled unit's
+ * registers again with each state block, which waits implicitly.
+ * Core_Validate calls this before a state block only while blending is on
+ * or was since the engine was last idle (blend_since; Core_GpuIdle clears
+ * it) -- out of ValidateOnce, so a program's unblended state blocks run
+ * the code they ran in 0.18 (inside ValidateOnce the fix cost GLQuake
+ * 1.3%: ab_r019, 2026-11-25). It waits for an idle 3D engine
+ *   - while unit 1+ textures (RadeonGLBlendWait, R2E_BlendMtWait): Pelt's
+ *     blended two-unit shells, between which only the alpha reference and
+ *     the TCL uploads change (6 shells: 31 hangs in 1500 frames -> 0);
+ *   - when the texture units change (RadeonGLPpWait, R2E_PpWait): GLMix
+ *     0.2's death screen (40 in 600 -> 0), DevilutionX's fights (51 in
+ *     2149 -> 0 in 3503).
+ * The night's blend-only measurements (RadeonGLPpWaitBlend=1): 0 hangs in
+ * GLMix and in Pelt (6 shells, 2001 frames). hang_units follows every
+ * state block while blended pixels may be in flight; at the first call
+ * after an unblended stretch none are, so a stale value there can only
+ * add a wait, never miss one. */
+void Compat_HangWait(struct Core *c)
+{
+    ULONG units;
+    ULONG waited;
+
+    units = Core_UnitsOn(c);
+    waited = 0;
+    if ((R2E_BlendMtWait && (units & ~1UL)) || (R2E_PpWait && units != c->hang_units))
+    {
+        (void) R2E_Reg(c->cs, R_WAIT_UNTIL, R_WAIT_3D_IDLE);
+        c->stat_unit_waits++;
+        waited = 1;
+    }
+    c->hang_units = units;
+    /* what is drawn after this block: blended pixels in flight again */
+    if (c->enables & EN_BLEND)
+        c->blend_since = 1;
+    else if (waited)
+        c->blend_since = 0;
+}

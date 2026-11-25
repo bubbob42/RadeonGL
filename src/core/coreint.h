@@ -105,8 +105,13 @@ ULONG Core_PlaneMask(ULONG format, ULONG m);
 #define IN_BEGIN(c) ((c)->prim != CORE_NO_PRIM)
 
 /* Mark everything a texture unit change can touch. */
-extern ULONG Texgen_FixUnits;      /* texgen.c, RadeonGLTexgenFix */
+#ifdef RGL_PROBES
+extern ULONG Texgen_FixUnits;      /* texgen.c, RadeonGLTexgenFix (r2emit.h: the probes) */
 #define DIRTY_UNIT(c, u) ((c)->dirty |= (D_TEX0 << (u)) | D_COMBINE | D_PPCNTL \
                                        | (Texgen_FixUnits ? D_TEXGEN : 0UL))
+#else
+#define Texgen_FixUnits 0UL
+#define DIRTY_UNIT(c, u) ((c)->dirty |= (D_TEX0 << (u)) | D_COMBINE | D_PPCNTL)
+#endif
 
 #endif /* CORE_COREINT_H */

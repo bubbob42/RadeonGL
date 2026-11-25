@@ -102,21 +102,6 @@ static ULONG rgl_busy = 0;
 
 /* --- Memory and the core's environment ------------------------------------------ */
 
-/* a decimal environment variable, def when unset or not a number
- * (branch hang-watchdog's switches) */
-static ULONG EnvNum(const char *name, ULONG def)
-{
-    char v[16];
-    ULONG n;
-    ULONG i;
-
-    if (GetVar((STRPTR) name, (STRPTR) v, sizeof(v), 0) <= 0)
-        return def;
-    for (i = 0, n = 0; v[i] >= '0' && v[i] <= '9'; i++)
-        n = n * 10 + (ULONG) (v[i] - '0');
-    return i > 0 ? n : def;
-}
-
 static APTR EnvAlloc(APTR env, ULONG size)
 {
     (void) env;
@@ -636,37 +621,9 @@ static void *CreateContext(const struct Ask *a)
     if (r->real)
         r->rad.overlap = (GetVar((STRPTR) "RadeonGLOverlap", (STRPTR) flag, sizeof(flag), 0) > 0
                           && flag[0] == '0') ? 0UL : 1UL;
-    /* 2026-11-24, RadeonGLPreWait=0: a pending frame waited for inside the
-     * P96 lock only, as up to 0.18 (card.c PreSettle); RadeonGLSerial=1: a
-     * line on the serial port when a frame never ended */
-    if (r->real)
-    {
-        r->rad.prewait = (GetVar((STRPTR) "RadeonGLPreWait", (STRPTR) flag, sizeof(flag), 0) > 0
-                          && flag[0] == '0') ? 0UL : 1UL;
-        r->rad.serial = EnvNum("RadeonGLSerial", 0);    /* 1 lines, 2 also a heartbeat */
-        /* branch hang-watchdog (docs/audit-2026-11-24-r200-hang.md):
-         * RadeonGLWatchdog=N vblanks without fence progress before the
-         * vertical-blank server resets a hung engine (default 50 = 1 s on
-         * PAL, 0 off); RadeonGLTestWatchdog=1 (test build) lets it fire
-         * on an idle engine; RadeonGLIsync=1 sets the 2D/3D interlock */
-        Card_WdArm(&r->rad, EnvNum("RadeonGLWatchdog", 50),
-                   EnvNum("RadeonGLTestWatchdog", 0), EnvNum("RadeonGLIsync", 0));
-        Card_DcLine(&r->rad, EnvNum("RadeonGLDcLine", 0xff));   /* branch hang-probe */
-    }
-    /* the audit's switches, library-wide (r2emit.h, texgen.c) */
-    R2E_TclFlushOn = EnvNum("RadeonGLTclFlush", 0);
-    R2E_TamDebug = EnvNum("RadeonGLTamDebug", 0);
-    Texgen_FixUnits = EnvNum("RadeonGLTexgenFix", 0);
-    R2E_PpWait = EnvNum("RadeonGLPpWait", 4);       /* the R200 hang's fix, on (r2emit.h) */
-    R2E_PpWaitNoClean = EnvNum("RadeonGLPpWaitNoClean", 1);
-    R2E_PpWaitBlend = EnvNum("RadeonGLPpWaitBlend", 0);
-    R2E_TclWait = EnvNum("RadeonGLTclWait", 0);
-    R2E_BlendMtWait = EnvNum("RadeonGLBlendWait", 1);   /* the hang fix, general form (r2emit.h) */
-    R2E_MiscWait = EnvNum("RadeonGLMiscWait", 0);
-    R2E_NoDedup = EnvNum("RadeonGLNoDedup", 0);
-    R2E_TexFlush = EnvNum("RadeonGLTexFlush", 0);
-    R2E_Tc4 = EnvNum("RadeonGLTc4", 0);
-    R2E_SepBlend = EnvNum("RadeonGLSepBlend", 0);
+    /* RadeonGLPreWait, RadeonGLSerial, the watchdog, the R200 hang's waits
+     * (cardwait.c, behind the hot code: 2026-11-25) */
+    Card_ReadSwitches(r->real ? &r->rad : NULL);
 #ifdef RGL_TESTHANG
     if (r->real)
         Card_TestHangSetup();
@@ -1018,19 +975,9 @@ GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height
  * keep their places (the 68060 punishes moved hot code;
  * tools/hot_layout.py). */
 
-void Hook_MGLMinTriArea(GLcontext context, GLfloat area)
-{
-    (void) context;
-    if (rgl != NULL)
-        rgl->core.min_tri_area = area;
-}
-
-void Hook_MGLSetZOffset(GLcontext context, GLfloat offset)
-{
-    (void) context;
-    if (rgl != NULL)
-        Core_SetZOffset(&rgl->core, offset);
-}
+/* MGLMinTriArea, MGLSetZOffset and five mglChoose calls that change
+ * nothing moved to rglcompat.c (2026-11-25: the call that reads the R200
+ * hang's switches took their 48 bytes) */
 
 void Hook_MGLEnableSync(GLcontext context, GLboolean enable)
 {
@@ -1062,15 +1009,10 @@ void Hook_MGLSetPointer(GLcontext context)
         SetPointer(InputWindow(rgl), rgl->ptr_blank, 0, 0, 0, 0);
 }
 
-void Hook_mglChooseGuardBand(GLboolean flag) { (void) flag; }
-void Hook_mglChooseMtexBufferSize(int size) { (void) size; }
 /* mglChooseNumberOfBuffers lives in cardflip.c (triple buffering,
  * 2026-11-12) */
 void Hook_mglChoosePixelDepth(int depth) { choose_depth = (depth > 16) ? 32UL : 16UL; }
-void Hook_mglChooseTextureBufferSize(int size) { (void) size; }
-void Hook_mglChooseVertexBufferSize(int size) { (void) size; }
 void Hook_mglChooseWindowMode(GLboolean flag) { choose_window = (flag != GL_FALSE) ? 1UL : 0UL; }
-void Hook_mglChooseZBufferDepth(int bits) { (void) bits; }
 
 /* --- GL --------------------------------------------------------------------------- */
 

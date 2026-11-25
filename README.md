@@ -148,7 +148,14 @@ needs.
   A program that shares the card can stay off it while a game runs.
   `RglPort` (`src/probe/rglport.c`) shows it.
 - **Safety:** every command list is checked before the Radeon runs it
-  (`RadeonGLCheck=0` turns it off for speed).
+  (`RadeonGLCheck=0` turns it off for speed). A hung 3D engine is reset,
+  in stages and by a watchdog in the vertical blank even when another
+  program is stuck waiting for the card, so it no longer freezes the
+  machine (`RadeonGLWatchdog`). Since 0.19 RadeonGL also avoids the R200
+  hang itself: the chip stalls when the texture setup changes while
+  blended pixels are still in flight, so it waits for the engine at
+  exactly those moments (DevilutionX: 51 hangs in 2149 frames before,
+  none in 3503 now).
 - **The package:** an Installer, manuals in English and German, a card test,
   a card report for bug reports and four demos (`demos/`), and Trio, which
   runs three of them at once, each a program of its own in a window of its

@@ -339,7 +339,9 @@ static BOOL IsIdentity(const float *m)
  * Mesa's disable_tex_obj_state clears it (r200_texstate.c:944-972) -- else
  * the TCL computes a texcoord set the output format has no slot for
  * (GLBench Pelt: unit 1's matrix while only unit 0 draws). */
+#ifdef RGL_PROBES
 ULONG Texgen_FixUnits = 0;
+#endif
 
 ULONG Texgen_Update(struct Core *c)
 {
@@ -358,7 +360,7 @@ ULONG Texgen_Update(struct Core *c)
     ULONG old;
     ULONG on;
 
-    on = Texgen_FixUnits ? Core_UnitsOn(c) : ~0UL;
+    on = Texgen_FixUnits ? Core_UnitsOn(c) : 0xffffffffUL;
     v[0] = 0x00ffffffUL;
     v[1] = 0x00543210UL;
     v[2] = 0;

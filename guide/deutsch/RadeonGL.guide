@@ -441,6 +441,28 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
     Textur ist schlimmer als ein langsameres Bild). Einmal aufgegeben,
     bleibt er für den Rest des Programms aus.
 
+@{b}RadeonGLWatchdog@{ub}  (Vorgabe: 50)
+    Wie viele vertikale Austastlücken (50 je Sekunde bei PAL) ein Bild
+    stillstehen darf, während die 3D-Einheit beschäftigt ist, bevor der
+    Wächter die Einheit zurücksetzt und das Bild verworfen wird. 0
+    schaltet den Wächter aus.
+
+@{b}RadeonGLPreWait@{ub}  (Vorgabe: an)
+    0 wartet auf das letzte Bild innerhalb der Picasso96-Sperre, wie vor
+    0.19, ohne RadeonGLs eigene Zeitgrenze.
+
+@{b}RadeonGLPpWait@{ub}, @{b}RadeonGLBlendWait@{ub}  (Vorgabe: an)
+    0 schaltet die Wartepausen ab, die die R200 vor dem Hängen bewahren,
+    wenn sich die Textureinstellung unter überblendetem Zeichnen ändert
+    (nur zum Vergleichen: Programme, die mit zwei Textureinheiten
+    überblenden, hängen dann ab und zu, und der Wächter holt die Einheit
+    zurück).
+
+@{b}RadeonGLSerial@{ub}  (Vorgabe: aus)
+    1 schreibt eine Zeile auf die serielle Schnittstelle (9600 Baud),
+    wenn ein Bild nie fertig wurde und die Einheit zurückgesetzt wurde;
+    2 dazu alle fünf Sekunden einen Punkt.
+
 @{b}RadeonGLLocked@{ub}  (Vorgabe: an)
     0 zeichnet die Eckpunkt-Felder eines Programms auf dem langsamen,
     direkten Weg (zum Vergleichen, oder falls indiziertes Zeichnen
@@ -826,6 +848,24 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.19 (24.11.2026)
+    * behoben: Die 3D-Einheit der Radeon blieb ab und zu stehen, in
+      Programmen, die mit zwei Textureinheiten überblenden -- die
+      durchsichtigen Wände und beleuchteten Kacheln in DevilutionX, das
+      Fell in GLBench. Der Chip verliert den Faden, wenn sich die
+      Textureinstellung ändert, während überblendete Pixel noch unterwegs
+      sind; RadeonGL lässt die Einheit genau dann erst fertig werden.
+      DevilutionX: vorher 51 Hänger in 2149 Bildern, jetzt keiner in
+      3503, bei gleichem Tempo; GLQuake behält sein Tempo (innerhalb eines
+      Prozents)
+    * eine hängende 3D-Einheit friert den Rechner nicht mehr ein: RadeonGL
+      wartet vor jeder Picasso96-Sperre mit einer eigenen Zeitgrenze auf
+      ein Bild, setzt die 3D-Einheit stufenweise zurück, und ein Wächter
+      in der vertikalen Austastlücke setzt sie zurück, auch wenn ein
+      anderes Programm beim Warten auf die Karte festhängt
+      (RadeonGLWatchdog). Vorher konnte ein Hänger den ganzen Amiga
+      anhalten
 
 0.18 (22.11.2026)
     * behoben: Zwei Mipmap-Filter wurden vertauscht gezeichnet.

@@ -318,17 +318,26 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
             Put(f, ", stage 3 needed: "); PutU(f, k->wd_stage3);
         }
     }
-    Put(f, "\ntest switches: TclFlush "); PutU(f, R2E_TclFlushOn);
-    Put(f, ", TamDebug "); PutX(f, R2E_TamDebug);
-    Put(f, ", TexgenFix "); PutU(f, Texgen_FixUnits);
-    Put(f, ", Isync "); PutU(f, k->isync);
-    Put(f, ", PpWait "); PutU(f, R2E_PpWait);
+    /* the R200 hang's fix (compat.c Compat_HangWait), and with RGL_PROBES
+     * the night's variants in ValidateOnce and probes */
+#ifndef RGL_PROBES
+    Put(f, "\nthe R200 hang's waits, while blending: at a texture unit switch ");
+    Put(f, R2E_PpWait ? "on" : "off (RadeonGLPpWait=0)");
+    Put(f, ", with unit 1+ ");
+    Put(f, R2E_BlendMtWait ? "on" : "off (RadeonGLBlendWait=0)");
+    Put(f, " -- waits sent: "); PutU(f, r->core.stat_unit_waits);
+#else
+    Put(f, "\nthe R200 hang's waits: PpWait "); PutU(f, R2E_PpWait);
     if (R2E_PpWaitNoClean)
         Put(f, " (3D_IDLE)");
     if (R2E_PpWaitBlend)
         Put(f, " (after blending only)");
-    Put(f, " -- unit waits sent: "); PutU(f, r->core.stat_unit_waits);
     Put(f, ", BlendWait "); PutU(f, R2E_BlendMtWait);
+    Put(f, " -- unit waits sent: "); PutU(f, r->core.stat_unit_waits);
+    Put(f, "\ntest switches: TclFlush "); PutU(f, R2E_TclFlushOn);
+    Put(f, ", TamDebug "); PutX(f, R2E_TamDebug);
+    Put(f, ", TexgenFix "); PutU(f, Texgen_FixUnits);
+    Put(f, ", Isync "); PutU(f, k->isync);
     Put(f, ", TclWait "); PutU(f, R2E_TclWait);
     Put(f, ", MiscWait "); PutU(f, R2E_MiscWait);
     Put(f, ", NoDedup "); PutU(f, R2E_NoDedup);
@@ -346,6 +355,7 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     {
         Put(f, " (Radeon.card's ISYNC_CNTL "); PutX(f, k->isync_saved); Put(f, ")");
     }
+#endif
     Put(f, "\n");
     if (k->overlap)
     {

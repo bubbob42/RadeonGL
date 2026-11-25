@@ -306,7 +306,12 @@ struct Card
 
 ULONG Card_WdCheck(struct Card *k);     /* the VERTB server's body (interrupt) */
 void Card_WdArm(struct Card *k, ULONG limit, ULONG test, ULONG isync);
+#ifdef RGL_PROBES
 void Card_DcLine(struct Card *k, ULONG line);
+#endif
+/* the R200 hang's switches and the watchdog's from the environment, at the
+ * context's open (k NULL: no card) -- cardwait.c, linked behind the hot code */
+void Card_ReadSwitches(struct Card *k);
 
 /* R4, cardview.c: the view a texture is made from (a struct RglBitMapView);
  * 0 = taken (gpu, pitch in bytes, CORE_VIEW_* format, handle 1..CARD_NVIEW) */

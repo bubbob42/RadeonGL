@@ -12,6 +12,9 @@
 #include <proto/dos.h>
 
 #include "card.h"
+#include "core.h"
+#include "coreint.h"
+#include "r2emit.h"
 
 /* RadeonGLWaitSleep: the sleep step in us (default 500; 0: the old spin),
  * read at the card's first wait -- here rather than in card.c's OpenTimer,
@@ -107,4 +110,69 @@ LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq)
         k->wait_last_us = gone;
     }
     return R2_OK;
+}
+
+/* a decimal environment variable, def when unset or not a number */
+static ULONG EnvNum(const char *name, ULONG def)
+{
+    char v[16];
+    ULONG n;
+    ULONG i;
+
+    if (GetVar((STRPTR) name, (STRPTR) v, sizeof(v), 0) <= 0)
+        return def;
+    for (i = 0, n = 0; v[i] >= '0' && v[i] <= '9'; i++)
+        n = n * 10 + (ULONG) (v[i] - '0');
+    return i > 0 ? n : def;
+}
+
+/* 2026-11-25: the switches of the R200 hang's fix and of the watchdog
+ * (docs/audit-2026-11-24-r200-hang.md), read at the context's open in the
+ * opening task (rgl.c CreateContext; k NULL without a card). Here, behind
+ * the hot code: in rgl.c they moved its hooks by 1112 bytes.
+ * RadeonGLPreWait=0: the old wait inside the P96 lock (no watchdog then);
+ * RadeonGLSerial=1 a line on the serial port for every hang, 2 also a
+ * heartbeat; RadeonGLWatchdog=N vblanks without fence progress before the
+ * vertical-blank server resets a hung engine (default 50 = 1 s on PAL, 0
+ * off); RadeonGLTestWatchdog=1 (test build) lets it fire on an idle
+ * engine; RadeonGLPpWait, RadeonGLPpWaitNoClean, RadeonGLPpWaitBlend and
+ * RadeonGLBlendWait: the fix (r2emit.h). With RGL_PROBES also the night's
+ * probes (r2emit.h, texgen.c): RadeonGLIsync=1 the 2D/3D interlock,
+ * RadeonGLDcLine, RadeonGLTclFlush, RadeonGLTamDebug, RadeonGLTexgenFix,
+ * RadeonGLTclWait, RadeonGLMiscWait, RadeonGLNoDedup, RadeonGLTexFlush,
+ * RadeonGLTc4, RadeonGLSepBlend. */
+void Card_ReadSwitches(struct Card *k)
+{
+    char flag[4];
+
+    if (k != NULL)
+    {
+        /* RadeonGLPreWait=0: a pending frame waited for inside the P96 lock
+         * only, as up to 0.18 (card.c PreSettle); the watchdog needs it */
+        k->prewait = (GetVar((STRPTR) "RadeonGLPreWait", (STRPTR) flag, sizeof(flag), 0) > 0
+                      && flag[0] == '0') ? 0UL : 1UL;
+        k->serial = EnvNum("RadeonGLSerial", 0);
+#ifdef RGL_PROBES
+        Card_WdArm(k, EnvNum("RadeonGLWatchdog", 50), EnvNum("RadeonGLTestWatchdog", 0),
+                   EnvNum("RadeonGLIsync", 0));
+        Card_DcLine(k, EnvNum("RadeonGLDcLine", 0xff));
+#else
+        Card_WdArm(k, EnvNum("RadeonGLWatchdog", 50), EnvNum("RadeonGLTestWatchdog", 0), 0);
+#endif
+    }
+    R2E_PpWait = EnvNum("RadeonGLPpWait", 4);
+    R2E_BlendMtWait = EnvNum("RadeonGLBlendWait", 1);
+#ifdef RGL_PROBES
+    R2E_PpWaitNoClean = EnvNum("RadeonGLPpWaitNoClean", 1);
+    R2E_PpWaitBlend = EnvNum("RadeonGLPpWaitBlend", 0);
+    R2E_TclFlushOn = EnvNum("RadeonGLTclFlush", 0);
+    R2E_TamDebug = EnvNum("RadeonGLTamDebug", 0);
+    Texgen_FixUnits = EnvNum("RadeonGLTexgenFix", 0);
+    R2E_TclWait = EnvNum("RadeonGLTclWait", 0);
+    R2E_MiscWait = EnvNum("RadeonGLMiscWait", 0);
+    R2E_NoDedup = EnvNum("RadeonGLNoDedup", 0);
+    R2E_TexFlush = EnvNum("RadeonGLTexFlush", 0);
+    R2E_Tc4 = EnvNum("RadeonGLTc4", 0);
+    R2E_SepBlend = EnvNum("RadeonGLSepBlend", 0);
+#endif
 }

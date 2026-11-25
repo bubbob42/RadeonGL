@@ -53,6 +53,26 @@ void Hook_MGLLockMode(GLcontext context, GLenum lockMode)
         ((struct Rgl *) context)->core.lock_mode = lockMode;
 }
 
+/* Seven more from rgl.c (2026-11-25): the call that reads the R200 hang's
+ * switches there took their 48 bytes, so GLQuake's hooks keep their places */
+void Hook_MGLMinTriArea(GLcontext context, GLfloat area)
+{
+    if (context != NULL)
+        ((struct Rgl *) context)->core.min_tri_area = area;
+}
+
+void Hook_MGLSetZOffset(GLcontext context, GLfloat offset)
+{
+    if (context != NULL)
+        Core_SetZOffset(&((struct Rgl *) context)->core, offset);
+}
+
+void Hook_mglChooseGuardBand(GLboolean flag) { (void) flag; }
+void Hook_mglChooseMtexBufferSize(int size) { (void) size; }
+void Hook_mglChooseTextureBufferSize(int size) { (void) size; }
+void Hook_mglChooseVertexBufferSize(int size) { (void) size; }
+void Hook_mglChooseZBufferDepth(int bits) { (void) bits; }
+
 static void Sync(struct Core *c)
 {
     c->single_buffer = (((struct Rgl *) c)->kind != CARD_KIND_SCREEN) ? 1UL : 0UL;

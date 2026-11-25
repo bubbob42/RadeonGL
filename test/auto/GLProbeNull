@@ -1,0 +1,150 @@
+; GLProbeNull -- branch hang-probe's switches on the null card, the packet
+; checker on, 2026-11-24 night: GLMix 0.2 (the death screen) once per switch;
+; every library log must say "checker errors: 0" and every run rc=0.
+; Needs: gmake glsmoke.
+; LIMIT 600
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLCheck 1
+SetEnv RadeonGLHeapMax 16
+SetEnv RadeonGLLog DEV:Test/probe-base.log
+Echo "=== base: GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-tc4.log
+SetEnv RadeonGLTc4 1
+Echo "=== tc4: GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-ppwait.log
+SetEnv RadeonGLPpWait 1
+Echo "=== ppwait: GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-nodedup.log
+SetEnv RadeonGLNoDedup 1
+Echo "=== nodedup: GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-texflush.log
+SetEnv RadeonGLTexFlush 1
+Echo "=== texflush: GLMix FRAMES=40 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-tclflush.log
+SetEnv RadeonGLTclFlush 1
+Echo "=== tclflush: GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-texgen.log
+SetEnv RadeonGLTexgenFix 1
+Echo "=== texgen: GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-tam.log
+SetEnv RadeonGLTamDebug 6
+Echo "=== tam: GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+SetEnv RadeonGLLog DEV:Test/probe-all.log
+SetEnv RadeonGLTc4 1
+SetEnv RadeonGLPpWait 1
+SetEnv RadeonGLNoDedup 1
+SetEnv RadeonGLTexFlush 1
+SetEnv RadeonGLTclFlush 1
+SetEnv RadeonGLTexgenFix 1
+Echo "=== all: GLMix FRAMES=40 SPRITES=9 CHUNKS=5 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=40 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLTc4
+UnSetEnv RadeonGLPpWait
+UnSetEnv RadeonGLNoDedup
+UnSetEnv RadeonGLTexFlush
+UnSetEnv RadeonGLTclFlush
+UnSetEnv RadeonGLTexgenFix
+UnSetEnv RadeonGLTamDebug
+UnSetEnv RadeonGLHeapMax
+UnSetEnv RadeonGLCheck
+UnSetEnv RadeonGLLog
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+Echo "=== the library logs ===" >>DEV:Test/auto.log
+Echo "--- base" >>DEV:Test/auto.log
+Search DEV:Test/probe-base.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- tc4" >>DEV:Test/auto.log
+Search DEV:Test/probe-tc4.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- ppwait" >>DEV:Test/auto.log
+Search DEV:Test/probe-ppwait.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- nodedup" >>DEV:Test/auto.log
+Search DEV:Test/probe-nodedup.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- texflush" >>DEV:Test/auto.log
+Search DEV:Test/probe-texflush.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- tclflush" >>DEV:Test/auto.log
+Search DEV:Test/probe-tclflush.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- texgen" >>DEV:Test/auto.log
+Search DEV:Test/probe-texgen.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- tam" >>DEV:Test/auto.log
+Search DEV:Test/probe-tam.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "--- all" >>DEV:Test/auto.log
+Search DEV:Test/probe-all.log "checker errors" "test switches" "GL error pending" >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

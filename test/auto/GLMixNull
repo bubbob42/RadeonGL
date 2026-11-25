@@ -1,0 +1,46 @@
+; GLMixNull -- GLMix (DevilutionX's fight mix) on the null card, the
+; packet checker on, a 16 MB heap (as Hamiller's), 2026-11-24: before the
+; stress test goes to the Radeon, every packet it makes must pass the
+; checker. Three short runs: the light map LINEAR on unit 1 with static
+; chunks (the game's default), the light off (DEVILUTIONX_GLLIGHTUNIT=0),
+; and static off; 0.2: the death screen (no uploads, 9 sprites, 5
+; chunks, with 0.2's depth / alpha / scissor / tint / see-through parts,
+; which the first three runs have too). Each library log must say "checker errors: 0", each
+; program "GL error 0x0" and rc=0.
+; Needs: gmake glsmoke.
+; LIMIT 420
+FailAt 1000
+Wait 12
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Avail >NIL: FLUSH
+Assign LIBS: DEV:GLSmoke/Libs ADD
+SetEnv RadeonGLCheck 1
+SetEnv RadeonGLHeapMax 16
+SetEnv RadeonGLLog DEV:Test/glmix1.log
+Echo "=== GLMix FRAMES=60 (light LINEAR, static) ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=60 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glmix0.log
+Echo "=== GLMix FRAMES=60 LIGHT=0 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=60 LIGHT=0 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glmixs.log
+Echo "=== GLMix FRAMES=60 STATIC=0 ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=60 STATIC=0 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+SetEnv RadeonGLLog DEV:Test/glmixd.log
+Echo "=== GLMix FRAMES=60 UPLOADS=0 SPRITES=9 CHUNKS=5 (the death screen) ===" >>DEV:Test/auto.log
+DEV:GLSmoke/GLMix FRAMES=60 UPLOADS=0 SPRITES=9 CHUNKS=5 >>DEV:Test/auto.log
+Echo "rc=$RC" >>DEV:Test/auto.log
+UnSetEnv RadeonGLHeapMax
+UnSetEnv RadeonGLCheck
+Assign LIBS: DEV:GLSmoke/Libs REMOVE
+UnSetEnv RadeonGLLog
+Echo "=== the library's logs ===" >>DEV:Test/auto.log
+Type DEV:Test/glmix1.log >>DEV:Test/auto.log
+Type DEV:Test/glmix0.log >>DEV:Test/auto.log
+Type DEV:Test/glmixs.log >>DEV:Test/auto.log
+Type DEV:Test/glmixd.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

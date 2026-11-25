@@ -572,6 +572,7 @@ struct Core
     ULONG rescale;                          /* GL_RESCALE_NORMAL */
     ULONG tg_r_mode[CORE_UNITS];            /* glTexGen(GL_R): GL_REFLECTION_MAP ... */
     ULONG hw_stq_d3d;                       /* RE_CNTL's STQn_D3D bits as last sent (cube maps) */
+    ULONG hang_units;                       /* Compat_HangWait: the texture units at its last call */
 };
 
 struct PmWork;
@@ -894,6 +895,7 @@ void Core_BlendEquation(struct Core *c, ULONG mode);
 void Core_BlendFuncSeparate(struct Core *c, ULONG sr, ULONG dr, ULONG sa, ULONG da);
 void Compat_BlendFuncReset(struct Core *c);     /* state.c: glBlendFunc after a separate one */
 void Compat_EmitBlend(struct Core *c);          /* hwstate.c: D_BLEND with blend_x */
+void Compat_HangWait(struct Core *c);           /* hwstate.c Core_Validate: the R200 hang's waits */
 void Compat_Free(struct Core *c);               /* Core_Free: what compat.c allocated */
 
 /* glPolygonMode (polymode.c). The library's hooks call the ...X calls in

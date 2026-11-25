@@ -95,8 +95,10 @@ void Core_Clear(struct Core *c, ULONG mask)
      * before TCL comes back, as the DRM's R200 depth clear ends
      * (linux-ums radeon_state.c:1367, less HOST_IDLECLEAN, which the checker
      * refuses and the fence does not use either) */
+#ifdef RGL_PROBES
     if (R2E_TclFlushOn)
         R2E_Reg(cs, R_WAIT_UNTIL, R_WAIT_2D_IDLECLEAN | R_WAIT_3D_IDLECLEAN);   /* as the fence */
+#endif
 
     /* back to the client's state at the next draw */
     c->dirty |= D_VAP | D_VTXFMT | D_PPCNTL | D_COMBINE | D_RB3D | D_PLANEMASK

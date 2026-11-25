@@ -158,7 +158,9 @@ static ULONG HasAlpha(ULONG base)
 void Hw_VertexFormat(struct Core *c, ULONG units)
 {
     ULONG fmt1;
+#ifdef RGL_PROBES
     ULONG out1;
+#endif
     ULONG compsel;
 
     /* lighting switched sets D_VTXFMT (state.c), so units decide alone */
@@ -179,12 +181,18 @@ void Hw_VertexFormat(struct Core *c, ULONG units)
     compsel = R_OUTPUT_XYZW | c->x_compsel;
     /* RadeonGLTc4 (branch hang-probe): 4 coordinates out of TCL per unit
      * (input stays 2: TCL fills r = 0, q = 1), as Mesa always does */
+#ifdef RGL_PROBES
     out1 = fmt1;
     if (R2E_Tc4 && !c->wide_on)
         out1 = ((units & 1) ? 4UL : 0) | ((units & 2) ? 4UL << 3 : 0);
     R2E_VertexFormat(c->cs, R_VTX_Z0 | c->x_fmt0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
                      fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT) | c->x_out0,
                      out1, compsel);
+#else
+    R2E_VertexFormat(c->cs, R_VTX_Z0 | c->x_fmt0 | (R_VTX_PK_RGBA << R_VTX_COLOR_0_SHIFT),
+                     fmt1, R_VTX_Z0 | R_VTX_W0 | (R_VTX_FP_RGBA << R_VTX_COLOR_0_SHIFT) | c->x_out0,
+                     fmt1, compsel);
+#endif
     /* A cube map's third coordinate is r, not q: RE_CNTL's STQn_D3D for its
      * coordinate set, or the rasterizer hands the sampler s/q, t/q and no r
      * -- every face read as +Z (MEASURED, GLSmoke13 T4, 2026-11-14; Mesa
@@ -223,6 +231,10 @@ LONG Core_Validate(struct Core *c)
 
     if ((c->dirty & ~D_VTXFMT) == 0)
         return R2_OK;               /* most draws: nothing to send */
+#ifndef RGL_PROBES
+    if ((c->enables & EN_BLEND) | c->blend_since)
+        Compat_HangWait(c);         /* the R200 hang's waits (compat.c) */
+#endif
     e = VALIDATE_ONCE(c);
     if ((c->dirty & ~D_VTXFMT) != 0)
         e = VALIDATE_ONCE(c);       /* into the fresh buffer: room enough */
