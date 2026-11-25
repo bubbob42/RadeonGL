@@ -5,7 +5,7 @@
  * and gluLookAt, glGetDoublev and glGetPointerv, glTexEnvfv, glDrawBuffer
  * and glReadBuffer, edge flags and colour index, texture residency,
  * priorities and memory, MiniGL's mglProhibit... and mglPrintMatrix calls
- * and mglLockBack.
+ * (mglLockBack: rglread.c).
  *
  * A file of its own, linked after everything else, as rgllight.c is: the
  * 68060's caches care where GLQuake's code sits (rgllight.c's note).
@@ -418,25 +418,6 @@ void Hook_GLReadBuffer(GLcontext context, GLenum mode)
     if ((c = Ctx(context)) == NULL)
         return;
     Core_ReadBuffer(c, mode);
-}
-
-/* The back buffer is never handed to the program: refused, as 29.1 does
- * whenever it has no lock it could hand out, with the size filled in */
-GLboolean Hook_MGLLockBack(GLcontext context, MGLLockInfo *info)
-{
-    struct Core *c;
-
-    c = Ctx(context);
-    if (info != NULL)
-    {
-        info->width = (c != NULL) ? c->target.width : 0;
-        info->height = (c != NULL) ? c->target.height : 0;
-        info->depth = (c != NULL && c->target.color_format == R_COLOR_FORMAT_ARGB8888) ? 32 : 16;
-        info->pixel_format = 0;
-        info->base_address = NULL;
-        info->pitch = 0;
-    }
-    return GL_FALSE;
 }
 
 /* --- MiniGL's requests ---------------------------------------------------------------------- */

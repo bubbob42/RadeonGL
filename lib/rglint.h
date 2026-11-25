@@ -58,6 +58,10 @@ struct Rgl
     ULONG tab_armed;            /* the core reports this context's vnorm and pm_mask */
     ULONG tab_hooks;            /* the groups the task's table holds (TAB_LIT, TAB_PM) */
     MGLDispatchTable *tab_table;    /* ... that table */
+    /* mglLockBack (rglread.c, 2026-11-25): the program's lock of the back
+     * buffer, held in rad.b[lb_index].lock; 0 = none */
+    LONG lb_lock;
+    ULONG lb_index;
 };
 
 /* rgl.c: every context, newest first (W3) */
@@ -85,6 +89,12 @@ extern ULONG Rgl_UnimplEarly[];         /* rgl.c: slots called before any contex
 extern const char Rglc_Extensions[];    /* GL_EXTENSIONS (rglcompat.c) */
 /* shell.c: the calling task's own dispatch table, NULL on the shared one */
 MGLDispatchTable *Shell_TaskTable(void);
+/* rgl.c: the bodies of four hooks whose Hook_ entries are rglread.c's
+ * (they give mglLockBack's lock back first; rgl.o keeps its size) */
+void Rgl_DeleteContext(GLcontext context);
+void Rgl_SwitchDisplay(GLcontext context);
+void Rgl_UnlockDisplay(GLcontext context);
+GLboolean Rgl_ResizeContext(GLcontext context, GLsizei width, GLsizei height);
 /* rgldlist.c: a context's lists freed; glGet's list names; a list being
  * made (its recorders hold the task table's slots) */
 void Rgldl_Free(struct Rgl *r);
