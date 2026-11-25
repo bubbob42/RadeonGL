@@ -751,7 +751,7 @@ static void *CreateContext(const struct Ask *a)
  * (GLQuake's VID_Shutdown deletes unconditionally, NULL after a refused
  * create; the audit of 2026-11-03 found a second program freeing the
  * first one's context through the shared currentContext). */
-void Hook_MGLDeleteContext(GLcontext context)
+void Rgl_DeleteContext(GLcontext context)
 {
     struct Rgl *r;
     struct Rgl **pp;
@@ -822,7 +822,7 @@ void Back_ClientGone(struct Task *task)
  * old single context's name now means the argument */
 #define rgl ((struct Rgl *) context)
 
-void Hook_MGLSwitchDisplay(GLcontext context)
+void Rgl_SwitchDisplay(GLcontext context)
 {
     struct Rgl *r;
     ULONG seq;
@@ -878,7 +878,7 @@ GLboolean Hook_MGLLockDisplay(GLcontext context)
     return GL_TRUE;
 }
 
-void Hook_MGLUnlockDisplay(GLcontext context)
+void Rgl_UnlockDisplay(GLcontext context)
 {
     (void) context;
 }
@@ -902,7 +902,7 @@ void *Hook_MGLGetInputWindowHandle(GLcontext context)
  * stay, so textures and static arrays survive. The client asks for the
  * window again (mglGetWindowHandle). GL_FALSE: the size stayed (the log
  * says why). The null card: only its target changes. */
-GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height)
+GLboolean Rgl_ResizeContext(GLcontext context, GLsizei width, GLsizei height)
 {
     struct CoreTarget t;
     char why[sizeof(rgl->resize_why)];

@@ -7,7 +7,7 @@
  * since 2026-11-11 glPolygonMode (GL_LINE and GL_POINT, culling first);
  * since 2026-11-12 GL 1.3 phase 1 (Tex13Cases: units 2..5, the combiner,
  * cube maps, mirror and border, ARGB32, ARGB1555); since 2026-11-25 V30's
- * little-endian arrays (MGL_ARRAY_TRANSFORMATIONS off).
+ * little-endian arrays (MGL_ARRAY_TRANSFORMATIONS off) and mglLockBack.
  * Each picture case draws into a frame of 128 x 128, reads pixels back and
  * compares them with what GL 1.1 says, worked out by hand below.
  *
@@ -435,6 +435,63 @@ static void ArrayCases(void)
 
     glDisableClientState(GL_VERTEX_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
+}
+
+/* --- mglLockBack (2026-11-25) ------------------------------------------------------------ */
+
+/* The back buffer through the program's own pointer: the bitmap context's
+ * bitmap here. A green square written in the format the lock names, read
+ * back from the bitmap; a second lock refused; a forgotten unlock ended by
+ * mglSwitchDisplay. */
+static void LockCases(void)
+{
+    MGLLockInfo info, info2;
+    UBYTE *p;
+    LONG x, y, bpp;
+    ULONG want_fmt;
+    GLboolean ok;
+
+    Ortho();
+    Begin();
+    ok = mglLockBack(&info);
+    WantInt("mglLockBack: granted", (LONG) ok, (LONG) GL_TRUE);
+    if (!ok)
+    {
+        mglUnlockDisplay();
+        return;
+    }
+    WantInt("mglLockBack: width", (LONG) info.width, S);
+    WantInt("mglLockBack: height", (LONG) info.height, S);
+    WantInt("mglLockBack: depth", (LONG) info.depth, fbdepth);
+    want_fmt = (fbdepth == 32) ? (1UL << 14) : (1UL << 7);  /* W3D_FMT_B8G8R8A8, _R5G6B5PC */
+    WantInt("mglLockBack: pixel_format (Warp3D's flag)", (LONG) info.pixel_format, (LONG) want_fmt);
+    WantInt("mglLockBack: a row fits the pitch", (LONG) (info.pitch >= (ULONG) (S * fbdepth / 8)), 1);
+    WantInt("mglLockBack while locked: refused", (LONG) mglLockBack(&info2), (LONG) GL_FALSE);
+    WantInt("mglLockBack while locked: no address", (LONG) (info2.base_address == NULL), 1);
+    bpp = (LONG) info.depth / 8;
+    for (y = 16; y < 32; y++)
+    {
+        p = (UBYTE *) info.base_address + (ULONG) y * info.pitch + 16 * (ULONG) bpp;
+        for (x = 0; x < 16; x++)
+        {
+            if (bpp == 4)
+            {
+                p[0] = 0; p[1] = 255; p[2] = 0; p[3] = 255;     /* B, G, R, A */
+            }
+            else
+            {
+                p[0] = 0xe0; p[1] = 0x07;                       /* 565, low byte first */
+            }
+            p += bpp;
+        }
+    }
+    mglUnlockDisplay();
+    Want("mglLockBack: the square written through the lock", 24, 24, 0, 1, 0);
+    Want("mglLockBack: beside it untouched", 40, 40, 0, 0, 0);
+    WantInt("mglLockBack, then no unlock", (LONG) mglLockBack(&info), (LONG) GL_TRUE);
+    Show();                         /* mglSwitchDisplay gives it back */
+    WantInt("mglLockBack after mglSwitchDisplay: granted", (LONG) mglLockBack(&info), (LONG) GL_TRUE);
+    mglUnlockDisplay();
 }
 
 /* --- glInterleavedArrays, gluBuild2DMipmaps ------------------------------------------------ */
@@ -1327,8 +1384,10 @@ static void QueryCases(void)
     mglTexMemStat(&cur, &peak);
     WantInt("mglTexMemStat: textures take memory", (cur > 0 && peak >= cur) ? 1 : 0, 1);
     memset(&li, 0x55, sizeof(li));
-    WantInt("mglLockBack refuses", (LONG) mglLockBack(&li), (LONG) GL_FALSE);
-    WantInt("mglLockBack: no address", li.base_address == NULL ? 1 : 0, 1);
+    /* 29.1 refuses; RadeonGL grants it since mgl-lockback (LockCases) */
+    WantInt("mglLockBack granted (29.1 refuses)", (LONG) mglLockBack(&li), (LONG) GL_TRUE);
+    WantInt("mglLockBack: an address", li.base_address != NULL ? 1 : 0, 1);
+    mglUnlockDisplay();
     WantInt("glGetError at the end", (LONG) glGetError(), 0);
 }
 
@@ -1431,6 +1490,7 @@ int main(void)
     GluCases();
     ArrayCases();
     MoreCases();
+    LockCases();
     CopyCases();
     BlendCases();
     PaletteCases();

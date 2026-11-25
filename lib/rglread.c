@@ -76,6 +76,51 @@ static void RowArgb(ULONG *out, const UBYTE *p, ULONG n, ULONG fmt)
     }
 }
 
+/* The frame's bitmap: k->b[]'s index */
+static ULONG FrameIndex(const struct Card *k)
+{
+    return (k->kind == CARD_KIND_BITMAP || k->flip_on) ? CARD_SCREEN : CARD_TARGET;
+}
+
+/* Triple buffering: the byte offset of the third drawn into (shot: the
+ * newest finished frame -- kicked (now finished), else waiting to be shown,
+ * else shown); 0 otherwise */
+static ULONG FrameThird(const struct Card *k, ULONG shot)
+{
+    struct CardFlip *f;
+    ULONG i;
+
+    if (!k->flip_on)
+        return 0;
+    f = k->flip;
+    i = f->sm.draw;
+    if (shot)
+        i = (f->sm.kick != CARD_FLIP_NONE) ? f->sm.kick
+          : (f->sm.ready != CARD_FLIP_NONE) ? f->sm.ready : f->sm.show;
+    return i * f->panel;
+}
+
+/* Inside a lock of the frame's bitmap (ri from it): the frame's first
+ * pixel (the top row), bytes a row, colour format */
+static UBYTE *FrameBase(const struct Card *k, const struct RenderInfo *ri, ULONG third,
+                        ULONG *bpr, ULONG *fmt)
+{
+    ULONG gpu;
+
+    if (k->kind == CARD_KIND_BITMAP || k->flip_on)
+    {
+        *bpr = (ULONG) ri->BytesPerRow;
+        *fmt = k->show_format;
+        return (UBYTE *) ri->Memory + third;    /* triple buffering: its third */
+    }
+    /* the colour buffer starts at the bitmap's first 4 KB boundary of the
+     * GPU's address space (card.c TargetAt) */
+    gpu = k->fb_start + ((ULONG) ri->Memory - (ULONG) k->membase) % k->ap_size;
+    *bpr = k->pitch * k->bpp;
+    *fmt = k->color_format;
+    return (UBYTE *) ri->Memory + (((gpu + 4095UL) & ~4095UL) - gpu);
+}
+
 /* Rows [y0, y1) (GL's, from the bottom) of columns [x0, x1) of the frame,
  * each to fn(ud, GL row, its pixels). FALSE when the frame was out of reach
  * (fn is then never called). fn runs inside the lock: no I/O. */
@@ -84,12 +129,11 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
 {
     struct Card *k;
     struct CardBm *b;
-    struct CardFlip *f;
     struct BitMap *bm;
     struct RenderInfo ri;
     ULONG *buf;
     UBYTE *base;
-    ULONG bpr, bpp, fmt, gpu, i;
+    ULONG bpr, bpp, fmt, i;
     LONG lock;
     LONG row;
 
@@ -109,20 +153,9 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
     }
     Card_Obtain();                  /* no other card's frame while this one is read (W3) */
     (void) Card_WaitIdle(k);
-    b = &k->b[(k->kind == CARD_KIND_BITMAP || k->flip_on) ? CARD_SCREEN : CARD_TARGET];
+    b = &k->b[FrameIndex(k)];
     bm = b->bm;
-    i = 0;
-    if (k->flip_on)
-    {
-        /* the third drawn into; for the shot the newest finished frame:
-         * kicked (now finished), else waiting to be shown, else shown */
-        f = k->flip;
-        i = f->sm.draw;
-        if (read_shot)
-            i = (f->sm.kick != CARD_FLIP_NONE) ? f->sm.kick
-              : (f->sm.ready != CARD_FLIP_NONE) ? f->sm.ready : f->sm.show;
-        i *= f->panel;
-    }
+    i = FrameThird(k, read_shot);   /* the third drawn into; for the shot the newest */
     if (bm == NULL || b->lock != 0)
     {
         Card_Release();
@@ -139,21 +172,7 @@ static BOOL ReadRows(struct Rgl *r, LONG x0, LONG x1, LONG y0, LONG y1,
         return FALSE;
     }
     bpp = k->bpp;
-    if (k->kind == CARD_KIND_BITMAP || k->flip_on)
-    {
-        base = (UBYTE *) ri.Memory + i;     /* triple buffering: its third */
-        bpr = (ULONG) ri.BytesPerRow;
-        fmt = k->show_format;
-    }
-    else
-    {
-        /* the colour buffer starts at the bitmap's first 4 KB boundary of
-         * the GPU's address space (card.c TargetAt) */
-        gpu = k->fb_start + ((ULONG) ri.Memory - (ULONG) k->membase) % k->ap_size;
-        base = (UBYTE *) ri.Memory + (((gpu + 4095UL) & ~4095UL) - gpu);
-        bpr = k->pitch * bpp;
-        fmt = k->color_format;
-    }
+    base = FrameBase(k, &ri, i, &bpr, &fmt);
     for (row = y0; row < y1; row++)
     {
         RowArgb(buf, base + (ULONG) ((LONG) k->height - 1 - row) * bpr + (ULONG) x0 * bpp,
@@ -587,4 +606,138 @@ void Hook_MGLWriteShotPPM(GLcontext context, char *filename)
         }
     }
     FreeVec(s.rgb);
+}
+
+/* --- mglLockBack (2026-11-25, scheduled item 4) ------------------------------------------- */
+
+/* The back buffer to the program, as V30 does (PiStorm3D gl/src/context.c
+ * MGLLockBack, MGLUnlockDisplay): everything drawn so far finished
+ * (Card_WaitIdle, whose fence wait outside the lock also guards against a
+ * hung engine), then a P96 lock of the frame's bitmap, its address and
+ * pitch handed out until MGLUnlockDisplay -- or MGLSwitchDisplay,
+ * mglResizeContext or MGLDeleteContext, which give it back first (the
+ * Hook_ entries below; their bodies stay in rgl.c, whose size the 060's
+ * layout keeps). The lock sits in the card's own slot for that bitmap
+ * (b->lock): while the program holds it the card's flushes and reads leave
+ * the bitmap alone, and Card_Close's UnlockAll gives it back in any case.
+ *
+ * The frame is the one being drawn: the target, a bitmap context's bitmap,
+ * or triple buffering's third. pixel_format is Warp3D's W3D_FMT_ flag for
+ * the bytes as they lie (the R200's little-endian formats; the aperture
+ * does not swap), as MiniGL 1.x filled it in (mglQ3 context.c:1315); V30
+ * gives 0. Reads cross the bus slowly behind the Mediator (~4.4 MB/s,
+ * BusBench). Refused, with the size filled in, as 29.1 refuses: the null
+ * card, a lost context, inside glBegin, a second lock, a bitmap not on the
+ * board. */
+#define LB_W3D_FMT_R5G5B5PC     (1UL << 3)      /* ggg bbbbb a rrrrr gg */
+#define LB_W3D_FMT_R5G6B5PC     (1UL << 7)      /* ggg bbbbb rrrrr ggg */
+#define LB_W3D_FMT_B8G8R8A8     (1UL << 14)     /* bbbbbbbb gggggggg rrrrrrrr aaaaaaaa */
+
+static void LockInfo(struct Rgl *r, MGLLockInfo *info, UBYTE *base, ULONG bpr, ULONG fmt)
+{
+    if (info == NULL)
+        return;
+    info->width = (r == NULL) ? 0 : r->real ? r->rad.width : r->core.target.width;
+    info->height = (r == NULL) ? 0 : r->real ? r->rad.height : r->core.target.height;
+    info->depth = (fmt == R_COLOR_FORMAT_ARGB8888) ? 32 : 16;
+    info->pixel_format = (base == NULL) ? 0
+                       : (fmt == R_COLOR_FORMAT_ARGB8888) ? LB_W3D_FMT_B8G8R8A8
+                       : (fmt == R_COLOR_FORMAT_ARGB1555) ? LB_W3D_FMT_R5G5B5PC : LB_W3D_FMT_R5G6B5PC;
+    info->base_address = (void *) base;
+    info->pitch = bpr;
+}
+
+GLboolean Hook_MGLLockBack(GLcontext context, MGLLockInfo *info)
+{
+    struct Rgl *r;
+    struct Card *k;
+    struct CardBm *b;
+    struct RenderInfo ri;
+    UBYTE *base;
+    ULONG idx, third, bpr, fmt;
+    LONG lock;
+
+    r = (struct Rgl *) context;
+    LockInfo(r, info, NULL, 0, (r != NULL) ? r->core.target.color_format : R_COLOR_FORMAT_RGB565);
+    if (r == NULL || !r->real || r->lb_lock != 0 || IN_BEGIN(&r->core) || P96Base == NULL)
+        return GL_FALSE;
+    k = &r->rad;
+    if (k->lost != 0)
+        return GL_FALSE;
+    Card_Obtain();
+    (void) Card_WaitIdle(k);
+    idx = FrameIndex(k);
+    b = &k->b[idx];
+    third = FrameThird(k, 0);
+    if (k->lost != 0 || b->bm == NULL || b->lock != 0)
+    {
+        Card_Release();
+        return GL_FALSE;
+    }
+    lock = p96LockBitMap(b->bm, (UBYTE *) &ri, sizeof(ri));
+    if (lock == 0 || ri.Memory == NULL || !p96GetBitMapAttr(b->bm, P96BMA_ISONBOARD))
+    {
+        if (lock != 0)
+            p96UnlockBitMap(b->bm, lock);
+        Card_Release();
+        return GL_FALSE;
+    }
+    b->lock = lock;                 /* the card's slot: its flushes leave the bitmap alone */
+    r->lb_lock = lock;
+    r->lb_index = idx;
+    base = FrameBase(k, &ri, third, &bpr, &fmt);
+    Card_Release();
+    LockInfo(r, info, base, bpr, fmt);
+    return GL_TRUE;
+}
+
+/* mglLockBack's lock back to P96, unless the card already gave it back
+ * (UnlockAll: a flush the program drew into the lock, which failed) */
+static void UnlockBack(struct Rgl *r)
+{
+    struct CardBm *b;
+
+    if (r == NULL || r->lb_lock == 0)
+        return;
+    Card_Obtain();
+    b = &r->rad.b[r->lb_index];
+    if (b->lock == r->lb_lock && b->bm != NULL)
+    {
+        p96UnlockBitMap(b->bm, b->lock);
+        b->lock = 0;
+    }
+    r->lb_lock = 0;
+    Card_Release();
+}
+
+void Hook_MGLUnlockDisplay(GLcontext context)
+{
+    UnlockBack((struct Rgl *) context);
+    Rgl_UnlockDisplay(context);
+}
+
+void Hook_MGLSwitchDisplay(GLcontext context)
+{
+    UnlockBack((struct Rgl *) context);     /* a lock the program forgot ends here */
+    Rgl_SwitchDisplay(context);
+}
+
+GLboolean Hook_MGLResizeContext(GLcontext context, GLsizei width, GLsizei height)
+{
+    UnlockBack((struct Rgl *) context);
+    return Rgl_ResizeContext(context, width, height);
+}
+
+void Hook_MGLDeleteContext(GLcontext context)
+{
+    struct Rgl *p;
+
+    /* only a context of the list: the body checks the rest */
+    Forbid();
+    for (p = rgl_list; p != NULL && p != (struct Rgl *) context; p = p->next)
+        ;
+    Permit();
+    if (p != NULL)
+        UnlockBack(p);
+    Rgl_DeleteContext(context);
 }
