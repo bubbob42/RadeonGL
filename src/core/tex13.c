@@ -83,6 +83,9 @@ void Tex13_Update(struct Core *c)
     for (u = CORE_NARROW; u < CORE_UNITS; u++)
         if (c->tex_enabled[u])
             wide = 1;
+    /* V30's little-endian arrays read on this file's way alone (LeIn) */
+    if (!c->array_xform)
+        wide = 1;
     route = (c->active_unit >= CORE_NARROW || c->cube_on) ? 1UL : 0UL;
     if (route && !c->x_route)
         SyncRoute(c);
@@ -1789,13 +1792,18 @@ void Tex13_Emit(struct Core *c, ULONG *p, ULONG x, ULONG y, ULONG z)
 
 /* --- Wide array draws: glArrayElement's way, every unit, r too ------------------------------ */
 
+/* pos NULL: the attributes alone (glArrayElement without a vertex array,
+ * which must not read the vertex pointer: compat.c's way does the same) */
 static void FetchWide(struct Core *c, ULONG i, float *pos)
 {
     const UBYTE *p;
     ULONG u;
     ULONG t;
 
-    Fetch(c, i, pos);               /* the colour, units 0 and 1's s and t, the position */
+    if (pos != NULL)
+        Fetch(c, i, pos);           /* the colour, units 0 and 1's s and t, the position */
+    else
+        FetchAttribs(c, i);
     for (u = 0; u < CORE_UNITS; u++)
     {
         if (!c->ta[u].enabled)
@@ -1811,13 +1819,81 @@ static void FetchWide(struct Core *c, ULONG i, float *pos)
     }
 }
 
+/* V30 (2026-11-25, docs/concept-v30-le-arrays.md): MGL_ARRAY_TRANSFORMATIONS
+ * off promises little-endian arrays -- positions, normals, texture
+ * coordinates, float colours; bytes have no byte order, index lists stay
+ * native (PiStorm3D gl/src/vertexarray.c v_LoadU32). Tex13_Update routes
+ * every array draw here then (wide_on), so this is the one reader to
+ * teach: vertex i's elements, swapped into c->le_buf, stand in for the
+ * enabled arrays while FetchWide and FetchNormal read element 0. */
+#define LE_ARRAYS (3 + CORE_UNITS)
+
+static struct CoreArray *LeArray(struct Core *c, ULONG k)
+{
+    if (k == 0)
+        return &c->va;
+    if (k == 1)
+        return &c->ca;
+    if (k == 2)
+        return &c->na;
+    return &c->ta[k - 3];
+}
+
+/* the arrays' pointers into save[], each enabled one at its swapped copy */
+static void LeIn(struct Core *c, ULONG i, const UBYTE **save)
+{
+    struct CoreArray *a;
+    const UBYTE *p;
+    UBYTE *d;
+    ULONG k;
+    ULONG n;
+    ULONG ts;
+    ULONG b;
+    ULONG j;
+
+    for (k = 0; k < LE_ARRAYS; k++)
+    {
+        a = LeArray(c, k);
+        save[k] = a->ptr;
+        if (!a->enabled || a->ptr == NULL)
+            continue;
+        p = Elem(a, i);
+        a->ptr = p;
+        ts = TypeSize(a->type);
+        if (ts < 2)
+            continue;               /* bytes: read where they are */
+        d = (UBYTE *) c->le_buf[k];
+        n = a->size * ts;           /* at most 4 x 8 bytes */
+        for (b = 0; b < n; b += ts)
+            for (j = 0; j < ts; j++)
+                d[b + j] = p[b + ts - 1 - j];
+        a->ptr = d;
+    }
+}
+
+static void LeOut(struct Core *c, const UBYTE *const *save)
+{
+    ULONG k;
+
+    for (k = 0; k < LE_ARRAYS; k++)
+        LeArray(c, k)->ptr = save[k];
+}
+
 static void WideVertex(struct Core *c, ULONG i)
 {
+    const UBYTE *save[LE_ARRAYS];
     float pos[4];
 
+    if (!c->array_xform)
+    {
+        LeIn(c, i, save);
+        i = 0;
+    }
     if (c->vnorm && c->na.enabled)
         FetchNormal(c, i);
     FetchWide(c, i, pos);
+    if (!c->array_xform)
+        LeOut(c, save);
     Core_Vertex3f(c, pos[0], pos[1], pos[2]);   /* Fetch divided by w */
 }
 
@@ -1856,13 +1932,23 @@ void Tex13_DrawElements(struct Core *c, ULONG mode, LONG count, ULONG type, cons
 
 void Tex13_ArrayElement(struct Core *c, LONG i)
 {
+    const UBYTE *save[LE_ARRAYS];
     float pos[4];
+    ULONG k;
 
-    if (c->na.enabled)
-        FetchNormal(c, (ULONG) i);
     if (c->ea.enabled && c->ea.ptr != NULL)
         Core_EdgeFlag(c, c->ea.ptr[(ULONG) i * (c->ea.stride ? c->ea.stride : 1UL)]);
-    FetchWide(c, (ULONG) i, pos);
+    k = (ULONG) i;
+    if (!c->array_xform)
+    {
+        LeIn(c, k, save);           /* V30's little-endian arrays (above) */
+        k = 0;
+    }
+    if (c->na.enabled)
+        FetchNormal(c, k);
+    FetchWide(c, k, c->va.enabled ? pos : NULL);
+    if (!c->array_xform)
+        LeOut(c, save);
     if (c->va.enabled)
         Core_Vertex3f(c, pos[0], pos[1], pos[2]);
 }

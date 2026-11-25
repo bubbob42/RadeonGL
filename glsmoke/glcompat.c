@@ -6,7 +6,8 @@
  * texels, glReadPixels in other types, and the glGet answers 29.1 gives;
  * since 2026-11-11 glPolygonMode (GL_LINE and GL_POINT, culling first);
  * since 2026-11-12 GL 1.3 phase 1 (Tex13Cases: units 2..5, the combiner,
- * cube maps, mirror and border, ARGB32, ARGB1555).
+ * cube maps, mirror and border, ARGB32, ARGB1555); since 2026-11-25 V30's
+ * little-endian arrays (MGL_ARRAY_TRANSFORMATIONS off).
  * Each picture case draws into a frame of 128 x 128, reads pixels back and
  * compares them with what GL 1.1 says, worked out by hand below.
  *
@@ -41,7 +42,7 @@
 #define TEMPLATE "DEPTH/K/N,VERBOSE/S,NOLOOP/S"
 #define S 128                   /* the frame: S x S */
 
-const char ver[] = "$VER: GLCompat 0.4 (21.11.2026)";
+const char ver[] = "$VER: GLCompat 0.5 (25.11.2026)";
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
 struct Library *P96Base;
@@ -373,6 +374,8 @@ static void ArrayCases(void)
     static const UBYTE c[8 * 4] = {
         0, 0, 255, 255,  0, 0, 255, 255,  0, 0, 255, 255,  0, 0, 255, 255,
         255, 0, 255, 255, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0, 255, 255 };
+    static const GLushort right[4] = { 4, 5, 6, 7 };
+    static GLfloat le[8 * 3];
     GLint first[2];
     GLsizei count[2];
     int i;
@@ -400,6 +403,35 @@ static void ArrayCases(void)
     Begin(); glMultiDrawArrays(GL_QUADS, first, count, 2); Show();
     Want("glMultiDrawArrays: the left half blue", S / 4, S / 2, 0, 0, 1);
     Want("glMultiDrawArrays: the right half magenta", S * 3 / 4, S / 2, 1, 0, 1);
+
+    /* A3-A6. V30's little-endian arrays (2026-11-25): MGL_ARRAY_TRANSFORMATIONS
+     * off, the same positions byte-swapped; byte colours and the index list
+     * as they are */
+    for (i = 0; i < 8 * 3 * 4; i++)
+        ((UBYTE *) le)[i] = ((const UBYTE *) v)[(i & ~3) + 3 - (i & 3)];
+    glDisable(MGL_ARRAY_TRANSFORMATIONS);
+    WantInt("glIsEnabled(MGL_ARRAY_TRANSFORMATIONS) off", (LONG) glIsEnabled(MGL_ARRAY_TRANSFORMATIONS),
+            (LONG) GL_FALSE);
+    glVertexPointer(3, GL_FLOAT, 0, (void *) le);
+    Begin(); glDrawArrays(GL_QUADS, 0, 8); Show();
+    Want("little-endian glDrawArrays: the left half blue", S / 4, S / 2, 0, 0, 1);
+    Want("little-endian glDrawArrays: the right half magenta", S * 3 / 4, S / 2, 1, 0, 1);
+    Begin(); glDrawElements(GL_QUADS, 4, GL_UNSIGNED_SHORT, (void *) right); Show();
+    Want("little-endian glDrawElements: the left half untouched", S / 4, S / 2, 0, 0, 0);
+    Want("little-endian glDrawElements: the right half magenta", S * 3 / 4, S / 2, 1, 0, 1);
+    Begin();
+    glBegin(GL_QUADS);
+    for (i = 0; i < 4; i++)
+        glArrayElement(i);
+    glEnd();
+    Show();
+    Want("little-endian glArrayElement: the left half blue", S / 4, S / 2, 0, 0, 1);
+    Want("little-endian glArrayElement: the right half untouched", S * 3 / 4, S / 2, 0, 0, 0);
+    glEnable(MGL_ARRAY_TRANSFORMATIONS);
+    glVertexPointer(3, GL_FLOAT, 0, (void *) v);
+    Begin(); glDrawArrays(GL_QUADS, 0, 8); Show();
+    Want("MGL_ARRAY_TRANSFORMATIONS on again: the left half blue", S / 4, S / 2, 0, 0, 1);
+    Want("MGL_ARRAY_TRANSFORMATIONS on again: the right half magenta", S * 3 / 4, S / 2, 1, 0, 1);
 
     glDisableClientState(GL_VERTEX_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);

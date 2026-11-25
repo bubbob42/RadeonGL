@@ -6098,6 +6098,134 @@ static void test_present_bands(void)
     core.sync = 0;
 }
 
+/* V30's little-endian arrays (2026-11-25, docs/concept-v30-le-arrays.md):
+ * with MGL_ARRAY_TRANSFORMATIONS off every multi-byte component is read
+ * byte-swapped. "Native" here is the host's order, so the swapped copies
+ * stand for a V30 program's arrays on the Amiga. */
+static void LeCopy(void *dst, const void *src, ULONG bytes, ULONG ts)
+{
+    const UBYTE *s;
+    UBYTE *d;
+    ULONG b;
+    ULONG j;
+
+    s = (const UBYTE *) src;
+    d = (UBYTE *) dst;
+    for (b = 0; b < bytes; b += ts)
+        for (j = 0; j < ts; j++)
+            d[b + j] = s[b + ts - 1 - j];
+}
+
+static void test_le_arrays(void)
+{
+    static const float pos[12] = { 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0.5f };
+    static const UBYTE col[16] = { 255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 64, 9, 8, 7, 6 };
+    static const float st[8] = { 0.25f, 0.5f, 0.75f, 1.0f, -1.5f, 2.25f, 3.0f, 4.0f };
+    static const WORD sst[8] = { 1, -2, 300, 4, -500, 6, 7, 8 };
+    static const float nrm[12] = { 0, 0, 1, 0, 1, 0, 0.6f, 0, -0.8f, 1, 0, 0 };
+    static const float pos4[16] = { 2, 4, 6, 2, 1, 0, 0, 1, 0, 3, 0, 0.5f, 8, 8, 8, 4 };
+    static const UWORD idx[6] = { 0, 1, 2, 2, 1, 3 };   /* index lists stay native */
+    static ULONG a[4096], b[4096];
+    float lpos[12], lst[8], lnrm[12], lpos4[16];
+    WORD lsst[8];
+    ULONG na, nb;
+    ULONG i, j, k, n;
+
+    LeCopy(lpos, pos, sizeof(pos), 4);
+    LeCopy(lst, st, sizeof(st), 4);
+    LeCopy(lnrm, nrm, sizeof(nrm), 4);
+    LeCopy(lpos4, pos4, sizeof(pos4), 4);
+    LeCopy(lsst, sst, sizeof(sst), 2);
+
+    /* the switch: array draws go tex13.c's way while it is off, and back */
+    Fresh(1);
+    CHECK_INT(core.wide_on, 0);
+    Core_Enable(&core, MGL_ARRAY_TRANSFORMATIONS, 0);
+    CHECK_INT(core.wide_on, 1);
+    CHECK_INT(Core_IsEnabled(&core, MGL_ARRAY_TRANSFORMATIONS), 0);
+    Core_Enable(&core, MGL_ARRAY_TRANSFORMATIONS, 1);
+    CHECK_INT(core.wide_on, 0);
+    CHECK_INT(Core_IsEnabled(&core, MGL_ARRAY_TRANSFORMATIONS), 1);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+
+    /* glDrawArrays, glDrawElements and glArrayElement of swapped float
+     * positions and byte colours send what glColor4ub + glVertex3f send;
+     * 3 and up: a 4-component position, divided by w */
+    for (k = 0; k < 4; k++)
+    {
+        n = (k == 0 || k == 3) ? 4 : 6;
+        Fresh(1);
+        Core_Enable(&core, MGL_ARRAY_TRANSFORMATIONS, 0);
+        if (k == 3)
+            Core_VertexPointer(&core, 4, GL_FLOAT, 0, lpos4);
+        else
+            Core_VertexPointer(&core, 3, GL_FLOAT, 0, lpos);
+        Core_ColorPointer(&core, 4, GL_UNSIGNED_BYTE, 0, col);
+        Core_EnableClientState(&core, GL_VERTEX_ARRAY, 1);
+        Core_EnableClientState(&core, GL_COLOR_ARRAY, 1);
+        if (k == 0 || k == 3)
+            Core_DrawArrays(&core, GL_TRIANGLE_STRIP, 0, 4);
+        else if (k == 1)
+            Core_DrawElements(&core, GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+        else
+        {
+            Core_Begin(&core, GL_TRIANGLES);
+            for (i = 0; i < 6; i++)
+                Core_ArrayElement(&core, (LONG) idx[i]);
+            Core_End(&core);
+        }
+        CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+        CHECK(core.va.ptr == (k == 3 ? (const UBYTE *) lpos4 : (const UBYTE *) lpos));
+        CHECK(core.ca.ptr == col);          /* the program's pointers are back */
+        na = CpDump(a, 4096);
+        Fresh(1);
+        Core_Enable(&core, MGL_ARRAY_TRANSFORMATIONS, 0);   /* the same route */
+        Core_Begin(&core, (k == 0 || k == 3) ? GL_TRIANGLE_STRIP : GL_TRIANGLES);
+        for (i = 0; i < n; i++)
+        {
+            j = (k == 0 || k == 3) ? i : idx[i];
+            Core_Color4ub(&core, col[j * 4], col[j * 4 + 1], col[j * 4 + 2], col[j * 4 + 3]);
+            if (k == 3)
+                Core_Vertex3f(&core, pos4[j * 4] / pos4[j * 4 + 3], pos4[j * 4 + 1] / pos4[j * 4 + 3],
+                              pos4[j * 4 + 2] / pos4[j * 4 + 3]);
+            else
+                Core_Vertex3f(&core, pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]);
+        }
+        Core_End(&core);
+        nb = CpDump(b, 4096);
+        CHECK(na > 16);
+        CHECK_INT(na, nb);
+        CHECK(na == nb && memcmp(a, b, na * 4) == 0);
+    }
+
+    /* the attributes: float coordinates on unit 0, short ones on unit 3,
+     * float normals -- glArrayElement without a vertex array sets them
+     * alone (and must not read the vertex pointer: NULL here) */
+    Fresh(1);
+    Core_Enable(&core, MGL_ARRAY_TRANSFORMATIONS, 0);
+    Core_TexCoordPointer(&core, 2, GL_FLOAT, 0, lst);
+    Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+    Core_ClientActiveTexture(&core, GL_TEXTURE0_ARB + 3);
+    Core_TexCoordPointer(&core, 2, GL_SHORT, 0, lsst);
+    Core_EnableClientState(&core, GL_TEXTURE_COORD_ARRAY, 1);
+    Core_ClientActiveTexture(&core, GL_TEXTURE0_ARB);
+    Core_NormalPointer(&core, GL_FLOAT, 0, lnrm);
+    Core_EnableClientState(&core, GL_NORMAL_ARRAY, 1);
+    Core_ArrayElement(&core, 2);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK(core.cur_st[0][0] == st[4] && core.cur_st[0][1] == st[5]);
+    CHECK(core.cur_st[3][0] == (float) sst[4] && core.cur_st[3][1] == (float) sst[5]);
+    CHECK(core.cur_normal[0] == nrm[6] && core.cur_normal[1] == nrm[7] && core.cur_normal[2] == nrm[8]);
+    CHECK(core.ta[0].ptr == (const UBYTE *) lst && core.ta[3].ptr == (const UBYTE *) lsst);
+    CHECK(core.na.ptr == (const UBYTE *) lnrm);
+    /* switched back on, the same arrays are read as they are */
+    Core_Enable(&core, MGL_ARRAY_TRANSFORMATIONS, 1);
+    Core_TexCoordPointer(&core, 2, GL_FLOAT, 0, st);
+    Core_ArrayElement(&core, 1);
+    CHECK(core.cur_st[0][0] == st[2] && core.cur_st[0][1] == st[3]);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+}
+
 int main(void)
 {
     struct CoreTarget t;
@@ -6160,6 +6288,7 @@ int main(void)
     test_polymode_frames();
     test_polymode_static();
     test_extension_tokens();
+    test_le_arrays();
     (void) t;
     (void) e;
     return tk_done("test_core");

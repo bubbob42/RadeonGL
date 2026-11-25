@@ -685,8 +685,9 @@ static ULONG Static(struct Core *c, ULONG mode, LONG count, ULONG type, const vo
     ULONG si;
 
     w = c->pm;
+    /* (not for V30's little-endian arrays: Pos reads them as they are) */
     if (!c->static_arrays || !c->static_indices || c->lock_count <= 0 || c->ea.enabled
-        || c->pm_front != c->pm_back || c->va.type != GL_FLOAT
+        || !c->array_xform || c->pm_front != c->pm_back || c->va.type != GL_FLOAT
         || (c->va.size != 2 && c->va.size != 3)
         || (mode != GL_TRIANGLES && mode != GL_QUADS && mode != GL_POLYGON))
         return 0;
