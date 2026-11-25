@@ -43,7 +43,8 @@ FEATURES
   * Transformation and rasterising on the Radeon, the full float matrix
     stack
   * Six texture units; RGB565, ARGB4444, ARGB1555, ARGB8888 (GL_RGB8,
-    GL_RGBA8), I8, AI88 in up to 16 MB of card memory; nearest, linear,
+    GL_RGBA8), I8, AI88 in up to 16 MB of card memory (32 MB with
+    RadeonGLHeapMax); nearest, linear,
     bilinear and trilinear mipmaps, anisotropic filters; repeat, clamp,
     border clamp and mirrored repeat; MODULATE, REPLACE, DECAL, BLEND, ADD
     and GL 1.3's combiner (GL_COMBINE, dot3, crossbar, ATI's combine3);
@@ -81,7 +82,7 @@ All 205 functions of minigl.library 29.1 are there. Not yet:
     stipple, logic operations, reading the depth buffer
   * Generic 32-bit textures are stored with 16 bits (GL_RGBA8 and
     GL_RGB8 keep 8)
-  * Contexts on 24- and 8-bit screens; textures beyond 16 MB are not
+  * Contexts on 24- and 8-bit screens; textures beyond the heap are not
     swapped out
 
 
@@ -151,6 +152,14 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.20 (25.11.2026)
+  - anisotropic filtering no longer slows programs down (GLQuake at 8x:
+    3.3% slower before, now within 0.2%; 16x costs no more than 8x)
+  - ARGB1555 texture uploads about 5x faster (DevilutionX's sprites)
+  - RadeonGLHeapMax up to 32 MB, for programs with big textures
+  - MiniGL V30's little-endian vertex arrays; mglLockBack hands out the
+    frame being drawn
 
 0.19 (24.11.2026)
   - fixed: the 3D engine hung now and then in programs that blend with two

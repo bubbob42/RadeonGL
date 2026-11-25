@@ -1,5 +1,5 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.11 (8.11.2026)
+@$VER: RadeonGL.guide 0.20 (25.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
@@ -90,7 +90,7 @@ brauchen vielleicht Funktionen, die sie noch nicht hat: siehe
       @{" Der Bildschirm " link Screen}.
     * @{b}Freien Kartenspeicher@{ub} für RadeonGLs eigene Puffer und
       mindestens 4 MB Texturen. Hat die Karte genug, nimmt sie bis zu
-      16 MB für Texturen.
+      16 MB für Texturen, mit RadeonGLHeapMax bis zu 32 MB.
 
 @{b}Getestet auf@{ub}
 
@@ -692,7 +692,8 @@ Für gar kein Protokoll:
       @{" Der Bildschirm " link Screen}). Sie wechseln sich auf der Radeon
       ab; solange mehr als eines zeichnet, ist jedes etwas langsamer als
       allein. Jedes braucht eigenen Kartenspeicher: ein Bildschirmkontext
-      bis zu 16 MB Texturen, ein Fenster- oder Bitmap-Kontext 8 MB.
+      bis zu 16 MB Texturen, ein Fenster- oder Bitmap-Kontext 8 MB
+      (RadeonGLHeapMax: bis zu 32 MB).
     * Die Beleuchtung (glLight, glMaterial, glLightModel, glColorMaterial,
       Normalen aus glNormal und glNormalPointer) übernimmt die Radeon:
       acht Lichter, gerichtet, punktförmig und als Spot, mit Abschwächung.
@@ -704,8 +705,8 @@ Für gar kein Protokoll:
     * glReadPixels und mglWriteShotPPM lesen das Bild über Picasso96 aus
       dem Kartenspeicher zurück: etwa 4 MB pro Sekunde, ein Bild von
       640 x 480 in 32 Bit dauert also etwa eine Viertelsekunde.
-    * Texturen liegen in bis zu 16 MB des Kartenspeichers, und RadeonGL
-      lagert sie noch nicht aus: Ein Programm, das mehr braucht, bekommt
+    * Texturen liegen in bis zu 16 MB des Kartenspeichers (32 MB mit
+      RadeonGLHeapMax), und RadeonGL lagert sie noch nicht aus: Ein Programm, das mehr braucht, bekommt
       für den Rest weiße Texturen.
     * Texturen werden mit 16 Bit pro Texel gespeichert: RGBA-Texturen
       verlieren an Genauigkeit (ARGB4444), RGB-Texturen werden RGB565 --
@@ -727,8 +728,9 @@ RadeonGL beantwortet alle 205 Funktionen der minigl.library 29.1
 Angenommen, aber ohne Wirkung: Kantenmarken und Farbindex-Werte,
 glDrawBuffer und glReadBuffer (RadeonGL zeichnet in das Bild, das gerade
 entsteht, und liest von dort), die Texturprioritäten, mglProhibit... und
-mglProposeCloseDesktop. mglLockBack lehnt immer ab. glTexCoord4f teilt an
-jeder Ecke durch q (die Radeon bekommt q nicht).
+mglProposeCloseDesktop. glTexCoord4f teilt an jeder Ecke durch q (die
+Radeon bekommt q nicht). mglLockBack gibt seit 0.20 das Bild heraus, das
+gerade entsteht (siehe die Versionen).
 
 Texturen mit Farbpalette, wie in MiniGL 29.1: glColorTable setzt eine
 Palette für den Kontext, und ein GL_COLOR_INDEX-Upload wird beim Hochladen
@@ -848,6 +850,32 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.20 (25.11.2026)
+    * anisotrope Filterung bremst ein Programm nicht mehr: RadeonGL nahm
+      jedes Zeichnen eines Programms, das sie nutzte, auf dem langen Weg.
+      GLQuake bei 8x: vorher 3,3 % langsamer, jetzt innerhalb von 0,2 %
+      ohne Anisotropie. Der Anteil der Radeon selbst bleibt auch bei
+      1920 x 1080 unter 1 %, und 16x kostet nicht mehr als 8x. (Der R200
+      überblendet unter Anisotropie keine Mipmap-Stufen: mit trilinearer
+      Filterung kommen die Mipmap-Streifen zurück.)
+    * Textur-Uploads nach ARGB1555 (GL_RGB5_A1) etwa fünfmal schneller:
+      nicht mehr Texel für Texel umgerechnet, und GL_BGRA mit
+      GL_UNSIGNED_SHORT_1_5_5_5_REV wird unverändert kopiert. DevilutionX:
+      neue Sprite-Bilder 3,5 -> 0,7 Mikrosekunden je Texel, die ersten
+      Sekunden eines Kampfes etwa 30 % schneller
+    * RadeonGLHeapMax geht jetzt bis 32 MB (Bildschirm- und
+      Fensterkontexte), für Programme mit großen Texturen; der
+      Texturspeicher wird kleiner, bis er auf die Karte passt. Ohne die
+      Variable ändert sich nichts
+    * die Little-Endian-Vertex-Arrays von MiniGL V30:
+      glDisable(MGL_ARRAY_TRANSFORMATIONS) heißt, die Arrays des Programms
+      sind Little-Endian
+    * mglLockBack gibt das Bild heraus, das gerade gezeichnet wird
+      (Adresse, Zeilenlänge, Pixelformat nach Warp3D), bis mglUnlockDisplay
+      oder zum nächsten Bild; 29.1 lehnte ab
+    * behoben: glArrayElement ohne Vertex-Array las den Vertex-Zeiger
+      trotzdem, wenn eine Textureinheit über 1 oder eine Cube-Map an war
 
 0.19 (24.11.2026)
     * behoben: Die 3D-Einheit der Radeon blieb ab und zu stehen, in

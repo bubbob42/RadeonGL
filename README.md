@@ -37,7 +37,9 @@ needs.
 - **Drawing:** every GL primitive (points, lines, line strips and loops,
   triangles, strips, fans, quads, quad strips, polygons), in immediate mode
   and from vertex arrays (`glDrawArrays`, `glDrawElements` with 8-, 16- and
-  32-bit indices).
+  32-bit indices). `glDisable(MGL_ARRAY_TRANSFORMATIONS)` means the
+  program's arrays are little-endian, as in MiniGL V30 (0.20; drawn vertex
+  by vertex).
 - **The fast path:** compiled vertex arrays (`glLockArraysEXT`) go to the
   card as indexed draws; an upload cache keeps what a program sends again
   unchanged in the card's memory. Since 0.18 it gives that memory to
@@ -61,7 +63,7 @@ needs.
 - **Textures:** six units (multitexture: `GL_ARB_multitexture`, also
   under MiniGL's name `GL_MGL_ARB_multitexture`), RGB565, ARGB4444,
   ARGB1555, ARGB8888 (for `GL_RGB8` and `GL_RGBA8`), I8 and AI88 in
-  the card's memory (up to 16 MB), nearest and linear filters, mipmaps
+  the card's memory (16 MB, up to 32 MB with `RadeonGLHeapMax`), nearest and linear filters, mipmaps
   bilinear and trilinear (`GL_LINEAR_MIPMAP_LINEAR`, the R200's own
   blend between two levels; up to 0.17 `GL_LINEAR_MIPMAP_NEAREST` and
   `GL_NEAREST_MIPMAP_LINEAR` were drawn the wrong way round), anisotropic
@@ -204,9 +206,13 @@ when a context is deleted.
 Draw, then `mglSwitchDisplay(context)`: one flush sends the frame to the
 card and shows it -- copied or switched on a screen, copied into a window,
 left in place in a bitmap. `mglEnableSync(context, GL_TRUE)` holds the
-copy until the beam has passed (no tearing). `mglLockDisplay` and
-`mglUnlockDisplay` are accepted and do nothing; `mglLockBack` is refused,
-as 29.1 does when it has no lock to hand out, with the size filled in.
+copy until the beam has passed (no tearing). `mglLockDisplay` is accepted
+and does nothing. `mglLockBack` (0.20) hands out the frame being drawn:
+everything drawn so far is finished first, then its address, pitch and
+Warp3D's pixel format (`W3D_FMT_R5G6B5PC`, `_R5G5B5PC` or `_B8G8R8A8`, the
+R200's little-endian layouts), until `mglUnlockDisplay`, the next
+`mglSwitchDisplay`, a resize or the context's end. Reading it crosses the
+bus slowly.
 
 ### Input
 
@@ -263,8 +269,8 @@ accepted without effect). Not there yet:
 - Contexts on a 24-bit or 8-bit screen (the Radeon draws 15, 16 and 32
   bit). Textures beyond the heap are not swapped out.
 - Accepted without effect: edge flags and colour-index values,
-  `glDrawBuffer` and `glReadBuffer`, texture priorities. `mglLockBack`
-  always refuses. `glTexCoord4f` divides by q at each corner.
+  `glDrawBuffer` and `glReadBuffer`, texture priorities. `glTexCoord4f`
+  divides by q at each corner.
 - Paletted textures as in MiniGL 29.1: one palette a context, applied when
   a `GL_COLOR_INDEX` image is uploaded; a `GL_RGBA` palette is read as
   A, R, G, B (MiniGL's order).

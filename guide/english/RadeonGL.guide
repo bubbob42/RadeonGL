@@ -1,5 +1,5 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.11 (8.11.2026)
+@$VER: RadeonGL.guide 0.20 (25.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
@@ -86,7 +86,7 @@ it does not have yet: see @{" Which programs work " link Programs}.
       preferences: see @{" The screen " link Screen}.
     * @{b}Free card memory@{ub} for RadeonGL's own buffers and at least
       4 MB of textures. It takes up to 16 MB for textures when the card
-      has it.
+      has it, up to 32 MB with RadeonGLHeapMax.
 
 @{b}Tested on@{ub}
 
@@ -642,7 +642,7 @@ To have no log at all:
       take turns on the Radeon; while more than one draws, each is a
       little slower than alone. Each needs card memory of its own: a
       screen context up to 16 MB of textures, a window or bitmap context
-      8 MB.
+      8 MB (RadeonGLHeapMax: up to 32 MB).
     * Lighting (glLight, glMaterial, glLightModel, glColorMaterial, normals
       from glNormal and glNormalPointer) is done by the Radeon: eight
       lights, directional, local and spot, with attenuation. Lit compiled
@@ -653,8 +653,8 @@ To have no log at all:
     * glReadPixels and mglWriteShotPPM read the picture back from the
       card's memory through Picasso96: about 4 MB a second, so a
       640 x 480 picture in 32 bit takes about a quarter of a second.
-    * Textures live in up to 16 MB of the card's memory, and RadeonGL
-      does not yet swap them out: a program that needs more gets white
+    * Textures live in up to 16 MB of the card's memory (32 MB with
+      RadeonGLHeapMax), and RadeonGL does not yet swap them out: a program that needs more gets white
       textures for the rest.
     * Textures are stored with 16 bits a texel: RGBA textures lose
       precision (ARGB4444), RGB ones become RGB565 -- unless a program asks
@@ -674,8 +674,9 @@ them accepted without effect, see below). Not there yet:
 Accepted but without effect: edge flags and colour-index values,
 glDrawBuffer and glReadBuffer (RadeonGL draws into the picture being
 built and reads from it), texture priorities, mglProhibit... and
-mglProposeCloseDesktop. mglLockBack always refuses. glTexCoord4f divides
-by q at each corner (the Radeon is not given q).
+mglProposeCloseDesktop. glTexCoord4f divides by q at each corner (the
+Radeon is not given q). mglLockBack hands out the frame being drawn
+since 0.20 (see the History).
 
 Paletted textures, as in MiniGL 29.1: glColorTable sets one palette for
 the context, and a GL_COLOR_INDEX upload is turned into colours through
@@ -788,6 +789,30 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.20 (25.11.2026)
+    * anisotropic filtering no longer slows a program down: RadeonGL took
+      every draw of a program that used it the long way. GLQuake at 8x:
+      3.3% slower before, now within 0.2% of no anisotropy. The Radeon's
+      own share stays under 1% even at 1920 x 1080, and 16x costs no more
+      than 8x. (The R200 blends no mipmap levels under anisotropy: with
+      trilinear filtering the mipmap bands come back.)
+    * texture uploads into ARGB1555 (GL_RGB5_A1) about five times faster:
+      no longer converted texel by texel, and GL_BGRA with
+      GL_UNSIGNED_SHORT_1_5_5_5_REV is copied as it is. DevilutionX: new
+      sprite frames 3.5 -> 0.7 microseconds a texel, the opening seconds
+      of a fight about 30% faster
+    * RadeonGLHeapMax now goes up to 32 MB (screen and window contexts)
+      for programs with big textures; the heap steps down until the
+      board has room. Unset, nothing changes
+    * MiniGL V30's little-endian vertex arrays:
+      glDisable(MGL_ARRAY_TRANSFORMATIONS) means the program's arrays are
+      little-endian
+    * mglLockBack hands out the frame being drawn (address, pitch,
+      Warp3D's pixel format) until mglUnlockDisplay or the next frame;
+      29.1 refused it
+    * fixed: glArrayElement without a vertex array read the vertex
+      pointer anyway when a texture unit above 1 or a cube map was on
 
 0.19 (24.11.2026)
     * fixed: the Radeon's 3D engine stopped now and then in programs that
