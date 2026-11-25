@@ -463,7 +463,12 @@
 #define   R_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST (10UL << 1)
 /* the bits above: 8 | 4 | 2. Until 0.17 this was 11 (8 | 2 | 1, no level
  * blend): anisotropy with GL_LINEAR_MIPMAP_LINEAR stayed on one level
- * (MEASURED, GLFilt, anisotropy 8) */
+ * (MEASURED, GLFilt, anisotropy 8). MEASURED 2026-11-25 with GLFilt 0.4's
+ * slanted floor (truly anisotropic sampling; the square-on quads of 11-21
+ * never were): 11, 14 and 15 all draw the same -- the R200 blends NO mip
+ * levels under anisotropy (trilinear + aniso = bilinear + aniso; the
+ * Radeon 8500 family's known limit). Anisotropy itself works: level 0
+ * held far longer at 8 and 16. 14 stays. */
 #define   R_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR  (14UL << 1)
 #define   R_MAX_ANISO_SHIFT       5      /* 0 1:1, 1 2:1, 2 4:1, 3 8:1, 4 16:1 */
 #define   R_MAX_ANISO_MASK        (7UL << 5)
