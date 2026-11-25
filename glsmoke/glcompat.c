@@ -1353,8 +1353,10 @@ static void QueryCases(void)
     mglTexMemStat(&cur, &peak);
     WantInt("mglTexMemStat: textures take memory", (cur > 0 && peak >= cur) ? 1 : 0, 1);
     memset(&li, 0x55, sizeof(li));
-    WantInt("mglLockBack refuses", (LONG) mglLockBack(&li), (LONG) GL_FALSE);
-    WantInt("mglLockBack: no address", li.base_address == NULL ? 1 : 0, 1);
+    /* 29.1 refuses; RadeonGL grants it since mgl-lockback (LockCases) */
+    WantInt("mglLockBack granted (29.1 refuses)", (LONG) mglLockBack(&li), (LONG) GL_TRUE);
+    WantInt("mglLockBack: an address", li.base_address != NULL ? 1 : 0, 1);
+    mglUnlockDisplay();
     WantInt("glGetError at the end", (LONG) glGetError(), 0);
 }
 
