@@ -70,9 +70,10 @@ void Compat_Enable(struct Core *c, ULONG cap, ULONG on)
         case GL_POLYGON_OFFSET_POINT:
             flag = &c->poly_offset_point;
             break;
-        case MGL_ARRAY_TRANSFORMATIONS:     /* stored and answered, as 29.1 does */
-            flag = &c->array_xform;
-            break;
+        case MGL_ARRAY_TRANSFORMATIONS:     /* off: V30's little-endian arrays (tex13.c) */
+            c->array_xform = on ? 1UL : 0UL;
+            Tex13_Update(c);
+            return;
         case GL_SHARED_TEXTURE_PALETTE_EXT: /* the one palette serves anyway: stored */
             flag = &c->shared_pal;
             break;

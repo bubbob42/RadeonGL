@@ -577,6 +577,10 @@ struct Core
     ULONG tg_r_mode[CORE_UNITS];            /* glTexGen(GL_R): GL_REFLECTION_MAP ... */
     ULONG hw_stq_d3d;                       /* RE_CNTL's STQn_D3D bits as last sent (cube maps) */
     ULONG hang_units;                       /* Compat_HangWait: the texture units at its last call */
+    /* V30's little-endian arrays (MGL_ARRAY_TRANSFORMATIONS off, tex13.c):
+     * one vertex's elements, byte-swapped -- the vertex, colour and normal
+     * arrays, then the texture units' (4 components of up to 8 bytes) */
+    ULONG le_buf[3 + CORE_UNITS][8];
 };
 
 struct PmWork;
