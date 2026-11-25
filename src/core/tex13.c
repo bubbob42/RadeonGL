@@ -36,6 +36,7 @@
  * (name 0) is the 2D one's object.
  */
 
+#include <stddef.h>
 #include "core.h"
 #include "coreint.h"
 #include "r200reg.h"
@@ -866,6 +867,99 @@ static ULONG In(struct Core *c, ULONG v)
     return v;
 }
 
+/* --- ARGB1555 without the per-texel way (2026-11-25, DevilutionX's sprite
+ * pages: GL_RGB5_A1 atlases fed RGBA rows by glTexSubImage2D; Fetch13 and
+ * Encode13 for each texel were most of the ~45 ms a new sprite frame cost
+ * on the A4000D). Two texels a dword, the first in the low half, as Row13's
+ * generic way packs them; partial dwords at the row's ends keep the texel
+ * beside them. */
+
+/* four bytes as one big-endian longword: one load on the 68k when aligned */
+#if defined(__GNUC__) && defined(__mc68000__)
+#define T13_LOAD32(q) (*(const ULONG *) (const void *) (q))
+#else
+#define T13_LOAD32(q) (((ULONG) (q)[0] << 24) | ((ULONG) (q)[1] << 16) | ((ULONG) (q)[2] << 8) \
+                       | (ULONG) (q)[3])
+#endif
+#define T13_BYTES32(q) (((ULONG) (q)[0] << 24) | ((ULONG) (q)[1] << 16) | ((ULONG) (q)[2] << 8) \
+                        | (ULONG) (q)[3])
+#define T13_ALIGNED(q, n) ((((size_t) (const void *) (q)) & ((n) - 1)) == 0)
+
+/* R G B A bytes (one longword) as ARGB1555: the top five bits of each
+ * colour, alpha set from 128 -- exactly Encode13's result */
+#define T13_RGBA1555(v) ((((v) >> 17) & 0x7c00UL) | (((v) >> 14) & 0x03e0UL) \
+                         | (((v) >> 11) & 0x001fUL) | (((v) & 0x80UL) << 8))
+
+static void Row1555Rgba(struct Core *c, ULONG *dst, ULONG first, ULONG w, const UBYTE *row)
+{
+    ULONG i;
+    ULONG lo;
+    ULONG hi;
+
+    i = 0;
+    if (first != 0 && w > 0)
+    {
+        hi = T13_RGBA1555(T13_BYTES32(row));
+        *dst = Out(c, (In(c, *dst) & 0x0000ffffUL) | (hi << 16));
+        dst++;
+        row += 4;
+        i = 1;
+    }
+    if (T13_ALIGNED(row, 4))
+        for (; i + 2 <= w; i += 2, row += 8)
+        {
+            lo = T13_LOAD32(row);
+            hi = T13_LOAD32(row + 4);
+            *dst++ = Out(c, T13_RGBA1555(lo) | (T13_RGBA1555(hi) << 16));
+        }
+    else
+        for (; i + 2 <= w; i += 2, row += 8)
+        {
+            lo = T13_BYTES32(row);
+            hi = T13_BYTES32(row + 4);
+            *dst++ = Out(c, T13_RGBA1555(lo) | (T13_RGBA1555(hi) << 16));
+        }
+    if (i < w)
+    {
+        lo = T13_RGBA1555(T13_BYTES32(row));
+        *dst = Out(c, (In(c, *dst) & 0xffff0000UL) | lo);
+    }
+}
+
+/* GL_BGRA + GL_UNSIGNED_SHORT_1_5_5_5_REV, native words, is ARGB1555
+ * itself: copied as it is (the row 2-byte aligned, no GL_UNPACK_SWAP_BYTES) */
+static void Row1555Words(struct Core *c, ULONG *dst, ULONG first, ULONG w, const UBYTE *row)
+{
+    const UWORD *p;
+    ULONG i;
+    ULONG v;
+
+    p = (const UWORD *) (const void *) row;
+    i = 0;
+    if (first != 0 && w > 0)
+    {
+        *dst = Out(c, (In(c, *dst) & 0x0000ffffUL) | ((ULONG) p[0] << 16));
+        dst++;
+        p++;
+        i = 1;
+    }
+#if defined(__GNUC__) && defined(__mc68000__)
+    if (T13_ALIGNED(p, 4))
+        for (; i + 2 <= w; i += 2, p += 2)
+        {
+            v = *(const ULONG *) (const void *) p;  /* first texel in the high half */
+            *dst++ = Out(c, (v << 16) | (v >> 16));
+        }
+#endif
+    for (; i + 2 <= w; i += 2, p += 2)
+    {
+        v = (ULONG) p[0] | ((ULONG) p[1] << 16);
+        *dst++ = Out(c, v);
+    }
+    if (i < w)
+        *dst = Out(c, (In(c, *dst) & 0xffff0000UL) | (ULONG) p[0]);
+}
+
 /* w texels of one source row into byte offset byte0 of the heap */
 static void Row13(struct Core *c, const struct CoreTex *t, ULONG byte0, ULONG w, const struct Src *s,
                   ULONG swap, const UBYTE *row)
@@ -884,6 +978,20 @@ static void Row13(struct Core *c, const struct CoreTex *t, ULONG byte0, ULONG w,
 
     cpp = t->cpp;
     dst = c->heap.cpu + (t->gpu - c->heap.gpu + byte0) / 4;
+    if (cpp == 2 && (t->hwfmt & R_TXFORMAT_FORMAT_MASK) == R_TXFORMAT_ARGB1555)
+    {
+        if (s->kind == K_BYTES && s->format == GL_RGBA)
+        {
+            Row1555Rgba(c, dst, (byte0 & 3) / 2, w, row);
+            return;
+        }
+        if (s->kind == K_P16 && s->type == GL_UNSIGNED_SHORT_1_5_5_5_REV && s->format == GL_BGRA
+            && !swap && T13_ALIGNED(row, 2))
+        {
+            Row1555Words(c, dst, (byte0 & 3) / 2, w, row);
+            return;
+        }
+    }
     if (cpp == 4 && s->kind == K_P32 && s->type == GL_UNSIGNED_INT_8_8_8_8_REV && s->format == GL_BGRA)
     {
         /* the Amiga's ARGB32: the texel itself (ARGB8888), one a dword */
