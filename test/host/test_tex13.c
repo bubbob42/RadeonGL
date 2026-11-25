@@ -692,6 +692,44 @@ static void test_sampling_regs(void)
     CHECK_INT(Core_GetError(&core), GL_INVALID_ENUM);
 }
 
+/* 2026-11-25: anisotropy alone stays in the fast route (no tex_x: GLQuake
+ * paid 3.3 % for ValidateOnce_W at 2x and 8x alike) -- the min field's
+ * anisotropic bit and the ratio ORed into the plain filter; 1 turns both
+ * off again */
+static void test_aniso_fast(void)
+{
+    static UBYTE px[8 * 8 * 4];
+    ULONG f;
+    LONG lvl;
+
+    Fresh();
+    memset(px, 0x80, sizeof(px));
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    for (lvl = 0; lvl < 4; lvl++)
+        Core_TexImage2D(&core, GL_TEXTURE_2D, lvl, GL_RGBA, 8 >> lvl, 8 >> lvl, 0, GL_RGBA,
+                        GL_UNSIGNED_BYTE, px);
+    Core_Enable(&core, GL_TEXTURE_2D, 1);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK_INT(core.tex_x, 0);                       /* the narrow route */
+    CHECK_INT(core.tex[1]->xparm, 0);
+    Quad(0, 0, 10, 1);
+    f = LastReg(R_PP_TXFILTER_0);
+    CHECK_HEX((f & R_MAX_ANISO_MASK) >> R_MAX_ANISO_SHIFT, 3);
+    CHECK_HEX(f & R_MIN_FILTER_MASK, R_MIN_FILTER_LINEAR_MIP_NEAREST | R_MIN_FILTER_ANISO_NEAREST);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 16);
+    Quad(0, 0, 10, 1);
+    CHECK_HEX((LastReg(R_PP_TXFILTER_0) & R_MAX_ANISO_MASK) >> R_MAX_ANISO_SHIFT, 4);
+    Core_TexParameteri(&core, GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1);
+    Quad(0, 0, 10, 1);
+    f = LastReg(R_PP_TXFILTER_0);
+    CHECK_HEX(f & R_MAX_ANISO_MASK, 0);
+    CHECK_HEX(f & R_MIN_FILTER_MASK, R_MIN_FILTER_LINEAR_MIP_NEAREST);
+    CHECK_INT(core.tex_x, 0);
+    CHECK_INT(Checked(), R2CE_OK);
+}
+
 /* --- Separate specular, rescale, queries ---------------------------------------------- */
 
 /* 2026-11-21: every minification filter's R200 mode, plain (no
@@ -1143,6 +1181,7 @@ int main(void)
     test_filter_after_upload();
     test_light_and_queries();
     test_argb1555_paths();
+    test_aniso_fast();
     pic_six_units();
     pic_combine();
     pic_crossbar();

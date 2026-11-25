@@ -169,6 +169,10 @@ struct CoreTex
     LONG min_lod, max_lod;  /* GL_TEXTURE_MIN/MAX_LOD, whole levels; lod_set: given */
     ULONG lod_set;
     ULONG border;           /* GL_TEXTURE_BORDER_COLOR as PP_BORDER_COLOR: A R G B bytes */
+    /* anisotropy in the fast route (2026-11-25): TXFILTER's anisotropic bit
+     * of the min field and its MAX_ANISO ratio, ORed in by both validate
+     * copies (hwvalid.h); 0: none. Set by tex13.c with the parameter. */
+    ULONG aniso_hw;
 };
 
 /* R4 (texview.c): the formats a back end's bitmap view may have */

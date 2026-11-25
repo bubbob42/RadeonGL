@@ -292,6 +292,7 @@ void Tex13_TexParameter(struct Core *c, ULONG target, ULONG pname, LONG param)
 {
     struct CoreTex *t;
     ULONG p;
+    ULONG n;
 
     if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP)
     {
@@ -348,7 +349,17 @@ void Tex13_TexParameter(struct Core *c, ULONG target, ULONG pname, LONG param)
                 return;
             }
             t->aniso = (p > 16) ? 16 : p;
-            t->xparm = 1;
+            /* 2026-11-25: in the fast route, not through xparm (which took
+             * the context to ValidateOnce_W and Tex13_TexRegs for good:
+             * GLQuake +3.3 % at 2x and 8x alike, the R200's sampling free).
+             * The min field's anisotropic bit ORed into the plain filter
+             * gives 8, 9, 10, 11, 14, 15 -- GLFilt 0.4's slanted floor drew
+             * 10/11 and 14/15 alike (the R200 blends no levels under
+             * anisotropy) -- with the ratio; Tex13_TexRegs still writes the
+             * exact codes when another parameter routes the texture there */
+            n = (t->aniso >= 16) ? 4 : (t->aniso >= 8) ? 3 : (t->aniso >= 4) ? 2
+              : (t->aniso >= 2) ? 1 : 0;
+            t->aniso_hw = n ? (R_MIN_FILTER_ANISO_NEAREST | (n << R_MAX_ANISO_SHIFT)) : 0;
             break;
         case GL_TEXTURE_MIN_LOD:
         case GL_TEXTURE_MAX_LOD:

@@ -1202,7 +1202,11 @@ CORE_LATE  := light texgen fog arraylit compat polymode texview ucgrow tex13
 # blend test): 10616 - 2816 - 48, everything from core_vertex.o on at 0.18's
 # places (ab_r019/ab_r019w/ab_r019f: first build +2.40%, the fix in
 # ValidateOnce +1.52%, this +0.84% on four pads, no fix code at all +0.48%).
-RGL_DISPATCH_PAD := 7752
+# 2026-11-25, anisotropy in the fast route (branch aniso-fast): both
+# ValidateOnce copies OR the texture's aniso_hw in, hwstate.o +16; the pad
+# -16 keeps everything from core_vertex.o on at 0.19's places (16 of 18 hot
+# functions; Core_Enable and Mat_Mul 16 earlier): 7752 - 16.
+RGL_DISPATCH_PAD := 7736
 RGL_OBJS   := build/rgl/shell.o build/rgl/rgl.o build/rgl/nullcard.o build/rgl/card.o build/rgl/runtime.o \
               build/rgl/rgl_dispatch.o \
               $(addprefix build/rgl/core_,$(addsuffix .o,$(filter-out $(CORE_LATE),$(CORE_MODULES)))) \

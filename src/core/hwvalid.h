@@ -159,7 +159,7 @@ static LONG HWV(EmitTexture)(struct Core *c, ULONG u)
     if (t == NULL)
         return R2_OK;
     r.filter = MinFilter(t->min_filter) | (t->mag_filter == GL_LINEAR ? R_MAG_FILTER_LINEAR : 0)
-             | (HWV(MaxLevel)(t) << R_MAX_MIP_LEVEL_SHIFT);
+             | (HWV(MaxLevel)(t) << R_MAX_MIP_LEVEL_SHIFT) | t->aniso_hw;
     if (t->wrap_s == GL_CLAMP)
         r.filter |= R_CLAMP_S_CLAMP_LAST;
     if (t->wrap_t == GL_CLAMP)
