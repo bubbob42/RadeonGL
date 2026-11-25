@@ -1033,6 +1033,99 @@ static void pic_formats(void)
     CHECK_INT(Checked(), R2CE_OK);
 }
 
+/* --- ARGB1555 uploads without the per-texel way (2026-11-25) ------------------------- */
+
+/* every texel of textures a and b (w x h, level 0) alike */
+static int SameTexels(const struct CoreTex *a, const struct CoreTex *b, ULONG w, ULONG h)
+{
+    ULONG x, y;
+
+    for (y = 0; y < h; y++)
+        for (x = 0; x < w; x++)
+            if (Texel(a, 0, 0, x, y) != Texel(b, 0, 0, x, y))
+                return 0;
+    return 1;
+}
+
+static void test_argb1555_paths(void)
+{
+    static UBYTE zero[16 * 4 * 4];
+    static UBYTE rgba[7 * 3 * 4];       /* 7 x 3, rows of 28 bytes */
+    static UBYTE odd[1 + 7 * 3 * 4];    /* the same, one byte off its alignment */
+    static ULONG packed[7 * 3];         /* GL_UNSIGNED_INT_8_8_8_8: R in the top byte */
+    static UWORD words[8 * 3];          /* 1_5_5_5_REV, rows of 8 (alignment 4) */
+    static UWORD swapped[8 * 3];
+    ULONG i, x, y, r, g, b, a, seed, v;
+    struct CoreTex *ta, *tb, *tc, *td, *te;
+
+    seed = 12345;
+    for (i = 0; i < sizeof(rgba); i++)
+    {
+        seed = seed * 1103515245UL + 12345UL;
+        rgba[i] = (UBYTE) (seed >> 16);
+    }
+    rgba[3] = 127;                      /* both sides of the alpha cut */
+    rgba[7] = 128;
+    for (i = 0; i < sizeof(rgba); i++)
+        odd[1 + i] = rgba[i];
+    for (y = 0; y < 3; y++)
+        for (x = 0; x < 7; x++)
+        {
+            i = (y * 7 + x) * 4;
+            r = rgba[i]; g = rgba[i + 1]; b = rgba[i + 2]; a = rgba[i + 3];
+            packed[y * 7 + x] = (r << 24) | (g << 16) | (b << 8) | a;
+            v = ((a >= 128) ? 0x8000UL : 0) | ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+            words[y * 8 + x] = (UWORD) v;
+            swapped[y * 8 + x] = (UWORD) (((v & 0xff) << 8) | (v >> 8));
+        }
+
+    Fresh();
+    for (i = 1; i <= 5; i++)
+    {
+        Core_BindTexture(&core, GL_TEXTURE_2D, i);
+        Core_TexImage2D(&core, GL_TEXTURE_2D, 0, GL_RGB5_A1, 16, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, zero);
+    }
+    ta = core.tex[1]; tb = core.tex[2]; tc = core.tex[3]; td = core.tex[4]; te = core.tex[5];
+    CHECK_HEX(ta->hwfmt, R_TXFORMAT_ARGB1555 | R_TXFORMAT_ALPHA_IN_MAP);
+    /* 1: RGBA bytes, the direct way, at x 1 (a partial first dword), 7 wide
+     * (a partial last one) */
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 1, 1, 7, 3, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    /* 2: the same colours through the generic way (a packed 32-bit type) */
+    Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 1, 1, 7, 3, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, packed);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK(SameTexels(ta, tb, 16, 4));
+    CHECK_HEX(Texel(ta, 0, 0, 1, 1), words[0]);
+    CHECK_HEX(Texel(ta, 0, 0, 2, 1), words[1] | 0x8000UL);      /* alpha 128: set */
+    CHECK_HEX(Texel(ta, 0, 0, 0, 1), 0);                        /* beside it: kept */
+    CHECK_HEX(Texel(ta, 0, 0, 8, 1), 0);
+    /* 3: native 1555 words, copied as they are */
+    Core_BindTexture(&core, GL_TEXTURE_2D, 3);
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 1, 1, 7, 3, GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV, words);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK(SameTexels(ta, tc, 16, 4));
+    /* 4: the RGBA bytes off their alignment (GL_UNPACK_ALIGNMENT 1) */
+    Core_PixelStore(&core, GL_UNPACK_ALIGNMENT, 1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 4);
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 1, 1, 7, 3, GL_RGBA, GL_UNSIGNED_BYTE, odd + 1);
+    Core_PixelStore(&core, GL_UNPACK_ALIGNMENT, 4);
+    CHECK(SameTexels(ta, td, 16, 4));
+    /* 5: byte-swapped words with GL_UNPACK_SWAP_BYTES: the generic way */
+    Core_PixelStore(&core, GL_UNPACK_SWAP_BYTES, 1);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 5);
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 1, 1, 7, 3, GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV, swapped);
+    Core_PixelStore(&core, GL_UNPACK_SWAP_BYTES, 0);
+    CHECK_INT(Core_GetError(&core), GL_NO_ERROR);
+    CHECK(SameTexels(ta, te, 16, 4));
+    /* an even start, an even width: whole dwords only */
+    Core_BindTexture(&core, GL_TEXTURE_2D, 1);
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 2, 0, 6, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    Core_BindTexture(&core, GL_TEXTURE_2D, 2);
+    Core_TexSubImage2D(&core, GL_TEXTURE_2D, 0, 2, 0, 6, 1, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, packed);
+    CHECK(SameTexels(ta, tb, 16, 4));
+}
+
 int main(void)
 {
     vram = (ULONG *) calloc(1, VRAM_SIZE);
@@ -1049,6 +1142,7 @@ int main(void)
     test_min_filters();
     test_filter_after_upload();
     test_light_and_queries();
+    test_argb1555_paths();
     pic_six_units();
     pic_combine();
     pic_crossbar();
