@@ -242,7 +242,7 @@ Each program gets its own context and dispatch table; they take turns on
 the Radeon flush by flush (see [Features](#features)). Calls without a
 context argument use the calling task's newest context. Texture memory:
 up to 16 MB for a screen context, 8 MB for a window or bitmap context
-unless `RadeonGLHeapMax` (2 to 16) says otherwise.
+unless `RadeonGLHeapMax` (2 to 32) says otherwise; above 16 MB only when the board has room, the size steps down until it fits.
 
 ### Watching from outside
 
@@ -261,7 +261,7 @@ accepted without effect). Not there yet:
 - Generic 32-bit textures (`GL_RGBA`, 4) are stored with 16 bits -- ask
   for `GL_RGBA8` or `GL_RGB8` to keep 8 bits.
 - Contexts on a 24-bit or 8-bit screen (the Radeon draws 15, 16 and 32
-  bit). Textures beyond 16 MB are not swapped out.
+  bit). Textures beyond the heap are not swapped out.
 - Accepted without effect: edge flags and colour-index values,
   `glDrawBuffer` and `glReadBuffer`, texture priorities. `mglLockBack`
   always refuses. `glTexCoord4f` divides by q at each corner.

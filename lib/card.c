@@ -2492,7 +2492,9 @@ static ULONG CardOpen(struct Card *k, ULONG w, ULONG h, ULONG depth, ULONG modei
         return CARD_NOT_RADEON;
     }
     k->kind = CARD_KIND_SCREEN;
-    k->heap_top = (Card_HeapMax >= 4 && Card_HeapMax < 16) ? Card_HeapMax << 20 : 16UL << 20;
+    /* 2026-11-25 (the user: a bigger heap for GLQuake's -rgba8): RadeonGLHeapMax
+     * up to 32 MB asks the ladder to start higher; unset, 16 MB as before */
+    k->heap_top = (Card_HeapMax >= 4 && Card_HeapMax <= 32) ? Card_HeapMax << 20 : 16UL << 20;
     k->heap_min = 4UL << 20;
 
     /* the clock, the GL screen and its input window, the back buffer, the rest */
@@ -2683,13 +2685,13 @@ static ULONG OpenWindowKind(struct Card *k, struct Window *win, ULONG own, const
     k->width = w;
     k->height = h;
     k->heap_top = (o != NULL && o->heap_top >= (2UL << 20)) ? o->heap_top : (8UL << 20);
-    /* RadeonGLHeapMax sets a window's or bitmap's heap either way, 2 to 16
+    /* RadeonGLHeapMax sets a window's or bitmap's heap either way, 2 to 32
      * MB (2026-11-09: GLQuake's demo1 needs about 8.7 MB; in a window its
      * 8 MB refused 19 textures). Unset: 8 MB, room for three (Trio). */
     if (Card_HeapMax >= 2)
         k->heap_top = Card_HeapMax << 20;
-    if (k->heap_top > (16UL << 20))
-        k->heap_top = 16UL << 20;
+    if (k->heap_top > (32UL << 20))
+        k->heap_top = 32UL << 20;
     k->heap_top &= ~((2UL << 20) - 1);
     k->heap_min = 1UL << 20;        /* 2026-11-18: was 2 MB (Herald under VRAM pressure): the
                                      * 512 KB stream + 512 KB for textures, no upload cache */
@@ -2885,8 +2887,8 @@ static ULONG CardOpenBitMap(struct Card *k, struct BitMap *bm, const struct Card
             k->heap_top = (o != NULL && o->heap_top >= (2UL << 20)) ? o->heap_top : (8UL << 20);
             if (Card_HeapMax >= 2)
                 k->heap_top = Card_HeapMax << 20;   /* either way, as a window's */
-            if (k->heap_top > (16UL << 20))
-                k->heap_top = 16UL << 20;
+            if (k->heap_top > (32UL << 20))
+                k->heap_top = 32UL << 20;
             k->heap_top &= ~((2UL << 20) - 1);
             k->heap_min = 1UL << 20;        /* 2026-11-18: was 2 MB, as a window's */
             if (BitMapRows(k, why, whylen) && OpenTimer(k, why, whylen) && AllocTarget(k, why, whylen))

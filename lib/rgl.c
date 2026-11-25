@@ -572,8 +572,9 @@ static void *CreateContext(const struct Ask *a)
     check = 1;
     if (GetVar((STRPTR) "RadeonGLCheck", (STRPTR) flag, sizeof(flag), 0) > 0 && flag[0] == '0')
         check = 0;
-    /* a test switch: RadeonGLHeapMax=n caps the texture heap at n MB (4 and
-     * up), to try a game on the heap a smaller board or Workbench gives */
+    /* RadeonGLHeapMax=n: the texture heap at most n MB -- 4 to 32 for a
+     * screen context (16 unset), 2 to 32 for a window or bitmap (8 unset);
+     * smaller to try a game on a smaller board, bigger for 8-bit textures */
     heap_max = 0;
     n = GetVar((STRPTR) "RadeonGLHeapMax", (STRPTR) flag, sizeof(flag), 0);
     for (i = 0; n > 0 && i < (ULONG) n && flag[i] >= '0' && flag[i] <= '9'; i++)
