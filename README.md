@@ -153,7 +153,9 @@ needs.
   (`RadeonGLCheck=0` turns it off for speed). A hung 3D engine is reset,
   in stages and by a watchdog in the vertical blank even when another
   program is stuck waiting for the card, so it no longer freezes the
-  machine (`RadeonGLWatchdog`). Since 0.19 RadeonGL also avoids the R200
+  machine (`RadeonGLWatchdog`). A frame counts as hung only when the
+  Radeon has read no new commands for half a second (since 0.21; up to
+  0.20 any frame busy for longer was reset and dropped). Since 0.19 RadeonGL also avoids the R200
   hang itself: the chip stalls when the texture setup changes while
   blended pixels are still in flight, so it waits for the engine at
   exactly those moments (DevilutionX: 51 hangs in 2149 frames before,

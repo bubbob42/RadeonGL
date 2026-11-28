@@ -93,9 +93,13 @@ static void Run(struct SimCp *s, ULONG budget)
     ULONG done;
     ULONG n;
 
+    if (s->every > 1 && ++s->tick % s->every != 0)
+        return;
     done = 0;
     while (done < budget)
     {
+        if (s->halt_at != 0 && s->consumed >= s->halt_at)
+            break;
         n = Step(s);
         if (n == 0)
             break;
@@ -173,6 +177,9 @@ void SimCp_Init(struct SimCp *s, ULONG *ring, ULONG *shadow, ULONG size,
     s->fence_reg = fence_reg;
     s->fence_val = fence_start;
     s->rate = rate;
+    s->every = 0;
+    s->tick = 0;
+    s->halt_at = 0;
     s->clock = 0;
     s->last_readback = 0xffffffffUL;
     s->consumed = 0;

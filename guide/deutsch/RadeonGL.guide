@@ -1,5 +1,5 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.20 (25.11.2026)
+@$VER: RadeonGL.guide 0.21 (28.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
@@ -443,9 +443,10 @@ kopieren. Eine nicht gesetzte Variable bedeutet die Vorgabe.
 
 @{b}RadeonGLWatchdog@{ub}  (Vorgabe: 50)
     Wie viele vertikale Austastlücken (50 je Sekunde bei PAL) ein Bild
-    stillstehen darf, während die 3D-Einheit beschäftigt ist, bevor der
-    Wächter die Einheit zurücksetzt und das Bild verworfen wird. 0
-    schaltet den Wächter aus.
+    stillstehen darf -- die 3D-Einheit beschäftigt, und die Radeon liest
+    keine neuen Befehle (seit 0.21; vorher zählte die ganze Zeit des
+    Bildes) --, bevor der Wächter die Einheit zurücksetzt und das Bild
+    verworfen wird. 0 schaltet den Wächter aus.
 
 @{b}RadeonGLPreWait@{ub}  (Vorgabe: an)
     0 wartet auf das letzte Bild innerhalb der Picasso96-Sperre, wie vor
@@ -850,6 +851,19 @@ Hardware getestet.
 @prev Licences
 
 @{b}Versionen@{ub}
+
+0.21 (28.11.2026)
+    * behoben: Ein Bild, das die Radeon länger als eine halbe Sekunde
+      beschäftigte, galt als hängende 3D-Einheit. RadeonGL setzte die
+      Einheit mitten im Zeichnen zurück und verwarf das Bild, und nach
+      genug solchen Fällen zeichnete das Programm gar nichts mehr.
+      RadeonGL gibt ein Bild jetzt erst auf, wenn die Radeon eine halbe
+      Sekunde lang keine neuen Befehle gelesen hat, und der Wächter
+      (RadeonGLWatchdog) zählt genauso; ein echter Hänger wird weiter
+      binnen etwa einer Sekunde erkannt. GLBench 0.2 stieß in seinen
+      Nebeltests darauf (Bilder von etwa 1,5 Sekunden); die laufen jetzt
+      ohne Zurücksetzen durch. Spiele mit ihren üblichen Bildraten waren
+      nie betroffen
 
 0.20 (25.11.2026)
     * anisotrope Filterung bremst ein Programm nicht mehr: RadeonGL nahm

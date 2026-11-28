@@ -153,6 +153,10 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 HISTORY
 
+0.21 (28.11.2026)
+  - fixed: a frame that kept the Radeon busy for over half a second was
+    reset as a hang and dropped (GLBench 0.2's fog tests)
+
 0.20 (25.11.2026)
   - anisotropic filtering no longer slows programs down (GLQuake at 8x:
     3.3% slower before, now within 0.2%; 16x costs no more than 8x)

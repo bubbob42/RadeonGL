@@ -73,19 +73,32 @@ static void ReadRptr(struct R2Ring *r)
         r->rptr = v;
 }
 
+BOOL R2Ring_Moved(struct R2Ring *r)
+{
+    ULONG old;
+
+    old = r->rptr;
+    ReadRptr(r);
+    return (BOOL) (r->rptr != old);
+}
+
 /* The writer has to wait for the GPU: read CP_RB_RPTR again, unless the
- * wait has lasted timeout_us already. */
+ * CP has read nothing for timeout_us (*start: its last move). */
 static LONG Progress(struct R2Ring *r, int *stalled, ULONG *start)
 {
+    ULONG now;
+
+    now = r->hw->clock_us(r->hw->hw);
     if (!*stalled)
     {
         *stalled = 1;
         r->stats.stalls++;
-        *start = r->hw->clock_us(r->hw->hw);
+        *start = now;
     }
-    else if ((ULONG) (r->hw->clock_us(r->hw->hw) - *start) > r->timeout_us)
+    else if ((ULONG) (now - *start) > r->timeout_us)
         return R2_ETIMEOUT;
-    ReadRptr(r);
+    if (R2Ring_Moved(r))
+        *start = now;
     return R2_OK;
 }
 
@@ -255,9 +268,13 @@ BOOL R2Ring_FenceDone(struct R2Ring *r, ULONG seq)
     return (BOOL) ((LONG) (r->fence_done - seq) >= 0);
 }
 
+/* RPTR is read once at the start (the baseline: a CP that stopped before
+ * the wait is caught after one timeout_us) and then only when timeout_us
+ * has run out: a CP still reading starts the next stretch. */
 LONG R2Ring_WaitFence(struct R2Ring *r, ULONG seq)
 {
     ULONG start;
+    ULONG now;
     LONG err;
 
     err = R2Ring_Commit(r);
@@ -266,11 +283,17 @@ LONG R2Ring_WaitFence(struct R2Ring *r, ULONG seq)
     if (R2Ring_FenceDone(r, seq))
         return R2_OK;
     r->stats.stalls++;
+    (void) R2Ring_Moved(r);
     start = r->hw->clock_us(r->hw->hw);
     while (!R2Ring_FenceDone(r, seq))
     {
-        if ((ULONG) (r->hw->clock_us(r->hw->hw) - start) > r->timeout_us)
-            return R2_ETIMEOUT;
+        now = r->hw->clock_us(r->hw->hw);
+        if ((ULONG) (now - start) > r->timeout_us)
+        {
+            if (!R2Ring_Moved(r))
+                return R2_ETIMEOUT;
+            start = now;
+        }
     }
     return R2_OK;
 }

@@ -2,14 +2,14 @@ Short:        minigl.library for R200 Radeons on P96
 Uploader:     marcus.gerards@googlemail.com (Marcus Gerards)
 Author:       marcus.gerards@googlemail.com (Marcus Gerards)
 Type:         driver/video
-Version:      0.20
+Version:      0.21
 Architecture: m68k-amigaos >= 3.1
 Distribution: Aminet
 Replaces:     driver/video/RadeonGL.lha
 Requires:     R200 Radeon 8500-9250, Picasso96 3.6+, 68020+ with FPU
 Kurz:         minigl.library fuer R200-Radeons an P96
 
-RadeonGL 0.20  --  25.11.2026
+RadeonGL 0.21  --  28.11.2026
 
 
 WHAT IT IS
@@ -152,6 +152,10 @@ the package (the installed drawer's Licences, and Source/LICENSE).
 
 
 HISTORY
+
+0.21 (28.11.2026)
+  - fixed: a frame that kept the Radeon busy for over half a second was
+    reset as a hang and dropped (GLBench 0.2's fog tests)
 
 0.20 (25.11.2026)
   - anisotropic filtering no longer slows programs down (GLQuake at 8x:

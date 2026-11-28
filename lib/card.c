@@ -3375,7 +3375,10 @@ ULONG Card_WdCheck(struct Card *k)
 }
 
 /* exec's server entry: A1 = is_Data; GCC's callee-saved registers kept,
- * D0 = 0 with Z set (the chain goes on) */
+ * D0 = 0 with Z set (the chain goes on). Not installed since 0.21: WdStart
+ * installs cardwait.c's Card_WdEntryStub, which tests the CP's read
+ * pointer and then calls Card_WdCheck. Kept so that card.o keeps 0.20's
+ * bytes and the hot code behind it its places (the Makefile's notes). */
 void Card_WdStub(void);
 __asm__(
     "\t.text\n"
@@ -3401,7 +3404,7 @@ static void WdStart(struct Card *k)
     k->wd_int.is_Node.ln_Pri = -10;
     k->wd_int.is_Node.ln_Name = (char *) "RadeonGL watchdog";
     k->wd_int.is_Data = (APTR) k;
-    k->wd_int.is_Code = (VOID (*)()) Card_WdStub;
+    k->wd_int.is_Code = (VOID (*)()) Card_WdEntryStub;     /* cardwait.c, since 0.21 */
     AddIntServer(INTB_VERTB, &k->wd_int);
     k->wd_on = 1;
 }

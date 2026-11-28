@@ -22,8 +22,15 @@
  *  - Fences: R2E_Fence's sequence number in one scratch register, polled
  *    over MMIO.
  *
- * Every wait is bounded (timeout_us); a timeout is reported, never spun
- * through. The hardware is reached through struct R2Hw so the host tests
+ * Every wait is bounded; a timeout is reported, never spun through. A
+ * wait gives up when the CP has read nothing of the ring for timeout_us,
+ * not after timeout_us in all (2026-11-28, GLBench 0.2's fog tests on
+ * Hamiller: a frame with more than 0.5 s of GPU work was reset as hung,
+ * mid-draw, again and again until the context was lost). A hung engine
+ * stops CP_RB_RPTR within a FIFO's worth of commands; a busy one moves it
+ * as it eats the ring. Not seen: a single draw from vertex arrays that
+ * keeps the engine busy for longer than timeout_us on its own.
+ * The hardware is reached through struct R2Hw so the host tests
  * can drive the same code against a simulated CP.
  */
 
@@ -95,8 +102,13 @@ LONG R2Ring_Fence(struct R2Ring *r, ULONG *seq);
  * the last value read does not already say so). */
 BOOL R2Ring_FenceDone(struct R2Ring *r, ULONG seq);
 
-/* Commit if needed and wait until fence seq has passed. */
+/* Commit if needed and wait until fence seq has passed. R2_ETIMEOUT once
+ * the CP has read nothing for timeout_us. */
 LONG R2Ring_WaitFence(struct R2Ring *r, ULONG seq);
+
+/* Read CP_RB_RPTR: TRUE when the CP has read further since the last read
+ * (the progress test of every wait; Card_WaitFenceSleep's too). */
+BOOL R2Ring_Moved(struct R2Ring *r);
 
 /* Fence, commit and wait: the GPU is idle afterwards. */
 LONG R2Ring_Idle(struct R2Ring *r);

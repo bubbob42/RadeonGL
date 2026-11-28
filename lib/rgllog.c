@@ -265,6 +265,10 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
     }
     else
         Put(f, " us (spinning: RadeonGLWaitSleep=0)\n");
+    /* 2026-11-28: a wait times out only when the CP reads nothing for
+     * 0.5 s; these went past 0.5 s with it still reading */
+    Put(f, "waits past 0.5 s with the card still drawing (long frames, not hangs): ");
+    PutU(f, k->wait_slow); Put(f, "\n");
 #ifdef CARD_OVERLAP_STAT
     Put(f, "overlap estimate: "); PutU(f, k->ov_n);
     Put(f, " unlocks after a fence; the GPU's tail at the unlock: mean ");
@@ -309,7 +313,9 @@ static void WriteCardLog(struct Rgl *r, struct LogOut *f)
         Put(f, " vblanks");
         if (k->wd_test)
             Put(f, " (TEST: fires on an idle engine)");
-        Put(f, "; engine resets it made: ");
+        Put(f, "; the longest frame it watched: ");
+        PutU(f, k->wd_quiet_max);
+        Put(f, " vblanks; engine resets it made: ");
         PutU(f, k->wd_resets);
         if (k->wd_resets != 0)
         {

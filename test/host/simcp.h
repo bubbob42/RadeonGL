@@ -34,6 +34,9 @@ struct SimCp
     ULONG  fence_reg;
     ULONG  fence_val;
     ULONG  rate;            /* dwords consumed per poll; 0 = a hung GPU */
+    ULONG  every;           /* consume only at every Nth poll (0, 1: every poll): a slow GPU */
+    ULONG  tick;            /* polls counted for every */
+    ULONG  halt_at;         /* stop for good once this many dwords are read (0: never) */
     ULONG  clock;
     ULONG  last_readback;   /* ring index of the last read back, or ~0 */
     ULONG *shadow;          /* the ring as committed */

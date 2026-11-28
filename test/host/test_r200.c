@@ -794,6 +794,73 @@ static void test_ring_hang(void)
     CHECK_INT(R2Ring_WaitFence(&rr.ring, seq), R2_ETIMEOUT);
 }
 
+/* Regression (2026-11-28, GLBench 0.2's fog tests on Hamiller): a frame
+ * with more GPU work than the timeout is no hang. The waits used to give
+ * up timeout_us after they began, and the library reset an engine that
+ * was still drawing. A slow CP here -- one packet at every 100th register
+ * read, a frame of about ten timeouts -- must be waited out, by the fence
+ * wait and by the writer waiting for room, because RPTR keeps moving. */
+static void test_ring_slow(void)
+{
+    struct RingRun rr;
+    ULONG i;
+    ULONG seq;
+
+    /* the fence wait: 1000 packets, 100000 polls of 10 us */
+    RingSetup(&rr, 0, 1, 0, 0);
+    rr.sim.every = 100;
+    for (i = 0; i < 1000; i++)
+        CHECK_INT(R2E_Nop(&rr.ring.cs, 3, 1), R2_OK);
+    CHECK_INT(R2Ring_Fence(&rr.ring, &seq), R2_OK);
+    CHECK_INT(R2Ring_WaitFence(&rr.ring, seq), R2_OK);
+    CHECK(rr.sim.clock > 5 * 100000UL);     /* far past one timeout */
+    CHECK(SimCp_Clean(&rr.sim));
+
+    /* the writer: the ring nearly full of small packets, then 2000 dwords
+     * at its start -- room only after ~670 packets more */
+    RingSetup(&rr, 0, 1, 0, 0);
+    rr.sim.every = 100;
+    for (i = 0; i < 1300; i++)
+        CHECK_INT(R2E_Nop(&rr.ring.cs, 3, 1), R2_OK);
+    CHECK_INT(R2E_Nop(&rr.ring.cs, 2000, 1), R2_OK);
+    CHECK(rr.sim.clock > 3 * 100000UL);
+    CHECK_INT(R2Ring_Idle(&rr.ring), R2_OK);
+    CHECK(SimCp_Clean(&rr.sim));
+}
+
+/* ... and a CP that stops halfway through such a frame (a hang mid-draw,
+ * RPTR standing still from then on) is still given up: within two
+ * timeouts of the stop, by the fence wait and by the writer. */
+static void test_ring_hang_midway(void)
+{
+    struct RingRun rr;
+    ULONG i;
+    ULONG seq;
+    LONG e;
+
+    RingSetup(&rr, 0, 1, 0, 0);
+    rr.sim.every = 100;
+    rr.sim.halt_at = 1500;                  /* after 500 packets: at ~500000 us */
+    for (i = 0; i < 1000; i++)
+        CHECK_INT(R2E_Nop(&rr.ring.cs, 3, 1), R2_OK);
+    CHECK_INT(R2Ring_Fence(&rr.ring, &seq), R2_OK);
+    CHECK_INT(R2Ring_WaitFence(&rr.ring, seq), R2_ETIMEOUT);
+    CHECK_INT(rr.sim.consumed, 1500);
+    CHECK(rr.sim.clock > 450000UL && rr.sim.clock < 500000UL + 2 * 100000UL + 20000UL);
+    CHECK(SimCp_Clean(&rr.sim));
+
+    RingSetup(&rr, 0, 1, 0, 0);
+    rr.sim.every = 100;
+    rr.sim.halt_at = 1500;
+    e = R2_OK;
+    for (i = 0; i < 3000 && e == R2_OK; i++)
+        e = R2E_Nop(&rr.ring.cs, 3, 1);
+    CHECK_INT(e, R2_ETIMEOUT);
+    CHECK_INT(rr.sim.consumed, 1500);
+    CHECK(rr.sim.clock < 500000UL + 2 * 100000UL + 20000UL);
+    CHECK(SimCp_Clean(&rr.sim));
+}
+
 static void test_ring_errors(void)
 {
     struct RingRun rr;
@@ -1383,6 +1450,8 @@ int main(void)
     RingStress(1, 5000, 0, 0, "swap, fast GPU");
     test_ring_pad_moves_writer();
     test_ring_hang();
+    test_ring_slow();
+    test_ring_hang_midway();
     test_ring_errors();
     test_sizes();
     test_cp();

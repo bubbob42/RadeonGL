@@ -1,5 +1,5 @@
 @database "RadeonGL.guide"
-@$VER: RadeonGL.guide 0.20 (25.11.2026)
+@$VER: RadeonGL.guide 0.21 (28.11.2026)
 @(c) 2026 Marcus Gerards
 @author Marcus Gerards
 @wordwrap
@@ -413,8 +413,9 @@ that is not set means the default.
 
 @{b}RadeonGLWatchdog@{ub}  (default: 50)
     How many vertical blanks (50 a second on PAL) a frame may stand still
-    with the 3D engine busy before the watchdog resets the engine and the
-    frame is dropped. 0 turns the watchdog off.
+    -- the 3D engine busy and the Radeon reading no new commands (since
+    0.21; before, the frame's whole time counted) -- before the watchdog
+    resets the engine and the frame is dropped. 0 turns the watchdog off.
 
 @{b}RadeonGLPreWait@{ub}  (default: on)
     0 waits for the last frame inside the Picasso96 lock, as before 0.19,
@@ -789,6 +790,18 @@ was tested on real hardware.
 @prev Licences
 
 @{b}History@{ub}
+
+0.21 (28.11.2026)
+    * fixed: a frame that kept the Radeon busy for more than half a
+      second was taken for a hung engine. RadeonGL reset the 3D engine in
+      the middle of drawing and dropped the frame, and after enough of
+      those the program drew nothing more. RadeonGL now gives a frame up
+      only when the Radeon has read no new commands for half a second,
+      and the watchdog (RadeonGLWatchdog) counts the same way; a real
+      hang is still caught within about a second. GLBench 0.2's fog tests
+      ran into it (frames of about 1.5 seconds); they now run through
+      without a reset. Games at their usual frame rates were never
+      affected
 
 0.20 (25.11.2026)
     * anisotropic filtering no longer slows a program down: RadeonGL took

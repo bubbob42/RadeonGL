@@ -302,9 +302,31 @@ struct Card
     ULONG dc_line;              /* 0xff: untouched */
     ULONG dc_saved;
     ULONG dc_have;
+    /* 2026-11-28 (GLBench 0.2's fog tests on Hamiller: frames of more
+     * than 1 s of GPU work): the watchdog takes CP_RB_RPTR moving as
+     * progress as well -- a long frame moves it, a hung engine does not
+     * (cardwait.c Card_WdEntry) */
+    ULONG wd_rptr;              /* CP_RB_RPTR as the server read it last */
+    ULONG wd_frame;             /* the fence (wd_seq) wd_rptr belongs to */
+    ULONG wd_quiet;             /* vblanks the frame has been watched without its fence */
+    ULONG wd_quiet_max;         /* ... the most (the log: the longest frame watched) */
+    /* fence waits (Card_WaitFenceSleep) that ran past the ring's timeout
+     * with the CP still reading: long frames, not hangs. Here, not in the
+     * ring's statistics: struct R2Ring sits inside struct Card, and a dword
+     * more there moved every field behind it (card.o +40 bytes) */
+    ULONG wait_slow;
+    /* the five dwords above and these eleven: 16 more, so the struct Card
+     * copies of the four Card_Open* paths (16 dwords a loop pass, the rest
+     * one by one; see layout_spare) keep 0.20's code. Adding fields: take
+     * them from here. */
+    ULONG layout_spare2[11];
 };
 
 ULONG Card_WdCheck(struct Card *k);     /* the VERTB server's body (interrupt) */
+/* the VERTB server's entry since 0.21 (cardwait.c): the CP's read pointer,
+ * then Card_WdCheck */
+ULONG Card_WdEntry(struct Card *k);
+void Card_WdEntryStub(void);
 void Card_WdArm(struct Card *k, ULONG limit, ULONG test, ULONG isync);
 #ifdef RGL_PROBES
 void Card_DcLine(struct Card *k, ULONG line);

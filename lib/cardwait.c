@@ -15,6 +15,7 @@
 #include "core.h"
 #include "coreint.h"
 #include "r2emit.h"
+#include "r200reg.h"
 
 /* RadeonGLWaitSleep: the sleep step in us (default 500; 0: the old spin),
  * read at the card's first wait -- here rather than in card.c's OpenTimer,
@@ -55,9 +56,12 @@ LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq)
     struct Card *k;
     struct timerequest *t;
     ULONG start;
+    ULONG quiet;
+    ULONG now;
     ULONG gone;
     ULONG end;
     ULONG slept;
+    ULONG slow;
     LONG err;
 
     k = (struct Card *) ((UBYTE *) r - offsetof(struct Card, ring));
@@ -79,7 +83,15 @@ LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq)
     if (R2Ring_FenceDone(r, seq))
         return R2_OK;
     r->stats.stalls++;
+    /* 2026-11-28 (GLBench 0.2's fog tests: frames of more than 0.5 s of
+     * GPU work were given up as hung, the engine reset mid-draw): the
+     * timeout counts from the CP's last read of the ring, not from the
+     * start -- RPTR read now (the baseline) and when timeout_us has run
+     * out; a CP still reading starts the next stretch (r2ring.h) */
+    (void) R2Ring_Moved(r);
+    slow = 0;
     start = k->hw.clock_us(k->hw.hw);
+    quiet = start;
     /* 2026-11-15 (Herald: 500 us steps are coarse at the end of a ~6 ms
      * wait): the end the last wait had is the guess -- sleep until
      * WAIT_END_US before it, spin the rest; a wait that runs far past the
@@ -88,9 +100,19 @@ LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq)
     slept = 0;
     while (!R2Ring_FenceDone(r, seq))
     {
-        gone = k->hw.clock_us(k->hw.hw) - start;
-        if (gone > r->timeout_us)
-            return R2_ETIMEOUT;
+        now = k->hw.clock_us(k->hw.hw);
+        gone = now - start;
+        if (now - quiet > r->timeout_us)
+        {
+            if (!R2Ring_Moved(r))
+                return R2_ETIMEOUT;
+            quiet = now;
+            if (!slow)
+            {
+                slow = 1;
+                k->wait_slow++;
+            }
+        }
         if (gone >= k->wait_spin_us && (gone < end || gone > end + 2 * WAIT_END_US))
         {
             t = k->treq;
@@ -111,6 +133,64 @@ LONG Card_WaitFenceSleep(struct R2Ring *r, ULONG seq)
     }
     return R2_OK;
 }
+
+/* 2026-11-28 (GLBench 0.2's fog tests on Hamiller: frames of more than a
+ * second of GPU work were reset mid-draw): the vertical-blank server's
+ * entry since 0.21. A kicked frame's fence comes only at its end, so the
+ * CP still reading the ring counts as progress too: the watchdog's count
+ * (card.c Card_WdCheck, wd_ticks) starts again whenever CP_RB_RPTR has
+ * moved since the last vblank -- a hung engine stops it within a FIFO's
+ * worth of commands. Only a move towards what was committed is one, as in
+ * r2ring.c's ReadRptr (a failed bus read gives 0xffffffff); a new frame's
+ * baseline is the ring's own last read. Here, behind the hot code, and
+ * through a stub of its own: card.o keeps 0.20's bytes (its old stub
+ * stays, unused) and the core behind it its places. Interrupt context:
+ * register reads only, the conditions as Card_WdCheck's. */
+ULONG Card_WdEntry(struct Card *k)
+{
+    ULONG m;
+    ULONG p;
+    ULONG f;
+
+    if (k->pending && !k->wd_hold && !k->wd_fired && k->lost == 0)
+    {
+        if (k->wd_frame != k->wd_seq)
+        {
+            k->wd_frame = k->wd_seq;
+            k->wd_rptr = k->ring.rptr;
+            k->wd_quiet = 0;
+        }
+        f = k->hw.read_reg(k->hw.hw, k->ring.fence_reg);
+        if ((LONG) (f - k->wd_seq) < 0)
+        {
+            if (++k->wd_quiet > k->wd_quiet_max)
+                k->wd_quiet_max = k->wd_quiet;
+            m = k->ring.size - 1;
+            p = k->hw.read_reg(k->hw.hw, R_CP_RB_RPTR) & m;
+            if (p != k->wd_rptr && ((p - k->wd_rptr) & m) <= ((k->ring.committed - k->wd_rptr) & m))
+            {
+                k->wd_rptr = p;
+                k->wd_ticks = 0;    /* Card_WdCheck counts from 1 again */
+            }
+        }
+    }
+    return Card_WdCheck(k);
+}
+
+/* exec's server entry, as card.c's Card_WdStub: A1 = is_Data; GCC's
+ * callee-saved registers kept, D0 = 0 with Z set (the chain goes on) */
+__asm__(
+    "\t.text\n"
+    "\t.align\t2\n"
+    "\t.globl\t_Card_WdEntryStub\n"
+    "_Card_WdEntryStub:\n"
+    "\tmovem.l d2-d7/a2-a6,-(sp)\n"
+    "\tmove.l a1,-(sp)\n"
+    "\tjsr _Card_WdEntry\n"
+    "\taddq.l #4,sp\n"
+    "\tmovem.l (sp)+,d2-d7/a2-a6\n"
+    "\tmoveq #0,d0\n"
+    "\trts\n");
 
 /* a decimal environment variable, def when unset or not a number */
 static ULONG EnvNum(const char *name, ULONG def)
