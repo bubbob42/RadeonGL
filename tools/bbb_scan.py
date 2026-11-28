@@ -30,8 +30,8 @@ extending auto-increment in the probe: the old sizing is assumed.
 Usage: tools/bbb_scan.py [TARGET...]
   TARGET   RadeonGL make targets whose compile lines to check
            (default: everything the release stages, the glsmoke tests,
-           GLBench, the probes, the GL core objects, and GLQuake for the
-           68060 and the 68040)
+           the probes, the GL core objects, and GLQuake for the 68060 and
+           the 68040)
   GLQUAKE_DIR  the GLQuake source (../RadeonGL-GLQuake)
 Exit 1 when bbb miscounted one, 0 when none, 2 on a failure.
 """
@@ -49,7 +49,7 @@ MODES = {"QI": 1, "HI": 2, "SI": 4, "DI": 8, "SF": 4, "DF": 8, "XF": 12}
 PAT = re.compile(r"(float_extend|zero_extend|sign_extend|float_truncate):(\w+) "
                  r"\(mem:(\w+) \((post_inc|pre_dec)")
 SPLIT = re.compile(r"\n(?=\(insn |\(call_insn |\(jump_insn |;; Function )")
-DEFAULT = ["release-stage", "glsmoke", "glbench", "probes", "r200-objs", "gcc"]
+DEFAULT = ["release-stage", "glsmoke", "probes", "r200-objs", "gcc"]
 SUFFIX = {"b": 1, "w": 2, "l": 4, "s": 4, "d": 8, "x": 12, "p": 12}
 FIXED = False               # set by probe(): the compiler sizes extends right
 

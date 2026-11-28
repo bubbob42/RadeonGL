@@ -1440,7 +1440,8 @@ glsmoke: $(GLSMOKE) $(GLCOST) $(GLFILL) $(GLVIEW) $(GLGROW) $(GLMIX) $(GLFOG) $(
 	@echo "glsmoke: staged DEV:GLSmoke (GLSmoke, Libs/minigl.library, RunGLSmoke)"
 
 include demos/demos.mk
-include glbench/glbench.mk
+# GLBench, the benchmark, moved to its own repository on 2026-11-28 (with
+# its score list, GLBench Scores); its history up to the move is here.
 
 # --- Unattended FS-UAE test: gmake autotest T=<test/auto name> --------------
 # A 68040 + uaegfx machine (fsuae/autotest-040.fs-uae.in, serial 1240) boots a

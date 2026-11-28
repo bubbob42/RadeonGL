@@ -164,12 +164,9 @@ needs.
   a card report for bug reports and four demos (`demos/`), and Trio, which
   runs three of them at once, each a program of its own in a window of its
   own on the Workbench, placed by `mglCreateContext`'s coordinates.
-- **GLBench** (its own archive, `glbench/`): a stress benchmark in seven
-  scenes that together use every feature above -- fur shells, eight
-  lights, sphere maps and display lists, all five blend equations, every
-  texture format and environment, a flock of a thousand darts, read-back
-  feedback -- with a score against a reference machine, and Burn: ten
-  minutes of one scene with a picture check every 250 frames.
+- **GLBench**, the benchmark that grew up beside RadeonGL (its feature
+  tests found several of the bugs fixed above), now lives in its own
+  repository together with its online score list.
 - **RadeonStat:** what the card is doing, in a window on the Workbench
   (from its icon) or a line a second (from a Shell): how busy the engine,
   the 3D pipeline, the 2D engine and the command processor are, the
@@ -393,8 +390,6 @@ fetched from Aminet:
 | `gmake rgl-lib` | `dist/Libs/RadeonGL/minigl.library` |
 | `gmake demos` | `dist/Demos/`: Spinner, Glow, Landscape, Showcase, Trio |
 | `gmake glsmoke probes` | GLSmoke (the card test), R200Info, RadeonStat and the other probes |
-| `gmake glbench` | `dist/GLBench/C/`: GLBench, the stress benchmark (seven scenes, a score, Burn), and its 68030 build |
-| `gmake glbench-archive` | `dist/GLBench.lha` and its Aminet readme: GLBench's own archive |
 | `gmake test` | the host tests (the core, the packet layer, the R200 simulator) |
 | `gmake autotest T=<name>` | one FS-UAE test from `test/auto` (the head of each test says what it checks) |
 | `gmake release-stage release-archive release-aminet release-drawer` | the release package: `dist/RadeonGL.lha`, the Aminet pair (copied to `release/`), `DEV:Release` |
